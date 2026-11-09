@@ -274,16 +274,45 @@ Open manual checks (Rafu Lightning, not done):
     removal).
 35. An agent finishes while the companion shows: the card shows the CLI
     letter and "Codex in <title> is done"; the chevron shows that card.
-36. Reduce Motion: the orb is still and the snap is instant. Reduce
-    Transparency and Increase Contrast: solid card, strong hairline, 2 pt ring.
+36. Reduce Motion: the orb is still (no blink, same face and badge) and the
+    snap is instant. Reduce Transparency: the marble has a solid base.
+    Increase Contrast: solid card, strong hairline, 2 pt orb outline.
     VoiceOver reads "Rafu voice" and the state, the actions, and the pill.
 37. Switch themes: Indigo, Khadi, a light and a dark bundled theme, and a
-    custom theme from Settings ▸ Appearance. The orb, ring, card, pill and
-    status dot follow each theme. The status dot is a ring while idle and
-    filled while a session is open; the notch wing shows the small orb.
+    custom theme from Settings ▸ Appearance. The orb, card, pill, timeline and
+    status item follow each theme. The status item shows a ring while idle,
+    then a glyph and a word (Listening, Paused, …); the notch wing shows the
+    small orb with no face.
 38. CPU (`top -l 50 -s 1 -pid $(pgrep -x RafuLightning)`): idle 0.0 %
     (also with "Keep Rafu on the canvas" on), listening < 3 %, speaking < 4 %,
     screen locked 0.0 %.
+
+#### Companion redesign: the kanche orb (2026-11-10)
+
+Design artifact: https://claude.ai/artifact/FCY8SC8zgPvAjiwiuUKgiu. Decisions: the orb
+sits above the board overview; badge only for Paused, Needs confirmation and Error;
+dot eyes, no pupils; organic cat's-eye leaf, not equal blades; Done after each
+completed task (one per delegation). Not built: the marble variants (cobalt, amber,
+green) and the focus ring on both zoom buttons.
+
+39. Open a board, bottom-right corner: the orb sits above the overview's place,
+    not on the zoom capsule or the overview. Hover the zoom corner: the overview
+    shows and the orb does not move. Switch to a file tab: the orb goes to the
+    corner. Try all four corners and a narrow window (about 480 pt deck).
+40. Hover the orb in each corner: the pill opens toward the window centre, never
+    over the orb, never past the window edge, and it shows "Listening · Mic on"
+    or "Paused · Mic off" and a Pause or Listen button.
+41. Press and release ⌃⌥Space quickly while the session connects: the card says
+    "Connected. The mic is off…", the orb shows half-closed dots looking down
+    and a pause badge, the status bar shows the pause glyph and "Paused", and
+    the timeline shows "Session started" and a Paused row (not "Nothing yet").
+42. Latch: the dots are round and follow the pointer over the orb; talk: brows
+    lift and the leaf swells; Rafu thinks: the dots look up and aside; Rafu
+    speaks: the leaf swells with the voice. After a delegation that ran a tool,
+    the orb shows happy arcs for about 1.2 s.
+43. Judge the look on Indigo and Khadi against the kanche photos: clear tinted
+    glass, the board visible through it, a thin leaf, sharp reflections. Report
+    if the Indigo glass looks too grey.
 
 ### Addition: `compose_view` (2026-11-08)
 

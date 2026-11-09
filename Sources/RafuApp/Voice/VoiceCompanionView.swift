@@ -17,6 +17,14 @@ final class VoiceCompanionModel {
     var showsTimeline = false
     /// The host's size; the corner positions follow it.
     var containerSize: CGSize = .zero
+    /// The host's origin in global coordinates, to bring chrome rects into
+    /// the host's space.
+    var hostOrigin: CGPoint = .zero
+    /// Chrome the orb must not cover (a board's zoom capsule and overview),
+    /// in global coordinates, by a stable key. Chrome writes it on layout
+    /// changes only, through `setAvoidRect`. A model, not a preference, so
+    /// it also crosses an `NSHostingView` boundary.
+    private(set) var avoidRects: [String: CGRect] = [:]
 
     /// The orb's slot in global coordinates, for the tuck test. Written by
     /// the view on layout changes only; never observed.
@@ -56,6 +64,25 @@ final class VoiceCompanionModel {
     }
 
     func move(_ direction: VoiceCompanionCorner.Move) { snap(to: corner.moved(direction)) }
+
+    /// Chrome reports its rect (global), or nil when it leaves.
+    func setAvoidRect(_ rect: CGRect?, for key: String) {
+        guard avoidRects[key] != rect else { return }
+        avoidRects[key] = rect
+    }
+
+    /// The chrome rects in the host's space.
+    var localAvoidRects: [CGRect] {
+        avoidRects.keys.sorted().compactMap { key in
+            avoidRects[key]?.offsetBy(dx: -hostOrigin.x, dy: -hostOrigin.y)
+        }
+    }
+
+    /// The orb's slot in the host's space.
+    var slotRect: CGRect {
+        VoiceCompanionPlacement.slotRect(
+            for: corner, in: containerSize, avoiding: localAvoidRects)
+    }
 
     func moveToNextCorner() { snap(to: corner.next) }
 
@@ -118,10 +145,11 @@ struct VoiceCompanionHost: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .onGeometryChange(for: CGSize.self) {
-            $0.size
-        } action: { size in
-            if model.containerSize != size { model.containerSize = size }
+        .onGeometryChange(for: CGRect.self) {
+            $0.frame(in: .global)
+        } action: { frame in
+            if model.containerSize != frame.size { model.containerSize = frame.size }
+            if model.hostOrigin != frame.origin { model.hostOrigin = frame.origin }
         }
         .onChange(of: workspace.rootURL?.path, initial: true) { _, path in
             model.load(workspacePath: path)
@@ -141,8 +169,9 @@ struct VoiceCompanionHost: View {
     }
 }
 
-/// The positioned companion. The slot is fixed at 96 pt; the orb sits in
-/// it, anchored to the corner, and the card and pill hang off it.
+/// The positioned companion. The orb sits in a 64 pt slot that avoids board
+/// chrome; the card and the pill take explicit rects from
+/// `VoiceCompanionPlacement`, so they stay inside the host and off the orb.
 private struct VoiceCompanionView: View {
     let model: VoiceCompanionModel
     let session: VoiceSession
@@ -154,6 +183,8 @@ private struct VoiceCompanionView: View {
     @State private var isDragging = false
     @State private var hoverIntent = false
     @State private var isHovering = false
+    @State private var cardHeight: CGFloat = 0
+    @State private var pillSize: CGSize = .zero
 
     private typealias Placement = VoiceCompanionPlacement
 
@@ -171,26 +202,38 @@ private struct VoiceCompanionView: View {
     private var orbSize: CGFloat {
         if model.isTucked { return Placement.tuckedOrbSize }
         if session.blobState == .idle { return Placement.idleOrbSize }
-        return (isHovering || model.showsPill) ? Placement.hoverOrbSize : Placement.orbSize
+        return Placement.orbSize
     }
 
+    private var partsHidden: Bool { model.isTucked || isDragging }
+
     var body: some View {
-        let origin = Placement.slotOrigin(for: corner, in: model.containerSize)
-        orbSlot
-            .overlay(alignment: cardOverlayAlignment) { card }
-            .overlay(alignment: pillOverlayAlignment) { pill }
-            .offset(
-                x: origin.x + dragOffset.width, y: origin.y + dragOffset.height
-            )
-            .onHover { hovering in hoverIntent = hovering }
-            .task(id: hoverIntent) { await settleHover() }
-            .animation(
-                RafuMotion.resolve(RafuMotion.companionSnap, reduceMotion: reduceMotion),
-                value: corner
-            )
-            .animation(
-                RafuMotion.resolve(RafuMotion.companionTuck, reduceMotion: reduceMotion),
-                value: model.isTucked)
+        let size = model.containerSize
+        let avoid = model.localAvoidRects
+        let slot = Placement.slotRect(for: corner, in: size, avoiding: avoid)
+        let card = Placement.cardRect(
+            orb: slot, card: CGSize(width: Placement.cardMaxWidth, height: cardHeight),
+            corner: corner, in: size, avoiding: avoid)
+        let pill = Placement.pillRect(
+            orb: slot, pill: pillSize, corner: corner, in: size, avoiding: avoid,
+            card: cardHeight > 0 && !partsHidden ? card.rect : nil)
+        ZStack(alignment: .topLeading) {
+            cardView
+                .offset(x: card.rect.minX, y: card.rect.minY)
+            orbSlot
+                .offset(x: slot.minX + dragOffset.width, y: slot.minY + dragOffset.height)
+            pillView
+                .offset(x: pill.rect.minX, y: pill.rect.minY)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .task(id: hoverIntent) { await settleHover() }
+        .animation(
+            RafuMotion.resolve(RafuMotion.companionSnap, reduceMotion: reduceMotion),
+            value: corner
+        )
+        .animation(
+            RafuMotion.resolve(RafuMotion.companionTuck, reduceMotion: reduceMotion),
+            value: model.isTucked)
     }
 
     // MARK: Orb
@@ -207,6 +250,7 @@ private struct VoiceCompanionView: View {
                 }
             }
             .onKeyPress(phases: .down) { press in handleKey(press) }
+            .onHover { hovering in hoverIntent = hovering }
             .help(orbHelp)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Rafu voice")
@@ -254,7 +298,7 @@ private struct VoiceCompanionView: View {
             }
             .onEnded { value in
                 let next = Placement.corner(
-                    afterDragFrom: corner, predicted: value.predictedEndTranslation,
+                    afterDragFrom: model.slotRect, predicted: value.predictedEndTranslation,
                     in: model.containerSize)
                 isDragging = false
                 let animation = RafuMotion.resolve(
@@ -305,7 +349,8 @@ private struct VoiceCompanionView: View {
     }
 
     /// The pill shows 150 ms after the pointer arrives and hides 300 ms
-    /// after it leaves. One short sleep per hover change; nothing loops.
+    /// after it leaves the orb and the pill. One short sleep per hover
+    /// change; nothing loops.
     private func settleHover() async {
         let delay: Duration =
             hoverIntent
@@ -327,55 +372,28 @@ private struct VoiceCompanionView: View {
 
     // MARK: Card and pill
 
-    private var cardSide: VoiceCompanionPlacement.Side { Placement.cardSide(for: corner) }
-
-    private var cardOverlayAlignment: Alignment {
-        switch cardSide {
-        case .above, .below: corner.isLeading ? .topLeading : .topTrailing
-        case .trailing: .topTrailing
-        case .leading: .topLeading
-        }
+    /// Always in the tree, so its height is known before it shows; hidden
+    /// while the orb is tucked or dragged.
+    private var cardView: some View {
+        VoiceSpeechCard(session: session, reveal: reveal)
+            .frame(
+                width: Placement.cardMaxWidth,
+                alignment: corner.isLeading ? .leading : .trailing
+            )
+            .fixedSize(horizontal: false, vertical: true)
+            .onGeometryChange(for: CGFloat.self) {
+                $0.size.height
+            } action: { height in
+                cardHeight = height
+            }
+            .opacity(partsHidden ? 0 : 1)
+            .allowsHitTesting(!partsHidden)
+            .accessibilityHidden(partsHidden)
     }
 
     @ViewBuilder
-    private var card: some View {
-        let side = cardSide
-        if !model.isTucked, !isDragging {
-            VoiceSpeechCard(session: session, reveal: reveal)
-                .frame(
-                    width: Placement.cardMaxWidth,
-                    alignment: corner.isLeading ? .leading : .trailing
-                )
-                .alignmentGuide(VerticalAlignment.top) { dimensions in
-                    side == .above
-                        ? dimensions[.bottom] + Placement.cardGap : dimensions[.top]
-                }
-                .alignmentGuide(HorizontalAlignment.trailing) { dimensions in
-                    side == .trailing
-                        ? dimensions[.leading] - Placement.cardGap : dimensions[.trailing]
-                }
-                .alignmentGuide(HorizontalAlignment.leading) { dimensions in
-                    side == .leading
-                        ? dimensions[.trailing] + Placement.cardGap : dimensions[.leading]
-                }
-        }
-    }
-
-    private var pillSide: VoiceCompanionPlacement.Side { Placement.pillSide(for: corner) }
-
-    private var pillOverlayAlignment: Alignment {
-        switch pillSide {
-        case .below: corner.isLeading ? .bottomLeading : .bottomTrailing
-        case .trailing: .trailing
-        case .leading: .leading
-        case .above: .top
-        }
-    }
-
-    @ViewBuilder
-    private var pill: some View {
-        let side = pillSide
-        if model.showsPill, !model.isTucked, !isDragging {
+    private var pillView: some View {
+        if model.showsPill, !partsHidden {
             VoiceControlPill(
                 session: session,
                 showTimeline: { model.showsTimeline = true },
@@ -385,17 +403,13 @@ private struct VoiceCompanionView: View {
                 }
             )
             .fixedSize()
-            .alignmentGuide(VerticalAlignment.bottom) { dimensions in
-                side == .below ? dimensions[.top] - Placement.cardGap : dimensions[.bottom]
+            .onGeometryChange(for: CGSize.self) {
+                $0.size
+            } action: { size in
+                pillSize = size
             }
-            .alignmentGuide(HorizontalAlignment.trailing) { dimensions in
-                side == .trailing
-                    ? dimensions[.leading] - Placement.cardGap : dimensions[.trailing]
-            }
-            .alignmentGuide(HorizontalAlignment.leading) { dimensions in
-                side == .leading
-                    ? dimensions[.trailing] + Placement.cardGap : dimensions[.leading]
-            }
+            // Until its size is known the rect is a guess: do not show it.
+            .opacity(pillSize == .zero ? 0 : 1)
             .transition(.opacity)
             .onHover { hovering in hoverIntent = hovering }
         }

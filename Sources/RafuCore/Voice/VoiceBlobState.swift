@@ -193,3 +193,52 @@ public nonisolated struct VoiceBlobMachine: Equatable, Sendable {
         }
     }
 }
+
+/// One answer to "is the microphone on?", in words and a glyph, for the
+/// pill chip, the timeline header and the status bar. Never colour only.
+public nonisolated struct VoiceRunStatus: Equatable, Sendable {
+    public let word: String
+    /// "Mic on" or "Mic off"; nil when no session is open.
+    public let micLine: String?
+    public let symbol: String
+    /// The main button names the action: "Pause" or "Listen".
+    public let actionTitle: String
+    public let actionSymbol: String
+
+    public init(state: VoiceBlobState, micOpen: Bool, latched: Bool) {
+        let micLine = micOpen ? "Mic on" : "Mic off"
+        switch state {
+        case .idle:
+            word = "Voice off"
+            self.micLine = nil
+            symbol = "circle"
+        case .connecting:
+            word = "Connecting"
+            self.micLine = nil
+            symbol = "ellipsis"
+        case .listeningHeld, .listeningLatched:
+            word = "Listening"
+            self.micLine = micLine
+            symbol = "mic.fill"
+        case .paused:
+            word = "Paused"
+            self.micLine = micLine
+            symbol = "pause.fill"
+        case .error:
+            word = "Voice stopped"
+            self.micLine = nil
+            symbol = "exclamationmark.triangle.fill"
+        case .thinking, .speaking, .checkIn, .needsConfirm:
+            word = state.word
+            self.micLine = micLine
+            symbol = micOpen ? "mic.fill" : "mic.slash.fill"
+        }
+        actionTitle = latched ? "Pause" : "Listen"
+        actionSymbol = latched ? "pause.fill" : "mic.fill"
+    }
+
+    /// For VoiceOver: "Paused. Mic off."
+    public var spoken: String {
+        micLine.map { "\(word). \($0)." } ?? "\(word)."
+    }
+}

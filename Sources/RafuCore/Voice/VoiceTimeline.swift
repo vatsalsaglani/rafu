@@ -6,6 +6,8 @@ import Foundation
 public nonisolated struct VoiceTimelineEvent: Equatable, Identifiable, Sendable {
     public enum Lane: String, CaseIterable, Sendable {
         case you, voice, delegation, tool, board
+        /// A session marker: started, listening, paused. No result.
+        case marker
     }
 
     /// How a finished row ended. `nil` means the row has no result to show:
@@ -49,7 +51,8 @@ public nonisolated struct VoiceTimelineEvent: Equatable, Identifiable, Sendable 
     }
 }
 
-/// The session's rows, newest last, at most 500. Cleared when the session closes.
+/// The session's rows, newest last, at most 500. The next session's open
+/// clears them, so the last session stays readable after it closes.
 public nonisolated struct VoiceTimeline: Equatable, Sendable {
     public static let capacity = 500
 
@@ -71,6 +74,17 @@ public nonisolated struct VoiceTimeline: Equatable, Sendable {
                 id: id, lane: lane, startMS: startMS, delegationID: delegationID,
                 persona: persona, title: title, detail: detail))
         if events.count > Self.capacity { events.removeFirst(events.count - Self.capacity) }
+        return id
+    }
+
+    /// Appends a finished marker row ("Session started", "Listening", …).
+    @discardableResult
+    public mutating func mark(_ title: String, atMS: Int, persona: String, detail: String = "")
+        -> String
+    {
+        let id = append(
+            lane: .marker, startMS: atMS, persona: persona, title: title, detail: detail)
+        finish(id, endMS: atMS)
         return id
     }
 

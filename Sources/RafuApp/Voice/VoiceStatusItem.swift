@@ -2,11 +2,11 @@ import AppKit
 import RafuCore
 import SwiftUI
 
-/// The voice item in every workspace window's status bar: a 7 pt dot, the
-/// accent while a session is open and muted while idle. The state word is in
-/// the help text and the accessibility value; the companion orb is the
-/// window's main voice surface (voice-presence.md). Its menu holds every
-/// voice action, one click away, so none needs the key chord.
+/// The voice item in every workspace window's status bar: a glyph that says
+/// if the microphone is on (mic, pause, mic off, a ring while idle) and,
+/// while a session is open, the state word. Not colour only. The companion
+/// orb is the window's main voice surface (voice-presence.md). Its menu holds
+/// every voice action, one click away, so none needs the key chord.
 struct VoiceStatusItem: View {
     let session: VoiceSession
     @Environment(\.rafuTheme) private var theme
@@ -16,6 +16,19 @@ struct VoiceStatusItem: View {
     private var state: VoiceBlobState { session.blobState }
 
     var body: some View {
+        HStack(spacing: 4) {
+            menu
+            if state.isOpen {
+                Text(status.word)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(theme.palette.textSecondary)
+                    .fixedSize()
+                    .accessibilityHidden(true)
+            }
+        }
+    }
+
+    private var menu: some View {
         Menu {
             Button(isListening ? "Stop Listening" : "Start Listening") {
                 session.toggleLatched()
@@ -38,7 +51,7 @@ struct VoiceStatusItem: View {
                 openSettings()
             }
         } label: {
-            Image(nsImage: Self.dot(open: state.isOpen))
+            Image(nsImage: Self.glyph(status.symbol, description: status.spoken))
                 .renderingMode(.template)
                 .foregroundStyle(state.isOpen ? theme.palette.accent : theme.palette.textMuted)
                 .frame(width: 14, height: 14)
@@ -57,28 +70,19 @@ struct VoiceStatusItem: View {
         }
     }
 
-    static let dotDiameter: CGFloat = 7
+    private var status: VoiceRunStatus {
+        VoiceRunStatus(
+            state: state, micOpen: session.isMicOpen, latched: session.machine.mic == .latched)
+    }
 
-    /// A 7 pt circle as a template image (a borderless menu label draws an
-    /// image, not an arbitrary shape): filled while a session is open, a
-    /// ring while idle, so colour is not the only signal. The help text and
-    /// the accessibility value carry the state word.
-    static func dot(open: Bool) -> NSImage {
-        let size = NSSize(width: dotDiameter, height: dotDiameter)
-        let image = NSImage(size: size, flipped: false) { rect in
-            if open {
-                NSColor.black.setFill()
-                NSBezierPath(ovalIn: rect).fill()
-            } else {
-                NSColor.black.setStroke()
-                let ring = NSBezierPath(ovalIn: rect.insetBy(dx: 0.75, dy: 0.75))
-                ring.lineWidth = 1.5
-                ring.stroke()
-            }
-            return true
-        }
+    /// An SF Symbol as an 11 pt template image (a borderless menu label
+    /// draws an image, not an arbitrary view).
+    static func glyph(_ symbol: String, description: String) -> NSImage {
+        let configuration = NSImage.SymbolConfiguration(pointSize: 11, weight: .semibold)
+        let image =
+            NSImage(systemSymbolName: symbol, accessibilityDescription: description)?
+            .withSymbolConfiguration(configuration) ?? NSImage()
         image.isTemplate = true
-        image.accessibilityDescription = open ? "Voice session open" : "Voice off"
         return image
     }
 

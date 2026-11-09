@@ -39,10 +39,13 @@ public nonisolated enum VoiceTimelineItem: Equatable, Identifiable, Sendable {
     case group(VoiceTimelineGroup)
     /// A tool or board row made outside any delegation.
     case standalone(VoiceTimelineEvent)
+    /// A session marker: started, listening, paused.
+    case marker(VoiceTimelineEvent)
 
     public var id: String {
         switch self {
-        case .you(let event), .rafu(let event), .standalone(let event): event.id
+        case .you(let event), .rafu(let event), .standalone(let event), .marker(let event):
+            event.id
         case .group(let group): group.id
         }
     }
@@ -81,6 +84,7 @@ public nonisolated enum VoiceTimelineGrouping {
             switch event.lane {
             case .you: items.append(.you(event))
             case .voice: items.append(.rafu(event))
+            case .marker: items.append(.marker(event))
             case .tool, .board:
                 if !claimed.contains(event.id) { items.append(.standalone(event)) }
             case .delegation:

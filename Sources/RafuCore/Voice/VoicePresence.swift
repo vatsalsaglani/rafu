@@ -5,208 +5,329 @@ import Foundation
 // state, the level smoother, the caption window, what the speech card shows
 // and when it hides, and where the companion sits. No view, no clock, no I/O.
 
-// MARK: Orb pose
+// MARK: Orb face
 
-/// How the orb looks in one state. The view turns this into pixels; the look
-/// itself may change later without touching these rules.
-public nonisolated struct VoiceOrbPose: Equatable, Sendable {
-    public enum Eyes: Equatable, Sendable {
-        case closed, half, open
-    }
+/// What the voice orb (the "kanche", a glass marble with a face of two dots)
+/// shows. The session state maps to one face; `hearing` and `success` are
+/// shown by the orb itself (speech arrives while listening; a task ended).
+public nonisolated enum VoiceOrbFace: String, CaseIterable, Sendable {
+    case off, connecting, listening, hearing, thinking, speaking, checkIn, paused, needsConfirm,
+        error, success
 
-    /// What moves the lobes.
-    public enum Driver: Equatable, Sendable {
-        /// Nothing: one static frame.
-        case still
-        /// The microphone level.
-        case input
-        /// Rafu's output level.
-        case output
-        /// Thinking: the lobes turn slowly with time.
-        case turning
-    }
-
-    /// Size factor of the orb in its slot (1 = full).
-    public var scale: Double = 1
-    /// 0…1 multiplier for the lobes' light.
-    public var brightness: Double = 1
-    /// 0 = full colour, 1 = grey.
-    public var desaturation: Double = 0
-    public var eyes: Eyes = .closed
-    public var eyesLookUp = false
-    /// 0 hides the ring.
-    public var ringOpacity: Double = 0
-    public var ringWidth: Double = 1
-    /// 0…0.15: how far the lobes shift toward the light tone (speaking).
-    public var lightShift: Double = 0
-    /// A ripple ring leaves the orb (connecting: repeating; check-in: once).
-    public var ripple: Ripple = .none
-    public var driver: Driver = .still
-
-    public enum Ripple: Equatable, Sendable {
-        case none, once, repeating
-    }
-
-    public init() {}
-
-    /// The pose for `state`. `micOpen` and `latched` come from the session;
-    /// Increase Contrast makes every shown ring at least 2 pt.
-    public static func pose(
-        for state: VoiceBlobState, micOpen: Bool, latched: Bool, increaseContrast: Bool = false
-    ) -> VoiceOrbPose {
-        var pose = VoiceOrbPose()
+    public static func face(for state: VoiceBlobState) -> VoiceOrbFace {
         switch state {
-        case .idle:
-            pose.brightness = 0.5
-        case .connecting:
-            pose.scale = 0.7
-            pose.brightness = 0.5
-            pose.ripple = .repeating
-        case .listeningHeld:
-            pose.eyes = .open
-            pose.eyesLookUp = true
-            pose.ringOpacity = 0.6
-            pose.ringWidth = 1
-            pose.driver = .input
-        case .listeningLatched:
-            pose.eyes = .open
-            pose.ringOpacity = 0.6
-            pose.ringWidth = 2
-            pose.driver = .input
-        case .thinking:
-            pose.brightness = 0.8
-            pose.eyes = .half
-            pose.ringOpacity = 0.3
-            pose.ringWidth = latched ? 2 : 1
-            pose.driver = .turning
-        case .speaking:
-            pose.lightShift = 0.15
-            pose.ringOpacity = micOpen ? 0.6 : 0
-            pose.ringWidth = latched ? 2 : 1
-            pose.driver = .output
-        case .checkIn:
-            pose.eyes = .open
-            pose.eyesLookUp = true
-            pose.ringOpacity = 0.6
-            pose.ringWidth = 2
-            pose.ripple = .once
-        // The lobes stay still while Rafu waits for an answer.
-        case .paused:
-            pose.scale = 0.8
-            pose.desaturation = 0.4
-        case .needsConfirm:
-            pose.eyes = .open
-            pose.ringOpacity = 1
-            pose.ringWidth = 2
-        case .error:
-            pose.brightness = 0.4
-            pose.desaturation = 1
+        case .idle: .off
+        case .connecting: .connecting
+        case .listeningHeld, .listeningLatched: .listening
+        case .thinking: .thinking
+        case .speaking: .speaking
+        case .checkIn: .checkIn
+        case .paused: .paused
+        case .needsConfirm: .needsConfirm
+        case .error: .error
         }
-        if increaseContrast, pose.ringOpacity > 0 {
-            pose.ringWidth = max(2, pose.ringWidth)
-            pose.ringOpacity = max(0.8, pose.ringOpacity)
+    }
+
+    /// The faces that need the motion clock: they move with time or with an
+    /// audio level. Listening needs it to notice speech. Every other face is
+    /// one still frame once its pose is reached.
+    public var usesClock: Bool {
+        switch self {
+        case .connecting, .listening, .hearing, .thinking, .speaking: true
+        default: false
         }
-        return pose
+    }
+
+    /// Open eyes blink now and then.
+    public var blinks: Bool {
+        switch self {
+        case .off, .success: false
+        default: true
+        }
+    }
+
+    /// Only the faces where the user must know or act carry a badge (user
+    /// decision, 2026-11-10). So a badge always means: Rafu does not hear
+    /// you, or Rafu needs you.
+    public var badgeSymbol: String? {
+        switch self {
+        case .paused: "pause.fill"
+        case .needsConfirm: "hand.raised.fill"
+        case .error: "exclamationmark"
+        default: nil
+        }
+    }
+
+    /// The Done face shows for this long after each completed task.
+    public static let doneHold: Duration = .milliseconds(1200)
+
+    /// Done never replaces a face that needs the user, or Off.
+    public func withDone(_ showsDone: Bool) -> VoiceOrbFace {
+        guard showsDone else { return self }
+        switch self {
+        case .needsConfirm, .error, .off: return self
+        default: return .success
+        }
     }
 }
 
-// MARK: Level smoothing
-
-/// Turns raw audio levels into the orb's shown level and lobe phase. One
-/// `step` per sampler tick (20 Hz). Silence never moves the lobes: the phase
-/// advances only with level, except while turning (Thinking).
-public nonisolated struct VoiceLevelSmoother: Equatable, Sendable {
-    /// The fall rate per tick: `shown = max(raw, shown × decay)`.
-    public static let decay = 0.72
-    /// Smaller changes are not written, so the view does not redraw.
-    public static let writeThreshold = 0.02
-    /// Thinking: 0.1 turn per second at 20 Hz.
-    public static let turnPerTick = 2 * Double.pi * 0.1 / 20
-    /// Lobe travel per tick at full level.
-    public static let phasePerLevel = 0.05
-    /// Ticks of one connecting ripple (1.2 s at 20 Hz).
-    public static let rippleTicks = 24
-
-    public private(set) var shown = 0.0
-    public private(set) var phase = 0.0
-    /// 0…1 progress of the ripple ring; 0 when no ripple shows.
-    public private(set) var ripple = 0.0
-    private var rippleTick = 0
-    private var rippleDone = false
-    /// The values last handed to the view.
-    public private(set) var written = Snapshot()
-
-    public struct Snapshot: Equatable, Sendable {
-        public var level = 0.0
-        public var phase = 0.0
-        public var ripple = 0.0
-        public init(level: Double = 0, phase: Double = 0, ripple: Double = 0) {
-            self.level = level
-            self.phase = phase
-            self.ripple = ripple
-        }
-    }
+/// One pose of the face and the marble. Every field is a number, so two poses
+/// can mix and the motion can ease from one to the next.
+public nonisolated struct VoiceOrbExpression: Equatable, Sendable {
+    /// 0 closed … 1 open.
+    public var lids = 1.0
+    /// 1: the eyes are happy arcs.
+    public var happy = 0.0
+    /// -1…1 each; +y is down.
+    public var gazeX = 0.0
+    public var gazeY = 0.0
+    /// The dot size factor.
+    public var dot = 1.0
+    /// 0 hides the brows.
+    public var brows = 0.0
+    public var browRaise = 0.0
+    /// + : inner ends up (worried).
+    public var browTilt = 0.0
+    /// Extra lift of the left brow only (thinking).
+    public var browSkew = 0.0
+    /// Head tilt in radians.
+    public var tilt = 0.0
+    /// Wobble speed of the marble (phase per second). It rocks; it never spins.
+    public var spin = 0.0
+    /// Extra wobble speed per unit of level.
+    public var levelSpin = 0.0
+    /// How much the cat's-eye swells per unit of level.
+    public var levelSwell = 0.0
+    /// 0 full colour … 1 grey.
+    public var grey = 0.0
+    /// 0…1 brightness of the cat's-eye and the caustic.
+    public var glow = 1.0
+    /// The marble's size in its slot.
+    public var scale = 1.0
 
     public init() {}
 
-    /// One tick. Returns the snapshot to write, or nil when the change is too
-    /// small to draw.
-    public mutating func step(raw: Double, pose: VoiceOrbPose) -> Snapshot? {
-        let clamped = min(1, max(0, raw.isFinite ? raw : 0))
-        switch pose.driver {
-        case .input, .output:
-            shown = max(clamped, shown * Self.decay)
-            if shown < 0.005 { shown = 0 }
-            phase += shown * Self.phasePerLevel
-        case .turning:
-            shown = max(0.25, shown * Self.decay)
-            phase += Self.turnPerTick
-        case .still:
-            shown = 0
+    public static func target(for face: VoiceOrbFace) -> VoiceOrbExpression {
+        var e = VoiceOrbExpression()
+        switch face {
+        case .off:
+            e.lids = 0
+            e.grey = 0.55
+            e.glow = 0.45
+            e.scale = 0.92
+        case .connecting:
+            e.lids = 0.6
+            e.spin = 0.9
+            e.glow = 0.7
+            e.scale = 0.96
+        case .listening:
+            e.gazeY = 0.1
+        case .hearing:
+            e.dot = 1.15
+            e.gazeY = 0.05
+            e.brows = 1
+            e.browRaise = 0.6
+            e.levelSpin = 1.6
+            e.levelSwell = 0.28
+        case .thinking:
+            e.gazeX = -0.8
+            e.gazeY = -0.9
+            e.dot = 0.88
+            e.brows = 1
+            e.browSkew = 0.9
+            e.spin = 1.1
+            e.glow = 0.9
+        case .speaking:
+            e.dot = 0.95
+            e.gazeY = 0.15
+            e.spin = 0.45
+            e.levelSpin = 1
+            e.levelSwell = 0.35
+        case .checkIn:
+            e.dot = 1.1
+            e.brows = 1
+            e.browRaise = 0.8
+            e.browSkew = 0.5
+            e.gazeY = -0.2
+            e.tilt = 0.14
+        case .paused:
+            e.lids = 0.45
+            e.gazeY = 0.8
+            e.grey = 0.5
+            e.glow = 0.6
+            e.scale = 0.95
+        case .needsConfirm:
+            e.dot = 1.3
+            e.brows = 1
+            e.browRaise = 1
+            e.gazeY = -0.4
+        case .error:
+            e.gazeY = 0.7
+            e.dot = 0.85
+            e.brows = 1
+            e.browTilt = 1
+            e.grey = 0.7
+            e.glow = 0.5
+        case .success:
+            e.happy = 1
+            e.spin = 2.4
         }
-        stepRipple(pose.ripple)
-        let next = Snapshot(level: shown, phase: phase, ripple: ripple)
-        let levelMoved = abs(next.level - written.level) > Self.writeThreshold
-        let turning = pose.driver == .turning
-        let rippleMoved = next.ripple != written.ripple
-        guard levelMoved || turning || rippleMoved || (next.level == 0 && written.level != 0)
-        else { return nil }
-        written = next
-        return next
+        return e
     }
 
-    /// Back to rest: level 0, no ripple. The phase is kept so the next
-    /// motion continues from where the lobes stopped.
-    public mutating func reset() {
-        shown = 0
-        ripple = 0
-        rippleTick = 0
-        rippleDone = false
-        written = Snapshot(level: 0, phase: phase, ripple: 0)
+    private static var fields: [WritableKeyPath<VoiceOrbExpression, Double>] {
+        [
+            \.lids, \.happy, \.gazeX, \.gazeY, \.dot, \.brows, \.browRaise, \.browTilt, \.browSkew,
+            \.tilt, \.spin, \.levelSpin, \.levelSwell, \.grey, \.glow, \.scale,
+        ]
     }
 
-    private mutating func stepRipple(_ kind: VoiceOrbPose.Ripple) {
-        switch kind {
-        case .none:
-            rippleTick = 0
-            rippleDone = false
-            ripple = 0
-        case .repeating:
-            rippleTick = (rippleTick + 1) % Self.rippleTicks
-            ripple = Double(rippleTick) / Double(Self.rippleTicks)
-        case .once:
-            guard !rippleDone else {
-                ripple = 0
-                return
-            }
-            rippleTick += 1
-            if rippleTick >= Self.rippleTicks {
-                rippleDone = true
-                ripple = 0
-            } else {
-                ripple = Double(rippleTick) / Double(Self.rippleTicks)
-            }
+    /// `fraction` of the way to `target`; snaps to it when it is close, so a
+    /// finished change is exactly equal and stops the clock.
+    public func approaching(_ target: VoiceOrbExpression, by fraction: Double)
+        -> VoiceOrbExpression
+    {
+        var next = self
+        var far = 0.0
+        for field in Self.fields {
+            let delta = target[keyPath: field] - self[keyPath: field]
+            next[keyPath: field] = self[keyPath: field] + delta * fraction
+            far = max(far, abs(delta))
         }
+        return far * (1 - fraction) < 0.01 ? target : next
+    }
+}
+
+// MARK: Orb motion
+
+/// The orb's motion, one tick at a time (30 Hz). Pure: the app's animator
+/// calls `step` from a sleeping loop and writes the result only when
+/// `step` reports a change. Silence never moves anything.
+public nonisolated struct VoiceOrbMotion: Equatable, Sendable {
+    public static let ticksPerSecond = 30.0
+    /// Listening shows the hearing face above this mic level …
+    public static let hearOn = 0.08
+    /// … and returns below this one.
+    public static let hearOff = 0.02
+    /// Easing per tick: a change of face takes about 8 ticks.
+    public static let ease = 0.28
+    /// The shown level falls by this factor per tick.
+    public static let decay = 0.8
+    /// One connecting ripple takes this long, in seconds.
+    public static let rippleSeconds = 1.2
+
+    /// What one frame draws.
+    public struct Drawn: Equatable, Sendable {
+        public var expression = VoiceOrbExpression.target(for: .off)
+        /// The marble's wobble phase.
+        public var phase = 0.6
+        public var level = 0.0
+        /// 0…1 progress of the connecting ripple; 0 hides it.
+        public var ripple = 0.0
+        /// Pointer or wander gaze, added to the expression's gaze.
+        public var lookX = 0.0
+        public var lookY = 0.0
+        public init() {}
+    }
+
+    public private(set) var drawn = Drawn()
+    public private(set) var hearing = false
+    private var time = 0.0
+
+    public init(face: VoiceOrbFace = .off) {
+        drawn.expression = .target(for: face)
+    }
+
+    /// Listening becomes Hearing while speech arrives.
+    public func shown(_ face: VoiceOrbFace) -> VoiceOrbFace {
+        face == .listening && hearing ? .hearing : face
+    }
+
+    /// The still frame for `face` (Reduce Motion, or a window that cannot
+    /// show motion): the pose at once, no level, no ripple, eyes ahead.
+    public mutating func rest(face: VoiceOrbFace) {
+        hearing = false
+        let phase = drawn.phase
+        drawn = Drawn()
+        drawn.phase = phase
+        drawn.expression = .target(for: face)
+    }
+
+    /// One tick. `pointer` is -1…1 from the orb's centre while the pointer
+    /// is over the orb. Returns true when the drawn frame changed.
+    @discardableResult
+    public mutating func step(
+        face: VoiceOrbFace, mic: Double, output: Double, pointer: (x: Double, y: Double)? = nil
+    ) -> Bool {
+        let before = drawn
+        let dt = 1 / Self.ticksPerSecond
+        time += dt
+        let micLevel = Self.clamped(mic)
+        if face == .listening {
+            if micLevel > Self.hearOn {
+                hearing = true
+            } else if micLevel < Self.hearOff {
+                hearing = false
+            }
+        } else {
+            hearing = false
+        }
+        let shown = shown(face)
+        let target = VoiceOrbExpression.target(for: shown)
+        drawn.expression = drawn.expression.approaching(target, by: Self.ease)
+
+        let raw: Double =
+            switch shown {
+            case .hearing: micLevel
+            case .speaking: Self.clamped(output)
+            default: 0
+            }
+        drawn.level = max(raw, drawn.level * Self.decay)
+        if drawn.level < 0.005 { drawn.level = 0 }
+        let settling = drawn.expression != target
+        // Success wobbles only while its face arrives; then it rests.
+        let spin = shown == .success && !settling ? 0 : drawn.expression.spin
+        drawn.phase += dt * (spin + drawn.level * target.levelSpin)
+        drawn.ripple =
+            shown == .connecting
+            ? (drawn.ripple + dt / Self.rippleSeconds).truncatingRemainder(dividingBy: 1) : 0
+
+        switch shown {
+        case .connecting:
+            drawn.lookX = sin(time * 1.6) * 0.6
+            drawn.lookY = 0
+        case .thinking:
+            drawn.lookX = sin(time * 0.9) * 0.12
+            drawn.lookY = 0
+        default:
+            // The dots follow the pointer only while listening.
+            let wanted = (shown == .listening || shown == .hearing) ? pointer : nil
+            drawn.lookX = Self.approach(drawn.lookX, wanted?.x ?? 0)
+            drawn.lookY = Self.approach(drawn.lookY, wanted?.y ?? 0)
+        }
+        return drawn != before
+    }
+
+    /// True when ticks would change nothing more for `face`: a face with no
+    /// clock whose pose, level, ripple and gaze have arrived.
+    public func isSettled(face: VoiceOrbFace) -> Bool {
+        let shown = shown(face)
+        guard !shown.usesClock else { return false }
+        return drawn.expression == .target(for: shown) && drawn.level == 0 && drawn.ripple == 0
+            && drawn.lookX == 0 && drawn.lookY == 0
+    }
+
+    private static func approach(_ value: Double, _ target: Double) -> Double {
+        let next = value + (target - value) * 0.3
+        return abs(target - next) < 0.01 ? target : next
+    }
+
+    private static func clamped(_ value: Double) -> Double {
+        min(1, max(0, value.isFinite ? value : 0))
+    }
+
+    public static func == (lhs: VoiceOrbMotion, rhs: VoiceOrbMotion) -> Bool {
+        lhs.drawn == rhs.drawn && lhs.hearing == rhs.hearing
     }
 }
 
@@ -444,33 +565,70 @@ public nonisolated enum VoiceCompanionCorner: String, CaseIterable, Sendable {
 
 /// Where the companion, its card and its pill sit. Pure geometry in the
 /// host's coordinate space (origin top-left).
+///
+/// Board chrome (the zoom capsule and the overview above it) reports a
+/// reserved rect; the orb never covers it. In a bottom corner the orb sits
+/// above that rect, on the same vertical line (user decision, 2026-11-10).
+/// The card and the pill are placed by explicit rects, never by alignment
+/// guides: a guide set inside an `if` does not reach `.overlay(alignment:)`,
+/// which is how the pill once covered the orb and left the window.
 public nonisolated enum VoiceCompanionPlacement {
-    /// The slot the orb lives in; the orb grows to it on hover.
-    public static let slotSize = 96.0
-    public static let orbSize = 72.0
-    public static let hoverOrbSize = 96.0
+    /// The slot the orb lives in. The orb does not grow on hover.
+    public static let slotSize = 64.0
+    public static let orbSize = 64.0
     public static let idleOrbSize = 40.0
     public static let tuckedOrbSize = 20.0
     public static let padding = 18.0
+    /// Clear space between the orb and a reserved chrome rect.
+    public static let chromeGap = 8.0
+    /// Space between the orb and its card or pill.
+    public static let partGap = 8.0
+    /// The card and the pill keep this far inside the host.
+    public static let partMargin = 8.0
     public static let cardMaxWidth = 260.0
-    public static let cardGap = 6.0
     /// The tuck test grows the slot by this much, so a card edge near the
     /// orb counts.
     public static let tuckMargin = 8.0
     public static let untuckDelay: Duration = .milliseconds(400)
     public static let pillShowDelay: Duration = .milliseconds(150)
 
-    /// The slot's top-left corner for `corner` in a container of `size`.
-    public static func slotOrigin(for corner: VoiceCompanionCorner, in size: CGSize) -> CGPoint {
-        let x = corner.isLeading ? padding : max(padding, Double(size.width) - slotSize - padding)
-        let y = corner.isTop ? padding : max(padding, Double(size.height) - slotSize - padding)
-        return CGPoint(x: x, y: y)
-    }
+    /// The slot for `corner` in a container of `size` that touches no rect
+    /// in `avoiding`. First the corner itself; then away from the horizontal
+    /// edge (above the chrome in a bottom corner, below it in a top one), on
+    /// the same vertical line; then, in a short host, beside the chrome. If
+    /// nothing fits, the corner (the tuck rule still applies).
+    public static func slotRect(
+        for corner: VoiceCompanionCorner, in size: CGSize, avoiding: [CGRect] = []
+    ) -> CGRect {
+        let width = Double(size.width)
+        let height = Double(size.height)
+        let natural = CGRect(
+            x: corner.isLeading ? padding : max(padding, width - slotSize - padding),
+            y: corner.isTop ? padding : max(padding, height - slotSize - padding),
+            width: slotSize, height: slotSize)
+        let blocks = avoiding.filter { !$0.isEmpty && !$0.isNull }
+            .map { $0.insetBy(dx: -chromeGap, dy: -chromeGap) }
+        func isFree(_ rect: CGRect) -> Bool {
+            Double(rect.minX) >= padding - 0.5 && Double(rect.maxX) <= width - padding + 0.5
+                && Double(rect.minY) >= padding - 0.5 && Double(rect.maxY) <= height - padding + 0.5
+                && !blocks.contains { $0.intersects(rect) }
+        }
+        if isFree(natural) { return natural }
 
-    public static func slotRect(for corner: VoiceCompanionCorner, in size: CGSize) -> CGRect {
-        CGRect(
-            origin: slotOrigin(for: corner, in: size),
-            size: CGSize(width: slotSize, height: slotSize))
+        var stacked = natural
+        for _ in 0..<blocks.count {
+            guard let hit = blocks.first(where: { $0.intersects(stacked) }) else { break }
+            stacked.origin.y = corner.isTop ? hit.maxY : hit.minY - slotSize
+        }
+        if isFree(stacked) { return stacked }
+
+        var beside = natural
+        for _ in 0..<blocks.count {
+            guard let hit = blocks.first(where: { $0.intersects(beside) }) else { break }
+            beside.origin.x = corner.isLeading ? hit.maxX : hit.minX - slotSize
+        }
+        if isFree(beside) { return beside }
+        return natural
     }
 
     /// The corner whose quadrant holds `point` (the slot centre where a
@@ -481,15 +639,13 @@ public nonisolated enum VoiceCompanionPlacement {
             leading: Double(point.x) < Double(size.width) / 2)
     }
 
-    /// The corner after a drag of the slot from `corner` by `predicted`
-    /// (SwiftUI's `predictedEndTranslation`).
-    public static func corner(
-        afterDragFrom corner: VoiceCompanionCorner, predicted: CGSize, in size: CGSize
-    ) -> VoiceCompanionCorner {
-        let origin = slotOrigin(for: corner, in: size)
+    /// The corner after a drag of `slot` by `predicted` (SwiftUI's
+    /// `predictedEndTranslation`).
+    public static func corner(afterDragFrom slot: CGRect, predicted: CGSize, in size: CGSize)
+        -> VoiceCompanionCorner
+    {
         let centre = CGPoint(
-            x: Double(origin.x) + slotSize / 2 + Double(predicted.width),
-            y: Double(origin.y) + slotSize / 2 + Double(predicted.height))
+            x: slot.midX + predicted.width, y: slot.midY + predicted.height)
         return nearestCorner(to: centre, in: size)
     }
 
@@ -503,18 +659,100 @@ public nonisolated enum VoiceCompanionPlacement {
         case above, below, leading, trailing
     }
 
-    /// The card: above the orb in a bottom corner; beside it, toward the
-    /// window centre, in a top corner.
-    public static func cardSide(for corner: VoiceCompanionCorner) -> Side {
-        if !corner.isTop { return .above }
-        return corner.isLeading ? .trailing : .leading
+    /// The speech card: above the orb in a bottom corner (below it in a top
+    /// one), its outer edge in line with the orb's; beside the orb, toward
+    /// the centre, when the host is too short.
+    public static func cardRect(
+        orb: CGRect, card: CGSize, corner: VoiceCompanionCorner, in size: CGSize,
+        avoiding: [CGRect] = []
+    ) -> (rect: CGRect, side: Side) {
+        let towardCentre: Side = corner.isLeading ? .trailing : .leading
+        let order: [Side] =
+            corner.isTop ? [.below, towardCentre, .above] : [.above, towardCentre, .below]
+        return place(
+            card, around: orb, order: order, in: size, avoiding: avoiding, edgeAligned: corner)
     }
 
-    /// The pill: beside the orb toward the centre in a bottom corner; below
-    /// it in a top corner (the card is beside it there).
-    public static func pillSide(for corner: VoiceCompanionCorner) -> Side {
-        if corner.isTop { return .below }
-        return corner.isLeading ? .trailing : .leading
+    /// The control pill: toward the window centre on the orb's centre line,
+    /// then above or below, then away. Never on the orb, never outside the
+    /// host, and off the chrome and the card when it can be.
+    public static func pillRect(
+        orb: CGRect, pill: CGSize, corner: VoiceCompanionCorner, in size: CGSize,
+        avoiding: [CGRect] = [], card: CGRect? = nil
+    ) -> (rect: CGRect, side: Side) {
+        let towardCentre: Side = corner.isLeading ? .trailing : .leading
+        let away: Side = corner.isLeading ? .leading : .trailing
+        let vertical: [Side] = corner.isTop ? [.below, .above] : [.above, .below]
+        let card = card.flatMap { $0.isEmpty ? nil : $0 }
+        return place(
+            pill, around: orb, order: [towardCentre] + vertical + [away], in: size,
+            avoiding: avoiding + (card.map { [$0] } ?? []), edgeAligned: nil)
+    }
+
+    /// The first side where `part` fits in the host, off the orb and off
+    /// every rect in `avoiding`; else the first side in the host and off the
+    /// orb; else kept inside the host on both axes.
+    static func place(
+        _ part: CGSize, around orb: CGRect, order: [Side], in size: CGSize,
+        avoiding: [CGRect], edgeAligned: VoiceCompanionCorner?
+    ) -> (rect: CGRect, side: Side) {
+        let bounds = CGRect(origin: .zero, size: size).insetBy(dx: partMargin, dy: partMargin)
+        let blocks = avoiding.filter { !$0.isEmpty && !$0.isNull }
+        func stackedX() -> CGFloat {
+            guard let corner = edgeAligned else { return orb.midX - part.width / 2 }
+            return corner.isLeading ? orb.minX : orb.maxX - part.width
+        }
+        func candidate(_ side: Side) -> CGRect {
+            let gap = partGap
+            return switch side {
+            case .leading:
+                CGRect(
+                    x: orb.minX - gap - part.width, y: orb.midY - part.height / 2,
+                    width: part.width, height: part.height)
+            case .trailing:
+                CGRect(
+                    x: orb.maxX + gap, y: orb.midY - part.height / 2, width: part.width,
+                    height: part.height)
+            case .above:
+                CGRect(
+                    x: stackedX(), y: orb.minY - gap - part.height, width: part.width,
+                    height: part.height)
+            case .below:
+                CGRect(
+                    x: stackedX(), y: orb.maxY + gap, width: part.width, height: part.height)
+            }
+        }
+        // Slides only along the axis that cannot push the part onto the orb.
+        func clamped(_ side: Side) -> CGRect {
+            var rect = candidate(side)
+            if side == .above || side == .below {
+                rect.origin.x = min(max(rect.minX, bounds.minX), bounds.maxX - rect.width)
+            } else {
+                rect.origin.y = min(max(rect.minY, bounds.minY), bounds.maxY - rect.height)
+            }
+            return rect
+        }
+        func inside(_ rect: CGRect) -> Bool {
+            rect.minX >= bounds.minX - 0.5 && rect.maxX <= bounds.maxX + 0.5
+                && rect.minY >= bounds.minY - 0.5 && rect.maxY <= bounds.maxY + 0.5
+        }
+        for side in order {
+            let rect = clamped(side)
+            if inside(rect), !rect.intersects(orb), !blocks.contains(where: { $0.intersects(rect) })
+            {
+                return (rect, side)
+            }
+        }
+        for side in order {
+            let rect = clamped(side)
+            if inside(rect), !rect.intersects(orb) { return (rect, side) }
+        }
+        let side = order.first ?? .above
+        var last = candidate(side)
+        last.origin.x = min(max(last.minX, bounds.minX), max(bounds.minX, bounds.maxX - last.width))
+        last.origin.y = min(
+            max(last.minY, bounds.minY), max(bounds.minY, bounds.maxY - last.height))
+        return (last, side)
     }
 
     public static let cornerKeyPrefix = "voice.companion.corner."

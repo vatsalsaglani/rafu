@@ -13,6 +13,7 @@ struct WorkspaceCanvasView: View {
     @Environment(\.rafuTheme) private var theme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(VoiceCompanionModel.self) private var voiceCompanion: VoiceCompanionModel?
     let board: CanvasBoardState
     let session: WorkspaceSession
     @State private var connectionDrag = CanvasConnectionDrag()
@@ -755,10 +756,30 @@ struct WorkspaceCanvasView: View {
         }
         .contentShape(.rect)
         .onHover { interaction.overviewHover = $0 }
+        .background(alignment: .bottomTrailing) { voiceCompanionReserve }
         .padding(12)
         .animation(
             RafuMotion.resolve(RafuMotion.panelToggle, reduceMotion: reduceMotion),
             value: showsOverview)
+    }
+
+    /// The rect the voice orb keeps clear of: the zoom capsule and the
+    /// overview's place above it, also while the overview is hidden, so the
+    /// orb (which sits above this corner) does not jump when it shows.
+    private var voiceCompanionReserve: some View {
+        let key = "board.\(presentationID.uuidString)"
+        let companion = voiceCompanion
+        return Color.clear
+            .frame(minWidth: CanvasMinimapLayout.size.width, maxWidth: .infinity)
+            .frame(minHeight: CanvasMinimapLayout.size.height + 36, maxHeight: .infinity)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+            .onGeometryChange(for: CGRect.self) {
+                $0.frame(in: .global)
+            } action: { frame in
+                companion?.setAvoidRect(frame, for: key)
+            }
+            .onDisappear { companion?.setAvoidRect(nil, for: key) }
     }
 
     /// A thin band along one edge of a `size` surface, for the "this tab

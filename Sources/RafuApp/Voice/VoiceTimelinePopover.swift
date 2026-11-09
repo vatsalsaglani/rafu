@@ -27,6 +27,7 @@ struct VoiceTimelinePopover: View {
         case .delegation: "Delegations"
         case .tool: "Tools"
         case .board: "Board effects"
+        case .marker: "Session"
         }
     }
 
@@ -37,20 +38,27 @@ struct VoiceTimelinePopover: View {
         let nowMS = currentNowMS()
         let latest = VoiceTimelineGrouping.latestKnownMS(events)
         let running = items.contains { if case .group(let g) = $0 { g.isRunning } else { false } }
+        let status = VoiceRunStatus(
+            state: session.blobState, micOpen: session.isMicOpen,
+            latched: session.machine.mic == .latched)
         VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text("Voice Timeline").font(.headline)
-                Spacer()
-                Text(!isOpen && !events.isEmpty ? "Last session ended" : session.blobState.word)
-                    .font(.caption)
-                    .foregroundStyle(theme.palette.textSecondary)
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Voice Timeline").font(.headline)
+                    Text(subtitle(isOpen: isOpen, hasEvents: !events.isEmpty))
+                        .font(.caption)
+                        .foregroundStyle(theme.palette.textMuted)
+                }
+                Spacer(minLength: 8)
+                VoiceStatusChip(status: status)
             }
             .padding(12)
-            Divider()
+            Rectangle().fill(theme.palette.borderSubtle).frame(height: 1)
+            if session.blobState == .paused {
+                VoiceTimelineMicBanner(session: session)
+            }
             if events.isEmpty {
-                Text(isOpen ? "Nothing yet in this session." : "No voice session is open.")
-                    .font(.callout)
-                    .foregroundStyle(theme.palette.textSecondary)
+                VoiceTimelineEmptyState(session: session)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
@@ -63,13 +71,22 @@ struct VoiceTimelinePopover: View {
                 }
             }
         }
+        .foregroundStyle(theme.palette.textPrimary)
         .frame(width: 360, height: 400, alignment: .top)
+        .background(theme.palette.cardBackground)
+        // The arrow takes the same surface as the content.
+        .presentationBackground(theme.palette.cardBackground)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Voice timeline")
         .onChange(of: latest, initial: true) { _, known in
             clock.note(knownMS: known, at: .now)
         }
         .task(id: running && motionAllowed) { await tickWhileRunning(running && motionAllowed) }
+    }
+
+    private func subtitle(isOpen: Bool, hasEvents: Bool) -> String {
+        if isOpen { return "This session" }
+        return hasEvents ? "Last session ended" : "No session"
     }
 
     /// Session milliseconds now. Reading `tick` makes the 4 Hz write redraw
@@ -109,6 +126,7 @@ private struct VoiceTimelineItemView: View {
         case .rafu(let row): VoiceRafuCapsule(row: row)
         case .group(let group): VoiceGroupCapsule(group: group, nowMS: nowMS)
         case .standalone(let row): VoiceStepCapsule(row: row, nowMS: nowMS)
+        case .marker(let row): VoiceMarkerCapsule(row: row)
         }
     }
 }
@@ -137,6 +155,136 @@ private struct VoiceCapsuleSurface: ViewModifier {
 extension View {
     fileprivate func voiceCapsule(emphasised: Bool = false) -> some View {
         modifier(VoiceCapsuleSurface(emphasised: emphasised))
+    }
+}
+
+/// A session marker: started, listening, paused. A dashed outline, no fill,
+/// so it reads as a note between the real rows.
+private struct VoiceMarkerCapsule: View {
+    let row: VoiceTimelineEvent
+    @Environment(\.rafuTheme) private var theme
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(row.title)
+                .font(.caption)
+                .foregroundStyle(theme.palette.textSecondary)
+                .lineLimit(2)
+            Spacer(minLength: 4)
+            Text("+" + VoiceTimelineFormat.seconds(row.startMS))
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(theme.palette.textMuted)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 4)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(
+                    theme.palette.borderSubtle, style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+        )
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(row.title), at \(VoiceTimelineFormat.seconds(row.startMS))")
+    }
+}
+
+/// While the microphone is off, the timeline says so in words and offers
+/// the one action that fixes it.
+private struct VoiceTimelineMicBanner: View {
+    let session: VoiceSession
+    @Environment(\.rafuTheme) private var theme
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "pause.fill")
+                .font(.system(size: 11, weight: .bold))
+                .padding(.top, 2)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 6) {
+                Text("The mic is off, so Rafu cannot hear you. Hold ⌃⌥Space while you talk, or:")
+                    .font(.callout)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("Start Listening") { session.toggleLatched() }
+                    .controlSize(.small)
+            }
+            Spacer(minLength: 0)
+        }
+        .foregroundStyle(theme.palette.textPrimary)
+        .padding(12)
+        .background(theme.palette.chipBackground)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(theme.palette.borderSubtle).frame(height: 1)
+        }
+        .accessibilityElement(children: .contain)
+    }
+}
+
+/// No rows yet: say what state Rafu is in and what to do.
+private struct VoiceTimelineEmptyState: View {
+    let session: VoiceSession
+    @Environment(\.rafuTheme) private var theme
+
+    private var text: (title: String, body: String) {
+        switch session.blobState {
+        case .idle, .error:
+            ("Voice is off", "Hold ⌃⌥Space to talk, or choose Start Listening.")
+        case .connecting:
+            ("Connecting", "What you say and what Rafu does shows here.")
+        case .paused:
+            ("Paused", "Nothing was said yet.")
+        default:
+            ("Rafu is listening", "Talk now. What you say and what Rafu does shows here.")
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 6) {
+            Text(text.title).font(.callout.weight(.semibold))
+            Text(text.body)
+                .font(.callout)
+                .foregroundStyle(theme.palette.textSecondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 240)
+            if !session.blobState.isOpen {
+                Button("Start Listening") { session.toggleLatched() }
+                    .controlSize(.small)
+                    .padding(.top, 4)
+            }
+        }
+        .padding(16)
+    }
+}
+
+/// The run state as a glyph and words: "Listening · Mic on", "Paused · Mic
+/// off". Used by the timeline header and the control pill.
+struct VoiceStatusChip: View {
+    let status: VoiceRunStatus
+    @Environment(\.rafuTheme) private var theme
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: status.symbol)
+                .font(.system(size: 10, weight: .bold))
+                .frame(width: 12)
+            Text(status.word).font(.system(size: 11, weight: .semibold))
+            if let micLine = status.micLine {
+                Text(micLine)
+                    .font(.system(size: 11))
+                    .foregroundStyle(theme.palette.textSecondary)
+            }
+        }
+        .foregroundStyle(theme.palette.textPrimary)
+        .padding(.horizontal, 8)
+        .frame(height: 22)
+        .background(theme.palette.chipBackground, in: Capsule())
+        .overlay {
+            Capsule().strokeBorder(
+                contrast == .increased ? theme.palette.borderStrong : theme.palette.borderSubtle,
+                lineWidth: 1)
+        }
+        .fixedSize()
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(status.spoken)
     }
 }
 

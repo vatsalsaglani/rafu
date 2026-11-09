@@ -66,19 +66,25 @@ struct VoicePresenceAppTests {
         for theme in try Self.themes() {
             for contrast in [false, true] {
                 let palette = VoiceOrbPalette(theme: theme, increaseContrast: contrast)
-                #expect(palette.lobes.count == 4, Comment(rawValue: theme.name))
-                // The orb is a dark sphere on every theme.
-                #expect(luminance(palette.base) < 0.3, Comment(rawValue: theme.name))
-                // The ring is the theme accent, never a fixed brand colour.
-                #expect(same(palette.ring, theme.palette.accent), Comment(rawValue: theme.name))
-                // The light tone is lighter than the base.
-                #expect(luminance(palette.light) > luminance(palette.base))
-                #expect(palette.rimShade == (contrast ? 0.55 : 0.35))
+                #expect(palette.leaf.count == 3, Comment(rawValue: theme.name))
+                // Translucent glass: thin in the middle, thicker at the rim.
+                #expect(palette.centreAlpha < palette.rimAlpha)
+                #expect(palette.rimAlpha < 1)
+                #expect(palette.solidBase == nil)
+                #expect(palette.outlineWidth == (contrast ? 2 : 1))
+                // Light dots on a dark board, dark dots on a light board.
+                if theme.isDark {
+                    #expect(luminance(palette.ink) > 0.7, Comment(rawValue: theme.name))
+                } else {
+                    #expect(luminance(palette.ink) < 0.4, Comment(rawValue: theme.name))
+                }
             }
         }
+        let solid = VoiceOrbPalette(theme: RafuThemeCatalog.indigo, reduceTransparency: true)
+        #expect(solid.solidBase != nil)
     }
 
-    @Test("A custom accent reaches the lobes; themes give different orbs")
+    @Test("A custom accent reaches the cat's-eye; themes give different orbs")
     func customAccent() throws {
         let green = try customTheme(
             appearance: "dark", accent: "#33CC99", background: "#101418", ink: "#EEEEEE")
@@ -86,43 +92,48 @@ struct VoicePresenceAppTests {
             appearance: "dark", accent: "#CC3366", background: "#101418", ink: "#EEEEEE")
         let greenPalette = VoiceOrbPalette(theme: green)
         let pinkPalette = VoiceOrbPalette(theme: pink)
-        #expect(same(greenPalette.lobes[1], green.palette.accent))
-        #expect(!same(greenPalette.lobes[1], pinkPalette.lobes[1]))
+        #expect(same(greenPalette.leaf[0], green.palette.accent.mix(with: .white, by: 0.1)))
+        #expect(!same(greenPalette.leaf[0], pinkPalette.leaf[0]))
         #expect(
             !same(
-                VoiceOrbPalette(theme: RafuThemeCatalog.indigo).ring,
-                VoiceOrbPalette(theme: RafuThemeCatalog.khadi).ring)
-                || !same(
-                    VoiceOrbPalette(theme: RafuThemeCatalog.indigo).base,
-                    VoiceOrbPalette(theme: RafuThemeCatalog.khadi).base)
-        )
+                VoiceOrbPalette(theme: RafuThemeCatalog.indigo).ink,
+                VoiceOrbPalette(theme: RafuThemeCatalog.khadi).ink))
     }
 
-    @Test("The sampler runs only while something moves the orb and motion is allowed")
-    func samplerGate() {
-        let listening = VoiceOrbPose.pose(for: .listeningLatched, micOpen: true, latched: true)
-        let idle = VoiceOrbPose.pose(for: .idle, micOpen: false, latched: false)
-        let paused = VoiceOrbPose.pose(for: .paused, micOpen: false, latched: false)
-        let connecting = VoiceOrbPose.pose(for: .connecting, micOpen: true, latched: false)
-        typealias Sampler = VoicePresenceSampler
-        #expect(Sampler.isActive(pose: listening, motionAllowed: true, reduceMotion: false))
-        #expect(Sampler.isActive(pose: connecting, motionAllowed: true, reduceMotion: false))
-        #expect(!Sampler.isActive(pose: idle, motionAllowed: true, reduceMotion: false))
-        #expect(!Sampler.isActive(pose: paused, motionAllowed: true, reduceMotion: false))
-        #expect(!Sampler.isActive(pose: listening, motionAllowed: false, reduceMotion: false))
-        #expect(!Sampler.isActive(pose: listening, motionAllowed: true, reduceMotion: true))
-        #expect(Sampler.interval == .milliseconds(50))
+    @Test("Without motion the animator writes one still frame and returns")
+    func animatorStill() async {
+        let animator = VoiceOrbAnimator()
+        await animator.run(face: .paused, animated: false) { (0, 0) }
+        #expect(animator.frame.face == .paused)
+        #expect(animator.frame.drawn.expression == .target(for: .paused))
+        #expect(animator.frame.drawn.level == 0)
+        await animator.runBlinks(enabled: false)
+        #expect(animator.frame.blink == 0)
     }
 
-    @Test("An inactive sampler returns at once and leaves a still frame")
-    func samplerInactive() async {
-        let sampler = VoicePresenceSampler()
-        let session = VoiceSession(dependencies: .live)
-        await sampler.run(active: false, session: session) {
-            VoiceOrbPose.pose(for: .idle, micOpen: false, latched: false)
-        }
-        #expect(sampler.snapshot.level == 0)
-        #expect(sampler.snapshot.ripple == 0)
+    @Test("A face with no clock settles and the loop ends by itself")
+    func animatorSettles() async {
+        let animator = VoiceOrbAnimator()
+        await animator.run(face: .needsConfirm, animated: true) { (0, 0) }
+        #expect(animator.frame.face == .needsConfirm)
+        #expect(animator.frame.drawn.expression == .target(for: .needsConfirm))
+    }
+
+    @Test("Chrome rects move into the host's space; the slot avoids them")
+    func avoidRects() {
+        let model = VoiceCompanionModel(defaults: .standard)
+        model.containerSize = CGSize(width: 1_000, height: 700)
+        model.hostOrigin = CGPoint(x: 200, y: 50)
+        let natural = model.slotRect
+        // Global rect of a zoom corner at the host's bottom-trailing corner.
+        let chrome = CGRect(
+            x: 200 + 1_000 - 12 - 170, y: 50 + 700 - 12 - 126, width: 170, height: 126)
+        model.setAvoidRect(chrome, for: "board.a")
+        #expect(model.localAvoidRects == [chrome.offsetBy(dx: -200, dy: -50)])
+        #expect(model.slotRect.maxY < natural.maxY)
+        #expect(!model.slotRect.intersects(model.localAvoidRects[0]))
+        model.setAvoidRect(nil, for: "board.a")
+        #expect(model.slotRect == natural)
     }
 
     @Test("The corner is remembered per workspace and moves by keyboard")

@@ -1,10 +1,11 @@
 import RafuCore
 import SwiftUI
 
-/// The voice orb in the notch wing: a 20 pt `VoiceLiveOrb` that takes the
-/// mascot's place while a voice session is open. It follows the audio level
-/// only while something moves it (the sampler's gate); otherwise it is one
-/// still frame. No ring outside the disc and no shell glow at this size.
+/// The voice orb in the notch wing: a 20 pt compact `VoiceLiveOrb` that
+/// takes the mascot's place while a voice session is open. At this size the
+/// dots would be about 1 pt, so it has no face and no badge; the marble
+/// still rocks and swells while something moves it, else it is one still
+/// frame.
 struct VoiceNotchOrb: View {
     let session: VoiceSession
     var size: CGFloat = 20
@@ -14,7 +15,7 @@ struct VoiceNotchOrb: View {
 
     var body: some View {
         Button(action: activate) {
-            VoiceLiveOrb(session: session, size: size, showsRing: false)
+            VoiceLiveOrb(session: session, size: size, isCompact: true)
                 .frame(width: size, height: size)
                 .contentShape(Circle())
         }

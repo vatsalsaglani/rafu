@@ -65,7 +65,7 @@ struct VoiceHotkeyAndTimelineTests {
         #expect(VoiceTimelinePopover.title(.board) == "Board effects")
         #expect(
             VoiceTimelineEvent.Lane.allCases.map(VoiceTimelinePopover.title) == [
-                "You", "Rafu", "Delegations", "Tools", "Board effects",
+                "You", "Rafu", "Delegations", "Tools", "Board effects", "Session",
             ])
     }
 }

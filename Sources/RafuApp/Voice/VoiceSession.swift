@@ -103,10 +103,17 @@ final class VoiceSession {
     /// A short tip after a turn Rafu did not hear or answer. Cleared by the
     /// next press, a reply, a delegation, or close.
     private(set) var hint: String?
+    /// Moves by one each time a delegation finishes with at least one done
+    /// call, so the orb shows its Done face for a moment.
+    private(set) var completedTasks = 0
     let costStore: VoiceCostStore
 
     static let silentTurnHint = "Hold ⌃⌥Space while you talk, or choose Start Listening."
     static let noReplyHint = "No reply. Hold ⌃⌥Space and try again."
+    /// The key went up before the session started: the session opens with
+    /// the microphone off, and the card says so.
+    static let connectedPausedHint =
+        "Connected. The mic is off. Click Rafu, or hold ⌃⌥Space while you talk."
 
     var blobState: VoiceBlobState { machine.state }
     var isMicOpen: Bool { machine.isMicOpen }
@@ -125,6 +132,8 @@ final class VoiceSession {
     /// The delegation the current tool rows belong to, so the timeline groups
     /// each step under its own delegation (not by time).
     @ObservationIgnored private var currentDelegationID: String?
+    /// The delegation last counted in `completedTasks`, so one counts once.
+    @ObservationIgnored private var countedDelegationID: String?
     @ObservationIgnored private var cardDelegationIndex = 0
     @ObservationIgnored private let dependencies: Dependencies
     @ObservationIgnored private var client: VoiceLiveClient?
@@ -269,6 +278,7 @@ final class VoiceSession {
         if wasOpen {
             clock.setLatched(latched, at: elapsed())
             if latched { micOpened() } else { micClosed() }
+            if isStarted { markMic(latched ? "Listening. The mic is on." : "Paused by you") }
         } else if latched {
             open()
         }
@@ -441,6 +451,13 @@ final class VoiceSession {
             turn.take(capture.takeCaptureStats(), beforeStart: true)
         }
         apply(.connected)
+        timeline.mark("Session started", atMS: milliseconds(elapsed()), persona: personaName)
+        if blobState == .paused {
+            hint = Self.connectedPausedHint
+            markMic("Paused. The key was released before the session started.")
+        } else if isMicOpen {
+            markMic("Listening. The mic is on.")
+        }
         startAgentUpdates()
         if !pendingFrames.isEmpty {
             // Sends what was said while connecting; a stream that already
@@ -548,6 +565,7 @@ final class VoiceSession {
         sessionGrants.removeAll()
         delegationCount = 0
         currentDelegationID = nil
+        countedDelegationID = nil
         cardDelegationIndex = 0
         isEngineSuspended = false
         lastEngineUse = .zero
@@ -732,6 +750,20 @@ final class VoiceSession {
                 heldMS: milliseconds((turn.closedAt ?? elapsed()) - turn.openedAt)))
     }
 
+    /// A timeline marker for a change of the microphone.
+    private func markMic(_ title: String) {
+        timeline.mark(title, atMS: milliseconds(elapsed()), persona: personaName)
+    }
+
+    /// Counts the current delegation once, if at least one of its calls
+    /// finished.
+    private func countCompletedTask() {
+        guard let id = currentDelegationID, id != countedDelegationID, turnProgress.done > 0
+        else { return }
+        countedDelegationID = id
+        completedTasks &+= 1
+    }
+
     private func showNoResponse(title: String, hint: String) {
         self.hint = hint
         let row = timeline.append(
@@ -834,8 +866,12 @@ final class VoiceSession {
             cancelOrphanViewStreams()
             if inFlightCalls > 0 {
                 completedWhileInFlight = true
-            } else {
+            } else if outputsAwaitingCreate > 0 {
                 sendResponseCreateIfNeeded()
+            } else {
+                // The last response of the delegation: no call runs and no
+                // output waits for another response.
+                countCompletedTask()
             }
         case .usageUpdated(let seconds, _):
             if let sessionID { costStore.recordUsage(sessionID: sessionID, seconds: seconds) }
@@ -1293,6 +1329,7 @@ final class VoiceSession {
             clock.paused = true
             apply(.pause)
             micClosed()
+            markMic("Paused. No answer to the check-in.")
         case .close:
             Task { await self.close(reason: .idle) }
         case nil:

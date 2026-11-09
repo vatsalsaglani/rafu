@@ -5,142 +5,143 @@ import Testing
 
 @Suite("Voice presence")
 struct VoicePresenceTests {
-    // MARK: Pose
+    // MARK: Orb face
 
-    @Test("Each state has the pose from the design table")
-    func poses() {
-        let idle = VoiceOrbPose.pose(for: .idle, micOpen: false, latched: false)
-        #expect(idle.driver == .still)
-        #expect(idle.eyes == .closed)
-        #expect(idle.ringOpacity == 0)
-
-        let connecting = VoiceOrbPose.pose(for: .connecting, micOpen: true, latched: false)
-        #expect(connecting.scale == 0.7)
-        #expect(connecting.brightness == 0.5)
-        #expect(connecting.ripple == .repeating)
-
-        let held = VoiceOrbPose.pose(for: .listeningHeld, micOpen: true, latched: false)
-        #expect(held.driver == .input)
-        #expect(held.eyes == .open)
-        #expect(held.eyesLookUp)
-        #expect(held.ringWidth == 1)
-        #expect(held.ringOpacity == 0.6)
-
-        let latched = VoiceOrbPose.pose(for: .listeningLatched, micOpen: true, latched: true)
-        #expect(latched.ringWidth == 2)
-        #expect(latched.driver == .input)
-
-        let thinking = VoiceOrbPose.pose(for: .thinking, micOpen: false, latched: false)
-        #expect(thinking.driver == .turning)
-        #expect(thinking.eyes == .half)
-        #expect(thinking.brightness == 0.8)
-        #expect(thinking.ringOpacity == 0.3)
-
-        let speaking = VoiceOrbPose.pose(for: .speaking, micOpen: false, latched: false)
-        #expect(speaking.driver == .output)
-        #expect(speaking.lightShift == 0.15)
-        #expect(speaking.ringOpacity == 0)
-        #expect(VoiceOrbPose.pose(for: .speaking, micOpen: true, latched: true).ringOpacity > 0)
-
-        let checkIn = VoiceOrbPose.pose(for: .checkIn, micOpen: true, latched: true)
-        #expect(checkIn.ripple == .once)
-        #expect(checkIn.driver == .still)
-        #expect(checkIn.eyesLookUp)
-
-        let paused = VoiceOrbPose.pose(for: .paused, micOpen: false, latched: false)
-        #expect(paused.scale == 0.8)
-        #expect(paused.desaturation == 0.4)
-        #expect(paused.driver == .still)
-
-        let confirm = VoiceOrbPose.pose(for: .needsConfirm, micOpen: false, latched: false)
-        #expect(confirm.ringWidth == 2)
-        #expect(confirm.ringOpacity == 1)
-        #expect(confirm.eyes == .open)
-        #expect(!confirm.eyesLookUp)
-
-        let error = VoiceOrbPose.pose(for: .error("x"), micOpen: false, latched: false)
-        #expect(error.brightness == 0.4)
-        #expect(error.desaturation == 1)
+    @Test("Each session state maps to one face; only three faces carry a badge")
+    func faces() {
+        #expect(VoiceOrbFace.face(for: .idle) == .off)
+        #expect(VoiceOrbFace.face(for: .connecting) == .connecting)
+        #expect(VoiceOrbFace.face(for: .listeningHeld) == .listening)
+        #expect(VoiceOrbFace.face(for: .listeningLatched) == .listening)
+        #expect(VoiceOrbFace.face(for: .thinking) == .thinking)
+        #expect(VoiceOrbFace.face(for: .speaking) == .speaking)
+        #expect(VoiceOrbFace.face(for: .checkIn) == .checkIn)
+        #expect(VoiceOrbFace.face(for: .paused) == .paused)
+        #expect(VoiceOrbFace.face(for: .needsConfirm) == .needsConfirm)
+        #expect(VoiceOrbFace.face(for: .error("x")) == .error)
+        let badged = VoiceOrbFace.allCases.filter { $0.badgeSymbol != nil }
+        #expect(badged == [.paused, .needsConfirm, .error])
     }
 
-    @Test("Increase Contrast makes every shown ring at least 2 pt")
-    func contrastRing() {
-        let held = VoiceOrbPose.pose(
-            for: .listeningHeld, micOpen: true, latched: false, increaseContrast: true)
-        #expect(held.ringWidth == 2)
-        #expect(held.ringOpacity >= 0.8)
-        let idle = VoiceOrbPose.pose(
-            for: .idle, micOpen: false, latched: false, increaseContrast: true)
-        #expect(idle.ringOpacity == 0)
+    @Test("Listening and Paused differ in the face, not only in colour")
+    func listeningVersusPaused() {
+        let listening = VoiceOrbExpression.target(for: .listening)
+        let paused = VoiceOrbExpression.target(for: .paused)
+        #expect(listening.lids == 1)
+        #expect(paused.lids < 0.5)
+        #expect(paused.gazeY > listening.gazeY)
+        #expect(VoiceOrbFace.paused.badgeSymbol == "pause.fill")
+        #expect(VoiceOrbFace.listening.badgeSymbol == nil)
+        #expect(VoiceOrbExpression.target(for: .off).lids == 0)
+        #expect(VoiceOrbExpression.target(for: .success).happy == 1)
     }
 
-    // MARK: Smoother
-
-    @Test("The level rises at once, falls by 0.72 a tick, and writes only real changes")
-    func smoothing() throws {
-        let pose = VoiceOrbPose.pose(for: .listeningLatched, micOpen: true, latched: true)
-        var smoother = VoiceLevelSmoother()
-        let firstStep = smoother.step(raw: 0.8, pose: pose)
-        let first = try #require(firstStep)
-        #expect(first.level == 0.8)
-        let secondStep = smoother.step(raw: 0, pose: pose)
-        let second = try #require(secondStep)
-        #expect(abs(second.level - 0.8 * 0.72) < 1e-9)
-        // A tiny change is not written.
-        var steady = VoiceLevelSmoother()
-        _ = steady.step(raw: 0.5, pose: pose)
-        let small = steady.step(raw: 0.51, pose: pose)
-        #expect(small == nil)
+    @Test("Done shows over working faces, never over Confirm, Error or Off")
+    func doneFace() {
+        #expect(VoiceOrbFace.listening.withDone(true) == .success)
+        #expect(VoiceOrbFace.thinking.withDone(true) == .success)
+        #expect(VoiceOrbFace.needsConfirm.withDone(true) == .needsConfirm)
+        #expect(VoiceOrbFace.error.withDone(true) == .error)
+        #expect(VoiceOrbFace.off.withDone(true) == .off)
+        #expect(VoiceOrbFace.paused.withDone(false) == .paused)
     }
 
-    @Test("Silence never moves the lobes; Thinking turns them with time")
+    // MARK: Orb motion
+
+    @Test("A change of face eases in and then settles exactly")
+    func easing() {
+        var motion = VoiceOrbMotion(face: .listening)
+        var ticks = 0
+        while !motion.isSettled(face: .paused), ticks < 60 {
+            motion.step(face: .paused, mic: 0, output: 0)
+            ticks += 1
+        }
+        #expect(ticks > 3)
+        #expect(ticks < 30)
+        #expect(motion.drawn.expression == .target(for: .paused))
+        // Settled: another tick changes nothing.
+        let changed = motion.step(face: .paused, mic: 0, output: 0)
+        #expect(!changed)
+    }
+
+    @Test("Silence while listening draws nothing new")
     func silenceIsStill() {
-        let listening = VoiceOrbPose.pose(for: .listeningLatched, micOpen: true, latched: true)
-        var smoother = VoiceLevelSmoother()
+        var motion = VoiceOrbMotion(face: .listening)
         for _ in 0..<40 {
-            let step = smoother.step(raw: 0, pose: listening)
-            #expect(step == nil)
+            let changed = motion.step(face: .listening, mic: 0, output: 0)
+            #expect(!changed)
         }
-        #expect(smoother.phase == 0)
-
-        let thinking = VoiceOrbPose.pose(for: .thinking, micOpen: false, latched: false)
-        var turning = VoiceLevelSmoother()
-        var writes = 0
-        for _ in 0..<20 where turning.step(raw: 0, pose: thinking) != nil { writes += 1 }
-        #expect(writes == 20)
-        // 0.1 turn per second: one second is 2π × 0.1 rad.
-        #expect(abs(turning.phase - 2 * Double.pi * 0.1) < 1e-9)
+        #expect(!motion.hearing)
+        #expect(!motion.isSettled(face: .listening))
     }
 
-    @Test("A connecting ripple repeats every 1.2 s; a check-in ripple runs once")
-    func ripples() {
-        var repeating = VoiceLevelSmoother()
-        let connecting = VoiceOrbPose.pose(for: .connecting, micOpen: true, latched: false)
-        var zeros = 0
-        for _ in 0..<(VoiceLevelSmoother.rippleTicks * 2) {
-            _ = repeating.step(raw: 0, pose: connecting)
-            if repeating.ripple == 0 { zeros += 1 }
-        }
-        #expect(zeros == 2)
-
-        var once = VoiceLevelSmoother()
-        let checkIn = VoiceOrbPose.pose(for: .checkIn, micOpen: true, latched: true)
-        for _ in 0..<(VoiceLevelSmoother.rippleTicks * 3) { _ = once.step(raw: 0, pose: checkIn) }
-        #expect(once.ripple == 0)
-        let after = once.step(raw: 0, pose: checkIn)
-        #expect(after == nil)
+    @Test("Speech turns Listening into Hearing, with hysteresis")
+    func hearing() {
+        var motion = VoiceOrbMotion(face: .listening)
+        motion.step(face: .listening, mic: 0.5, output: 0)
+        #expect(motion.hearing)
+        #expect(motion.shown(.listening) == .hearing)
+        #expect(motion.drawn.level == 0.5)
+        motion.step(face: .listening, mic: 0.05, output: 0)
+        #expect(motion.hearing)
+        motion.step(face: .listening, mic: 0.01, output: 0)
+        #expect(!motion.hearing)
+        motion.step(face: .thinking, mic: 0.9, output: 0)
+        #expect(!motion.hearing)
     }
 
-    @Test("Reset returns to a still frame and keeps the phase")
-    func reset() {
-        let pose = VoiceOrbPose.pose(for: .speaking, micOpen: false, latched: false)
-        var smoother = VoiceLevelSmoother()
-        _ = smoother.step(raw: 1, pose: pose)
-        let phase = smoother.phase
-        smoother.reset()
-        #expect(smoother.written.level == 0)
-        #expect(smoother.written.phase == phase)
-        #expect(smoother.written.ripple == 0)
+    @Test("Thinking rocks the marble with time; Speaking follows the output")
+    func movingFaces() {
+        var thinking = VoiceOrbMotion(face: .thinking)
+        let start = thinking.drawn.phase
+        for _ in 0..<30 { thinking.step(face: .thinking, mic: 0, output: 0) }
+        #expect(
+            abs(thinking.drawn.phase - start - VoiceOrbExpression.target(for: .thinking).spin)
+                < 0.01)
+
+        var speaking = VoiceOrbMotion(face: .speaking)
+        speaking.step(face: .speaking, mic: 0, output: 0.8)
+        #expect(speaking.drawn.level == 0.8)
+        speaking.step(face: .speaking, mic: 0, output: 0)
+        #expect(abs(speaking.drawn.level - 0.8 * VoiceOrbMotion.decay) < 1e-9)
+    }
+
+    @Test("Connecting repeats a ripple; other faces have none")
+    func ripple() {
+        var motion = VoiceOrbMotion(face: .connecting)
+        var wraps = 0
+        var last = 0.0
+        for _ in 0..<Int(VoiceOrbMotion.ticksPerSecond * VoiceOrbMotion.rippleSeconds * 2) + 1 {
+            motion.step(face: .connecting, mic: 0, output: 0)
+            if motion.drawn.ripple < last { wraps += 1 }
+            last = motion.drawn.ripple
+        }
+        #expect(wraps == 2)
+        motion.step(face: .listening, mic: 0, output: 0)
+        #expect(motion.drawn.ripple == 0)
+    }
+
+    @Test("The dots follow the pointer only while listening")
+    func pointerGaze() {
+        var listening = VoiceOrbMotion(face: .listening)
+        for _ in 0..<30 { listening.step(face: .listening, mic: 0, output: 0, pointer: (1, -1)) }
+        #expect(listening.drawn.lookX == 1)
+        #expect(listening.drawn.lookY == -1)
+        var paused = VoiceOrbMotion(face: .paused)
+        for _ in 0..<30 { paused.step(face: .paused, mic: 0, output: 0, pointer: (1, -1)) }
+        #expect(paused.drawn.lookX == 0)
+    }
+
+    @Test("Rest jumps to the still pose and keeps the phase")
+    func rest() {
+        var motion = VoiceOrbMotion(face: .speaking)
+        for _ in 0..<10 { motion.step(face: .speaking, mic: 0, output: 1) }
+        let phase = motion.drawn.phase
+        motion.rest(face: .paused)
+        #expect(motion.drawn.expression == .target(for: .paused))
+        #expect(motion.drawn.level == 0)
+        #expect(motion.drawn.phase == phase)
+        #expect(motion.isSettled(face: .paused))
     }
 
     // MARK: Captions
@@ -239,30 +240,61 @@ struct VoicePresenceTests {
     @Test("Corners sit 18 pt in from the edges")
     func cornerOrigins() {
         typealias Placement = VoiceCompanionPlacement
-        #expect(Placement.slotOrigin(for: .topLeading, in: window) == CGPoint(x: 18, y: 18))
+        #expect(Placement.slotRect(for: .topLeading, in: window).origin == CGPoint(x: 18, y: 18))
         #expect(
-            Placement.slotOrigin(for: .bottomTrailing, in: window)
-                == CGPoint(x: 1_000 - 96 - 18, y: 700 - 96 - 18))
+            Placement.slotRect(for: .bottomTrailing, in: window).origin
+                == CGPoint(x: 1_000 - 64 - 18, y: 700 - 64 - 18))
         // A window too small for the slot keeps it at the padding.
         #expect(
-            Placement.slotOrigin(for: .bottomTrailing, in: CGSize(width: 50, height: 50))
+            Placement.slotRect(for: .bottomTrailing, in: CGSize(width: 50, height: 50)).origin
                 == CGPoint(x: 18, y: 18))
+    }
+
+    /// The board's zoom corner in a 1000 x 700 host: the capsule and the
+    /// overview's place, 12 pt in from the corner.
+    private var zoomCorner: CGRect {
+        CGRect(x: 1_000 - 12 - 170, y: 700 - 12 - 126, width: 170, height: 126)
+    }
+
+    @Test("The orb sits above the board's zoom corner, on the same vertical line")
+    func avoidsChrome() {
+        typealias Placement = VoiceCompanionPlacement
+        let slot = Placement.slotRect(for: .bottomTrailing, in: window, avoiding: [zoomCorner])
+        #expect(
+            !slot.intersects(zoomCorner.insetBy(dx: -Placement.chromeGap, dy: -Placement.chromeGap))
+        )
+        #expect(slot.maxY <= zoomCorner.minY - Placement.chromeGap)
+        let trailingX: CGFloat = 1_000 - 64 - 18
+        #expect(slot.minX == trailingX, "\(slot)")
+        // Chrome in another corner does not move it.
+        let other = CGRect(x: 12, y: 12, width: 170, height: 126)
+        #expect(
+            Placement.slotRect(for: .bottomTrailing, in: window, avoiding: [other])
+                == Placement.slotRect(for: .bottomTrailing, in: window))
+        // A host too short to stack: beside the chrome instead.
+        let short = CGSize(width: 1_000, height: 200)
+        let low = CGRect(x: 1_000 - 12 - 170, y: 200 - 12 - 126, width: 170, height: 126)
+        let beside = Placement.slotRect(for: .bottomTrailing, in: short, avoiding: [low])
+        #expect(!beside.intersects(low))
+        #expect(beside.maxX <= low.minX)
     }
 
     @Test("A drag snaps to the quadrant of its predicted end")
     func dragSnap() {
         typealias Placement = VoiceCompanionPlacement
+        let bottomTrailing = Placement.slotRect(for: .bottomTrailing, in: window)
         #expect(
             Placement.corner(
-                afterDragFrom: .bottomTrailing, predicted: CGSize(width: -700, height: -100),
+                afterDragFrom: bottomTrailing, predicted: CGSize(width: -700, height: -100),
                 in: window) == .bottomLeading)
         #expect(
             Placement.corner(
-                afterDragFrom: .bottomTrailing, predicted: CGSize(width: -10, height: -500),
+                afterDragFrom: bottomTrailing, predicted: CGSize(width: -10, height: -500),
                 in: window) == .topTrailing)
         #expect(
-            Placement.corner(afterDragFrom: .topLeading, predicted: .zero, in: window)
-                == .topLeading)
+            Placement.corner(
+                afterDragFrom: Placement.slotRect(for: .topLeading, in: window), predicted: .zero,
+                in: window) == .topLeading)
     }
 
     @Test("Option-arrow moves to the adjacent corner; next goes clockwise")
@@ -296,16 +328,59 @@ struct VoicePresenceTests {
         #expect(Placement.untuckDelay == .milliseconds(400))
     }
 
-    @Test("The card goes above a bottom corner and beside a top one, toward the centre")
-    func cardAndPillSides() {
+    @Test("The card goes above a bottom corner and below a top one, in line with the orb")
+    func cardRect() {
         typealias Placement = VoiceCompanionPlacement
-        #expect(Placement.cardSide(for: .bottomTrailing) == .above)
-        #expect(Placement.cardSide(for: .bottomLeading) == .above)
-        #expect(Placement.cardSide(for: .topLeading) == .trailing)
-        #expect(Placement.cardSide(for: .topTrailing) == .leading)
-        #expect(Placement.pillSide(for: .bottomTrailing) == .leading)
-        #expect(Placement.pillSide(for: .bottomLeading) == .trailing)
-        #expect(Placement.pillSide(for: .topLeading) == .below)
+        let card = CGSize(width: Placement.cardMaxWidth, height: 40)
+        let bottom = Placement.slotRect(for: .bottomTrailing, in: window)
+        let above = Placement.cardRect(orb: bottom, card: card, corner: .bottomTrailing, in: window)
+        #expect(above.side == .above)
+        #expect(above.rect.maxY <= bottom.minY)
+        #expect(above.rect.maxX == bottom.maxX)
+        let top = Placement.slotRect(for: .topLeading, in: window)
+        let below = Placement.cardRect(orb: top, card: card, corner: .topLeading, in: window)
+        #expect(below.side == .below)
+        #expect(below.rect.minX == top.minX)
+    }
+
+    @Test("The pill never covers the orb and stays inside the host, at every width")
+    func pillStaysInside() {
+        typealias Placement = VoiceCompanionPlacement
+        let pill = CGSize(width: 260, height: 30)
+        for width in stride(from: 300.0, through: 1_600, by: 50) {
+            let host = CGSize(width: width, height: 600)
+            let bounds = CGRect(origin: .zero, size: host).insetBy(
+                dx: Placement.partMargin - 0.5, dy: Placement.partMargin - 0.5)
+            for corner in VoiceCompanionCorner.allCases {
+                let chrome = CGRect(
+                    x: width - 12 - 170, y: 600 - 12 - 126, width: 170, height: 126)
+                let orb = Placement.slotRect(for: corner, in: host, avoiding: [chrome])
+                let placed = Placement.pillRect(
+                    orb: orb, pill: pill, corner: corner, in: host, avoiding: [chrome])
+                #expect(!placed.rect.intersects(orb), "\(corner) at \(width)")
+                #expect(bounds.contains(placed.rect), "\(corner) at \(width)")
+            }
+        }
+        // In a wide host the pill opens toward the centre, beside the orb.
+        let orb = Placement.slotRect(for: .bottomTrailing, in: window)
+        let placed = Placement.pillRect(orb: orb, pill: pill, corner: .bottomTrailing, in: window)
+        #expect(placed.side == .leading)
+        #expect(placed.rect.maxX <= orb.minX)
+        #expect(placed.rect.midY == orb.midY)
+    }
+
+    @Test("The pill keeps off the card")
+    func pillAvoidsCard() {
+        typealias Placement = VoiceCompanionPlacement
+        let orb = Placement.slotRect(for: .bottomTrailing, in: window)
+        // A card beside the orb (a short host): the pill goes above instead.
+        let card = CGRect(x: orb.minX - 300, y: orb.minY - 4, width: 290, height: 72)
+        let placed = Placement.pillRect(
+            orb: orb, pill: CGSize(width: 200, height: 30), corner: .bottomTrailing, in: window,
+            card: card)
+        #expect(!placed.rect.intersects(card))
+        #expect(!placed.rect.intersects(orb))
+        #expect(placed.side == .above)
     }
 
     @Test("The corner key is per workspace, stable, and stores no path")

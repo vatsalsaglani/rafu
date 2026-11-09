@@ -323,6 +323,54 @@ struct VoiceSessionIntegrationTests {
         await fixture.voice.close()
     }
 
+    @Test("The timeline marks the start and each change of the microphone")
+    func timelineMarkers() async throws {
+        let fixture = try await VoiceFixture()
+        defer { TestDefaultsSuite.remove(fixture.suite) }
+        try await fixture.openLatched()
+        let voice = fixture.voice
+        #expect(
+            voice.timeline.rows(lane: .marker).map(\.title)
+                == ["Session started", "Listening. The mic is on."])
+        #expect(voice.hint == nil)
+        voice.toggleLatched()
+        #expect(voice.blobState == .paused)
+        #expect(voice.timeline.rows(lane: .marker).last?.title == "Paused by you")
+        voice.toggleLatched()
+        #expect(voice.timeline.rows(lane: .marker).last?.title == "Listening. The mic is on.")
+        let items = VoiceTimelineGrouping.items(events: voice.timeline.events, sessionOpen: true)
+        #expect(items.allSatisfy { if case .marker = $0 { true } else { false } })
+        await voice.close()
+    }
+
+    @Test("A delegation counts once as a completed task, after its last response")
+    func completedTask() async throws {
+        let fixture = try await VoiceFixture()
+        defer { TestDefaultsSuite.remove(fixture.suite) }
+        try await fixture.openLatched()
+        let voice = fixture.voice
+        fixture.transport.push(
+            #"{"type":"session.delegation.created","delegation":{"id":"del_task","target":"responses"}}"#
+        )
+        fixture.transport.push(
+            #"{"type":"response.event","event":{"type":"response.output_item.done","item":{"type":"function_call","call_id":"call_t","name":"note_create","arguments":"{\"title\":\"Plan\"}"}}}"#
+        )
+        fixture.transport.push(
+            #"{"type":"response.event","event":{"type":"response.completed","response":{"usage":{"input_tokens":10,"output_tokens":2}}}}"#
+        )
+        try await until("response.create") {
+            !fixture.transport.sent(type: "response.create").isEmpty
+        }
+        // The call's answer starts another response: not done yet.
+        #expect(voice.completedTasks == 0)
+        fixture.transport.push(
+            #"{"type":"response.event","event":{"type":"response.completed","response":{"usage":{"input_tokens":10,"output_tokens":2}}}}"#
+        )
+        try await until("done") { voice.completedTasks == 1 }
+        #expect(voice.completedTasks == 1)
+        await voice.close()
+    }
+
     @Test("Usage updates feed the cost meter")
     func usage() async throws {
         let fixture = try await VoiceFixture()
@@ -1367,7 +1415,12 @@ struct VoiceSilentTurnTests {
         try await until("mute") { !transport.sent(type: "session.input_audio.mute").isEmpty }
         await voice.audioSender?.value
         #expect(voice.blobState == .paused)
-        #expect(voice.hint == nil)
+        // Connected with the mic off: the card says so, and the timeline is
+        // not empty (the screenshot of 2026-11-10 showed "Nothing yet").
+        #expect(voice.hint == VoiceSession.connectedPausedHint)
+        let markers = voice.timeline.rows(lane: .marker).map(\.title)
+        #expect(markers.first == "Session started")
+        #expect(markers.dropFirst().first?.hasPrefix("Paused") == true)
         #expect(rows(voice, "Rafu did not hear you").isEmpty)
         let lines = try await transcriptLines(fixture)
         let turn = try #require(lines.first { $0["type"] as? String == "turn_audio" })
