@@ -80,9 +80,21 @@ final class VoiceAgentUpdates {
         announced = [:]
         boardID = nil
         policy = VoiceAgentUpdatePolicy()
+        lastSpoken = []
     }
 
-    func nextSentence(at now: Duration) -> String? { policy.nextSentence(at: now) }
+    /// The updates behind the newest spoken sentence (oldest first), for
+    /// the speech card's agent line.
+    private(set) var lastSpoken: [VoiceAgentUpdate] = []
+
+    func nextSentence(at now: Duration) -> String? {
+        let queued = policy.queue
+        guard let sentence = policy.nextSentence(at: now) else { return nil }
+        // `nextSentence` drops stale items first; what it spoke is what is
+        // left of the queue, in the same order.
+        lastSpoken = queued.filter { now - $0.queuedAt <= VoiceAgentUpdatePolicy.staleAfter }
+        return sentence
+    }
 
     /// Drops what waits. Used while the Settings toggle is off.
     func discardQueued() {

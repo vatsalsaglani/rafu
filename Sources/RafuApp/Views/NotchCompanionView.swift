@@ -141,7 +141,7 @@ struct CompanionWingsView: View {
             // An open voice session takes the mascot's place, so the strip
             // keeps its width (voice-control.md).
             if voice.blobState != .idle {
-                VoiceBlobView(session: voice)
+                VoiceNotchOrb(session: voice)
             } else if model.isMascotEnabled {
                 RafuMascotView(
                     state: model.mascotState, engaged: model.isStripExpanded, size: 20,

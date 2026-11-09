@@ -16,7 +16,9 @@ enum VoiceCloseReason: Equatable {
 ///
 /// Observation exposes small metadata only. The key, audio and transcripts
 /// never reach observable state (the timeline keeps at most 120 scalars of
-/// the user's own words, in memory, cleared on close). Only the opt-in debug
+/// the user's own words, in memory, cleared on close; the companion's live
+/// caption keeps at most 160 scalars of the current turn, in memory, cleared
+/// on close). Only the opt-in debug
 /// transcript (`VoiceDebugTranscript`) writes words to disk.
 @MainActor
 @Observable
@@ -83,6 +85,19 @@ final class VoiceSession {
     private(set) var activeBoardID: CanvasID?
     /// 0…1, written at most about 17 times a second while capturing.
     private(set) var inputLevel = 0.0
+    /// 0…1, Rafu's reply level from the output audio. Written only when it
+    /// moves by more than 0.02; 0 when Rafu is quiet.
+    private(set) var outputLevel = 0.0
+    /// The live words of the current turn for the speech card: yours while
+    /// you talk, Rafu's while Rafu speaks. At most 160 scalars, in memory
+    /// only, cleared on close.
+    private(set) var liveCaption: VoiceCaption?
+    /// The Confirm card that waits now, for the companion's inline ✓ and ✕.
+    private(set) var pendingConfirm: VoiceConfirmRequest?
+    /// Tool calls of the current delegation: done of total.
+    private(set) var turnProgress = VoiceTurnProgress()
+    /// The newest spoken agent update, for the speech card's agent line.
+    private(set) var agentLine: VoiceAgentLine?
     private(set) var timeline = VoiceTimeline()
     private(set) var lastError: String?
     /// A short tip after a turn Rafu did not hear or answer. Cleared by the
@@ -190,6 +205,7 @@ final class VoiceSession {
     @ObservationIgnored private var lastOutputEndMS: Int?
     /// Why the server closed the session; read by `close` for the error text.
     @ObservationIgnored private var remoteCloseReason: String?
+    @ObservationIgnored private var agentLineSequence = 0
 
     init(dependencies: Dependencies = .live) {
         self.dependencies = dependencies
@@ -542,6 +558,11 @@ final class VoiceSession {
         youRow = nil
         replyRow = nil
         inputLevel = 0
+        outputLevel = 0
+        liveCaption = nil
+        pendingConfirm = nil
+        turnProgress = VoiceTurnProgress()
+        agentLine = nil
         isClosing = false
         hint = nil
         currentTurn = nil
@@ -726,6 +747,7 @@ final class VoiceSession {
         currentTurn = nil
         isCapturing = false
         inputLevel = 0
+        setOutputLevel(0)
     }
 
     /// Updates the meter and the shared speech run; returns the frame's RMS.
@@ -760,6 +782,7 @@ final class VoiceSession {
             if transcript != nil {
                 noteInputTranscript(text, startMS: startMS, endMS: endMS)
             }
+            appendCaption(text, speaker: .you)
             if let youRow {
                 timeline.appendDetail(text, to: youRow)
             } else {
@@ -769,6 +792,7 @@ final class VoiceSession {
             }
         case .outputTranscriptDelta(let text, let startMS, let endMS):
             replyCharacters += text.count
+            appendCaption(text, speaker: .rafu)
             if transcript != nil {
                 noteOutputTranscript(text, startMS: startMS, endMS: endMS)
             }
@@ -779,6 +803,7 @@ final class VoiceSession {
             hint = nil
             noteServerTurnEvent(delegation: true)
             delegationCount += 1
+            turnProgress = VoiceTurnProgress()
             // A reply is coming: have the engine ready before its audio.
             _ = resumeEngineIfSuspended()
             clock.noteServerActivity(at: elapsed())
@@ -839,13 +864,15 @@ final class VoiceSession {
 
     private func handleOutputAudio(_ pcm: Data) {
         let now = elapsed()
-        let audible = VoiceAudioLevel.rms(pcm16: pcm) > VoiceAudioFormat.audibleOutputRMS
+        let rms = VoiceAudioLevel.rms(pcm16: pcm)
+        let audible = rms > VoiceAudioFormat.audibleOutputRMS
         // The server streams silence while the session is open; a stopped
         // engine skips it and restarts on the first audible delta.
         if isEngineSuspended {
             guard audible, resumeEngineIfSuspended() else { return }
         }
         playback?.enqueue(pcm)
+        setOutputLevel(audible ? VoiceAudioLevel.meterLevel(rms: rms) : 0)
         if audible {
             noteEngineUse()
             noteServerTurnEvent()
@@ -880,6 +907,7 @@ final class VoiceSession {
     private func endReply() {
         lastAudibleAt = nil
         updateAudioUntil = nil
+        setOutputLevel(0)
         if let replyRow {
             timeline.finish(
                 replyRow, endMS: milliseconds(elapsed()), detail: "\(replyCharacters) characters")
@@ -889,6 +917,25 @@ final class VoiceSession {
         apply(.replyEnded)
     }
 
+    // MARK: Presence
+
+    /// Writes the output level only when it moves enough to draw.
+    private func setOutputLevel(_ level: Double) {
+        guard abs(level - outputLevel) > 0.02 || (level == 0 && outputLevel != 0) else { return }
+        outputLevel = level
+    }
+
+    /// A new speaker starts a new caption; the same speaker adds to it.
+    private func appendCaption(_ text: String, speaker: VoiceSpeaker) {
+        if var caption = liveCaption, caption.speaker == speaker {
+            caption.append(text)
+            liveCaption = caption
+        } else {
+            let revision = (liveCaption?.revision ?? 0) &+ 1
+            liveCaption = VoiceCaption(speaker: speaker, text: text, revision: revision)
+        }
+    }
+
     // MARK: Tool calls
 
     /// Calls run one after another, in arrival order: "make three terminals"
@@ -896,6 +943,7 @@ final class VoiceSession {
     private func runCall(callID: String, name: String, arguments: String, measure: String?) {
         transcript?.record(.call(callID: callID, name: name, arguments: arguments))
         inFlightCalls += 1
+        turnProgress.total += 1
         clock.noteServerActivity(at: elapsed())
         noteEngineUse()
         let ticket = generation
@@ -944,7 +992,9 @@ final class VoiceSession {
         // timeline cuts the line to 120 scalars.
         let base = outcome.message.map { "\(outcome.summary): \($0)" } ?? outcome.summary
         let detail = measure.map { "\(base); \($0)" } ?? base
+        // TODO(merge): pass outcome: outcome.isError ? .failed : .ok
         timeline.finish(row, endMS: milliseconds(elapsed()), detail: detail)
+        turnProgress.done += 1
         clock.noteServerActivity(at: elapsed())
         noteServerTurnEvent(delegation: true)
         try? await client.send(
@@ -1184,6 +1234,10 @@ final class VoiceSession {
         }
         guard canSpeakUpdate(at: now), let sentence = agentUpdates.nextSentence(at: now)
         else { return }
+        if let newest = agentUpdates.lastSpoken.last {
+            agentLineSequence += 1
+            agentLine = VoiceAgentLine(update: newest, sequence: agentLineSequence)
+        }
         guard resumeEngineIfSuspended() else { return }
         updateAudioUntil = now + Self.updateAudioWindow
         checkInPending = true
@@ -1295,8 +1349,10 @@ final class VoiceSession {
             title: "Confirm \(request.tool.rawValue)")
         apply(.needsConfirm)
         cardDelegationIndex = delegationCount
+        pendingConfirm = request
         let answer = await confirmGate.ask(
             request, timeout: dependencies.confirmTimeout, present: dependencies.presentConfirm)
+        pendingConfirm = nil
         apply(.confirmResolved)
         transcript?.record(.confirm(tool: request.tool.rawValue, answer: answer.timelineWord))
         timeline.finish(row, endMS: milliseconds(elapsed()), detail: answer.timelineWord)
@@ -1313,6 +1369,16 @@ final class VoiceSession {
         guard confirmGate.isPending else { return .nothingPending }
         if answer != .cancel, delegationCount <= cardDelegationIndex { return .notHeard }
         return confirmGate.resolve(answer) ? .resolved : .nothingPending
+    }
+
+    /// A click on the companion's ✓ or ✕, or the Rafu menu's Approve and
+    /// Cancel items: straight to the same gate as the sheet, which resolves
+    /// once and closes the sheet. Unlike a spoken answer it needs no new
+    /// backend turn: the user acted.
+    @discardableResult
+    func answerConfirm(_ answer: VoiceConfirmAnswer) -> Bool {
+        guard confirmGate.isPending else { return false }
+        return confirmGate.resolve(answer)
     }
 
     func hasSessionGrant(_ key: String) -> Bool { sessionGrants.contains(key) }

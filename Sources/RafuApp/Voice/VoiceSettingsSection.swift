@@ -14,6 +14,7 @@ struct VoiceSettingsSection: View {
         VoiceCostMeter.defaultCapDollars)
     @AppStorage(VoicePreferences.debugTranscriptKey) private var keepsDebugTranscript = false
     @AppStorage(VoicePreferences.agentUpdatesKey) private var speaksAgentUpdates = true
+    @AppStorage(VoicePreferences.keepsCompanionKey) private var keepsCompanion = false
     @State private var microphone = VoiceMicrophonePermission.access
     @State private var isResetPresented = false
     @State private var chordConflict = false
@@ -40,10 +41,14 @@ struct VoiceSettingsSection: View {
                 .foregroundStyle(.secondary)
             }
             Text(
-                "Click the voice blob or choose Start Listening to keep the microphone open. Rafu checks in after 45 seconds of silence, pauses at 60, and closes the session after 90."
+                "Click Rafu's orb or choose Start Listening to keep the microphone open. Rafu checks in after 45 seconds of silence, pauses at 60, and closes the session after 90."
             )
             .font(.caption)
             .foregroundStyle(.secondary)
+            Toggle("Keep Rafu on the canvas when voice is off", isOn: $keepsCompanion)
+                .help(
+                    "Shows a small, still orb in a corner of each window while no voice session is open."
+                )
         } header: {
             Text("Talking to Rafu")
         } footer: {

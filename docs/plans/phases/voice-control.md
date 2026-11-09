@@ -18,8 +18,10 @@
   `CanvasAgentProvenance.swift` (voice vendor, optional `cli`, `symbol`),
   `CanvasCardChrome.swift` (badge symbol), `RafuTerminalView.swift` and
   `WorkspaceTerminalController.swift` (`recentOutputLines`),
-  `NotchCompanionView.swift` (blob in the left wing), `WorkspaceStatusBar.swift`
-  (voice item), `SettingsPaneNavigation.swift` and `RafuSettingsView.swift`
+  `NotchCompanionView.swift` (orb in the left wing), `WorkspaceStatusBar.swift`
+  (voice item), `WorkspaceWindowView.swift` (companion overlay, model, focused
+  value), `CanvasCardViews.swift` (card-drag report for the companion tuck),
+  `RafuMotion.swift` (companion tokens), `SettingsPaneNavigation.swift` and `RafuSettingsView.swift`
   (Voice pane), `RafuAppCommands.swift` (menu items), `ExternalOpenRequests.swift`
   (hotkey install; 1b: voice close on quit), `script/build_and_run.sh`
   (microphone usage string), `SettingsPresentationTests.swift`.
@@ -133,7 +135,7 @@
 5. Ask a long question and talk over the reply. Playback stops within about
    1.5 s (with echo cancellation on; note speakers vs. headphones).
 6. Two windows with an Ensemble each: voice acts on the key window's board.
-7. Reduce Motion on: the blob is still. VoiceOver: the status item reads the
+7. Reduce Motion on: the orb is still. VoiceOver: the status item reads the
    state.
 8. Deny the microphone once: the blob shows "Microphone access is off";
    Settings ▸ Voice offers "Open System Settings".
@@ -253,6 +255,35 @@ Open manual checks (Rafu Lightning, not done):
 - [ ] Working Claude: the reply says busy and offers to queue; accepted, the change runs after the Stop.
 - [ ] Codex: "Use gpt-5 with low reasoning in Tests" → destructive Confirm → Codex quits and resumes with its history.
 - [ ] Record the `/status` output of both CLIs and the `/exit` / `/quit` results in the reference note.
+
+#### The voice companion (2026-11-10, [`voice-presence.md`](../../references/voice-presence.md))
+
+31. Two windows. Latch a session: the orb appears in both. Drag it to all four
+    corners in each window, then relaunch Rafu Lightning: each window's
+    workspace keeps its corner. ⌥ + arrow keys on the focused orb move it.
+32. Drag an Ensemble card under the orb: it shrinks to a dot and the card and
+    pill hide; it returns about 0.4 s after you drop the card. Pan and zoom
+    the board: the orb stays fixed. Switch to a file tab: the orb stays.
+33. Hover the orb: the pill appears after about 0.15 s; each icon has a
+    tooltip; Space on the focused orb toggles it. Talk: "You: …" shows; Rafu's
+    reply shows as a moving window of words; the card hides 4 s after the last
+    word (not while you point at it).
+34. A removal in Ask mode: the card shows ✓ and ✕ and the sheet shows too.
+    Click ✕ on the card: the sheet closes; nothing is removed. Repeat with
+    Rafu ▸ Cancel Voice Request (⌃⌥⇧Escape) and Approve (no shortcut for a
+    removal).
+35. An agent finishes while the companion shows: the card shows the CLI
+    letter and "Codex in <title> is done"; the chevron shows that card.
+36. Reduce Motion: the orb is still and the snap is instant. Reduce
+    Transparency and Increase Contrast: solid card, strong hairline, 2 pt ring.
+    VoiceOver reads "Rafu voice" and the state, the actions, and the pill.
+37. Switch themes: Indigo, Khadi, a light and a dark bundled theme, and a
+    custom theme from Settings ▸ Appearance. The orb, ring, card, pill and
+    status dot follow each theme. The status dot is a ring while idle and
+    filled while a session is open; the notch wing shows the small orb.
+38. CPU (`top -l 50 -s 1 -pid $(pgrep -x RafuLightning)`): idle 0.0 %
+    (also with "Keep Rafu on the canvas" on), listening < 3 %, speaking < 4 %,
+    screen locked 0.0 %.
 
 ### Addition: `compose_view` (2026-11-08)
 
