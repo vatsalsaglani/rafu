@@ -139,6 +139,13 @@ folder-trust dialog first can use most of 30 s. The watch now logs, with states
 only, whether it started and why it ended (`docs/references/canvas-live-sessions.md`,
 "Diagnostics"). All other rules stand.
 
+## Cross-reference (2026-11-10): `agent_configure`
+
+The MCP server `instructions` string gained one sentence about `agent_configure`. It adds no bridge operation. The
+tool is `sensitive` (like `terminal_send`), keeps the creator rule, and always asks for a resume; see the ADR 0035
+amendment "`agent_configure`" and
+[`../references/agent-cli-commands.md`](../references/agent-cli-commands.md).
+
 ## Cross-reference (2026-11-08): view tools
 
 The MCP server `instructions` string gained one sentence about `view_render` and

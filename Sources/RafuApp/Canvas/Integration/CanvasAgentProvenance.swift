@@ -74,7 +74,7 @@ nonisolated enum CanvasAgentNoticeText {
         case .nodeUpdate: return updateVerb(call)
         case .ensembleDescribe, .noteRead, .nodeRemove, .terminalStart, .terminalSend,
             .edgeCreate, .edgeRemove, .linkSetState, .actionStatus, .iconSearch, .export,
-            .diagramBuild:
+            .diagramBuild, .agentConfigure:
             return nil
         }
     }

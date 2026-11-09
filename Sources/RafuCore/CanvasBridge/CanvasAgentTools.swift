@@ -126,6 +126,7 @@ public nonisolated enum CanvasAgentTool: String, CaseIterable, Codable, Sendable
     case diagramBuild = "diagram_build"
     case viewRender = "view_render"
     case viewUpdate = "view_update"
+    case agentConfigure = "agent_configure"
 
     /// The words shown in the approval and the activity log.
     public var actionTitle: String {
@@ -151,6 +152,7 @@ public nonisolated enum CanvasAgentTool: String, CaseIterable, Codable, Sendable
         case .diagramBuild: "Build a diagram"
         case .viewRender: "Show a view"
         case .viewUpdate: "Change a view"
+        case .agentConfigure: "Change an agent's model or effort"
         }
     }
 }
@@ -212,6 +214,16 @@ public nonisolated struct CanvasAgentToolCall: Codable, Hashable, Sendable {
     public var viewPatches: String?
     /// `view_update`: restore the view's initial state (Reset View).
     public var reset: Bool?
+    /// `agent_configure` and `terminal_create`: an allowlisted model token.
+    public var model: String?
+    /// `agent_configure` and `terminal_create`: an allowlisted effort token.
+    public var effort: String?
+    /// `agent_configure`: `in_place` or `resume`. The app fills in the
+    /// agent's default before it asks the user, so the question names it.
+    public var strategy: String?
+    /// `agent_configure`: when the agent is mid-turn, keep the change and run
+    /// it when the turn ends.
+    public var queue: Bool?
 
     public init(tool: CanvasAgentTool) { self.tool = tool }
 
@@ -249,7 +261,7 @@ public nonisolated struct CanvasAgentToolCall: Codable, Hashable, Sendable {
     public var risk: CanvasAgentRisk {
         switch tool {
         case .ensembleDescribe, .noteRead, .actionStatus, .iconSearch: .read
-        case .nodeRemove, .edgeRemove, .terminalStart, .terminalSend, .export:
+        case .nodeRemove, .edgeRemove, .terminalStart, .terminalSend, .export, .agentConfigure:
             .sensitive
         case .terminalCreate: startsProcess ? .sensitive : .edit
         default: .edit
@@ -284,6 +296,15 @@ public nonisolated struct CanvasAgentToolCall: Codable, Hashable, Sendable {
         add("Label", label)
         add("Folder", cwd)
         add("Agent", agent)
+        add("Model", model)
+        add("Effort", effort)
+        if let strategy {
+            lines.append(
+                strategy == CanvasAgentConfigureStrategy.resume.rawValue
+                    ? "Restart: the agent quits and resumes the same conversation"
+                    : "In place: Rafu types the change into the running agent")
+        }
+        if queue == true { lines.append("Queue: run when the agent's turn ends") }
         if link == true { lines.append("Link: live message link to this terminal") }
         if let command { add("Command", CanvasAgentShell.commandLine(command)) }
         add("State", state)
@@ -331,7 +352,9 @@ public nonisolated struct CanvasAgentToolCall: Codable, Hashable, Sendable {
         case .nodeUpdate: return ["node_id", "title", "x", "y", "width", "height"]
         case .nodeRemove, .terminalStart: return ["node_id"]
         case .terminalCreate:
-            return placement.union(["title", "cwd", "agent", "command", "prompt", "link"])
+            return placement.union([
+                "title", "cwd", "agent", "command", "prompt", "link", "model", "effort",
+            ])
         case .terminalSend: return ["node_id", "text", "command"]
         case .edgeCreate: return ["from", "to", "kind", "label"]
         case .edgeRemove: return ["edge_id"]
@@ -344,6 +367,7 @@ public nonisolated struct CanvasAgentToolCall: Codable, Hashable, Sendable {
         case .diagramBuild: return placement.union(["spec"])
         case .viewRender: return placement.union(["title", "spec"])
         case .viewUpdate: return ["node_id", "spec", "patches", "reset"]
+        case .agentConfigure: return ["node_id", "model", "effort", "mode", "strategy", "queue"]
         }
     }
 
@@ -444,6 +468,13 @@ public nonisolated struct CanvasAgentToolCall: Codable, Hashable, Sendable {
             guard let flag = value as? Bool else { throw .invalidArgument("reset") }
             call.reset = flag
         }
+        call.model = try string("model")?.lowercased()
+        call.effort = try string("effort")?.lowercased()
+        call.strategy = try string("strategy")?.lowercased()
+        if let value = arguments["queue"] {
+            guard let flag = value as? Bool else { throw .invalidArgument("queue") }
+            call.queue = flag
+        }
         if call.label == nil, call.tool == .nodeCreate, let text = call.title,
             call.kind == "service_icon"
         {
@@ -529,7 +560,23 @@ public nonisolated struct CanvasAgentToolCall: Codable, Hashable, Sendable {
             throw .invalidArgument("length")
         }
         if let state, !Self.linkStates.contains(state) { throw .invalidArgument("state") }
-        if let mode, CanvasAgentNoteMode(rawValue: mode) == nil { throw .invalidArgument("mode") }
+        if let mode {
+            let valid =
+                tool == .agentConfigure
+                ? CanvasAgentConfigurePlan.allModes.contains(mode)
+                : CanvasAgentNoteMode(rawValue: mode) != nil
+            if !valid { throw .invalidArgument("mode") }
+        }
+        if let model, !CanvasAgentConfigurePlan.isValidModel(model) {
+            throw .invalidArgumentReason(
+                key: "model", reason: CanvasAgentConfigureRefusal.invalidModel.message)
+        }
+        if let effort, !CanvasAgentConfigurePlan.allEfforts.contains(effort) {
+            throw .invalidArgument("effort")
+        }
+        if let strategy, CanvasAgentConfigureStrategy(rawValue: strategy) == nil {
+            throw .invalidArgument("strategy")
+        }
         try validateDiagramFieldBounds()
     }
 
@@ -595,10 +642,24 @@ public nonisolated struct CanvasAgentToolCall: Codable, Hashable, Sendable {
                 }
             }
             if agent != nil, command != nil { throw .invalidArgument("command") }
+            if model != nil || effort != nil {
+                guard let agent, let known = CanvasAgentConfigureAgent(agent: agent) else {
+                    throw .invalidArgumentReason(
+                        key: model != nil ? "model" : "effort",
+                        reason: "model and effort need agent claude or codex")
+                }
+                if let effort, !known.efforts.contains(effort) || effort == "auto" {
+                    throw .invalidArgumentReason(
+                        key: "effort",
+                        reason: "\(known.displayName) starts with effort "
+                            + known.efforts.filter { $0 != "auto" }.joined(separator: ", "))
+                }
+            }
             // The prompt becomes one argument of the typed launch line. Refuse here,
             // before any node exists, with the reason.
             if let agent, prompt != nil,
-                let argv = CanvasAgentLaunch.argv(agent: agent, prompt: prompt),
+                let argv = CanvasAgentLaunch.argv(
+                    agent: agent, prompt: prompt, model: model, effort: effort),
                 let refusal = CanvasAgentShell.refusal(for: argv)
             {
                 throw .invalidArgumentReason(key: "prompt", reason: refusal.reason(isPrompt: true))
@@ -639,6 +700,9 @@ public nonisolated struct CanvasAgentToolCall: Codable, Hashable, Sendable {
             if seconds != nil || fps != nil, format != "gif" { throw .invalidArgument("seconds") }
         case .diagramBuild: try require(diagram, "spec")
         case .viewRender: try require(viewSpec, "spec")
+        case .agentConfigure:
+            try require(nodeID, "node_id")
+            if model == nil, effort == nil, mode == nil { throw .missingArgument("model") }
         case .viewUpdate:
             try require(nodeID, "node_id")
             let given = [viewSpec != nil, viewPatches != nil, reset == true].filter { $0 }.count
@@ -959,14 +1023,31 @@ public nonisolated enum CanvasAgentLaunch {
     /// The argument vector that starts the agent with an optional first task.
     /// Control characters in the task become spaces so it stays one line.
     public static func argv(agent: String, prompt: String?) -> [String]? {
+        argv(agent: agent, prompt: prompt, model: nil, effort: nil)
+    }
+
+    /// The launch vector with model and effort flags before the task:
+    /// Claude `--model X --effort Y`, Codex `-m X -c model_reasoning_effort="Y"`.
+    /// nil when model or effort is given for another agent or fails its
+    /// allowlist; `auto` is not a launch effort.
+    public static func argv(agent: String, prompt: String?, model: String?, effort: String?)
+        -> [String]?
+    {
         guard let executable = executable(for: agent) else { return nil }
-        guard let prompt else { return [executable] }
+        var head = [executable]
+        if model != nil || effort != nil {
+            guard let known = CanvasAgentConfigureAgent(agent: agent) else { return nil }
+            if let model, !CanvasAgentConfigurePlan.isValidModel(model) { return nil }
+            if let effort, !known.efforts.contains(effort) || effort == "auto" { return nil }
+            head += known.flags(model: model, effort: effort, resume: false)
+        }
+        guard let prompt else { return head }
         guard acceptsPrompt(agent) else { return nil }
         let line = CanvasAgentText.singleLine(
             prompt, maxBytes: CanvasAgentToolCall.maximumPromptBytes
         )
         .trimmingCharacters(in: .whitespaces)
-        return line.isEmpty ? [executable] : [executable, line]
+        return line.isEmpty ? head : head + [line]
     }
 }
 
@@ -1069,6 +1150,14 @@ public nonisolated struct CanvasAgentToolResult: Codable, Hashable, Sendable {
     /// `state` in `ensemble_describe`: `running` or `stopped`. `stopped` means
     /// any line is queued, not typed.
     public var state: String?
+    /// `agent_configure`: `in_place`, `resume` or `queued`.
+    public var strategy: String?
+    /// `agent_configure`: true when the agent's answer in the terminal names
+    /// the new value. False is "not seen", not "failed".
+    public var confirmed: Bool?
+    /// `agent_configure`: the newest terminal lines after the change,
+    /// scrubbed of secrets, at most 200 characters.
+    public var readback: String?
 
     public init(status: Status = .ok, message: String? = nil) {
         self.status = status
@@ -1287,6 +1376,14 @@ public nonisolated enum CanvasAgentToolCatalog {
                             "string",
                             "First task for claude or codex, typed as one argument of the launch line: at most \(CanvasAgentToolCall.maximumCommandArgumentBytes) bytes, newlines become spaces. For a longer brief write a file or a note and pass a one-line prompt that names the path or note title and what to do with it.",
                             ["maxLength": CanvasAgentToolCall.maximumCommandArgumentBytes]),
+                        "model": property(
+                            "string",
+                            "Optional model for claude (--model) or codex (-m), for example sonnet or gpt-5. Lowercase letters, digits, '.', '-', '_'."
+                        ),
+                        "effort": property(
+                            "string",
+                            "Optional effort for claude (--effort: low, medium, high, xhigh, max) or codex (model_reasoning_effort: low, medium, high).",
+                            ["enum": ["low", "medium", "high", "xhigh", "max"]]),
                         "link": property(
                             "boolean",
                             "Also add a message link from your node to the new terminal, Paused until you call link_set_state live. Do this for a claude or codex peer; the link turns Live when both run an agent."
@@ -1363,8 +1460,41 @@ public nonisolated enum CanvasAgentToolCatalog {
                     required: ["request_id"])
             )
         case .viewRender, .viewUpdate: return viewDefinition(for: tool)
+        case .agentConfigure: return configureDefinition()
         default: return diagramDefinition(for: tool)
         }
+    }
+
+    private static func configureDefinition() -> (String, [String: Any]) {
+        let efforts = CanvasAgentConfigureAgent.allCases.map {
+            "\($0.rawValue): \($0.efforts.joined(separator: ", "))"
+        }.joined(separator: "; ")
+        let modes = CanvasAgentConfigureAgent.allCases.map {
+            "\($0.rawValue): \($0.modes.joined(separator: ", "))"
+        }.joined(separator: "; ")
+        return (
+            "Change the model, effort or mode of a claude or codex agent running in a terminal node, also in the middle of its conversation. Claude Code changes model and effort in place (Rafu types /model and /effort); a mode change, and every Codex change, uses strategy resume: the agent quits and resumes the same conversation with the new flags. Refused with agent_busy while the agent is mid-turn; pass queue true to run the change when the turn ends. The result has strategy (in_place, resume or queued), confirmed (the terminal showed the new value) and readback (the newest terminal lines, scrubbed). Say whether it was confirmed; never retry on your own. Only a terminal you created. Asks the user unless Agent control is Allow; a resume always asks.",
+            schema(
+                [
+                    "node_id": nodeID,
+                    "model": property(
+                        "string",
+                        "Model name or alias, for example sonnet, opus or gpt-5. Lowercase letters, digits, '.', '-', '_'; at most 64 characters."
+                    ),
+                    "effort": property(
+                        "string", "Reasoning effort. \(efforts).",
+                        ["enum": CanvasAgentConfigurePlan.allEfforts.sorted()]),
+                    "mode": property(
+                        "string", "Permission or sandbox mode (resume only). \(modes).",
+                        ["enum": CanvasAgentConfigurePlan.allModes.sorted()]),
+                    "strategy": property(
+                        "string",
+                        "in_place (Claude Code only) or resume. Default: in_place for Claude Code, resume for Codex.",
+                        ["enum": CanvasAgentConfigureStrategy.allCases.map(\.rawValue)]),
+                    "queue": property(
+                        "boolean", "If the agent is mid-turn, run the change when the turn ends."),
+                ], required: ["node_id"])
+        )
     }
 
     private static func viewDefinition(for tool: CanvasAgentTool) -> (String, [String: Any]) {

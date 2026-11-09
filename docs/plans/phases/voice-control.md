@@ -237,6 +237,23 @@ checked live; turn on the debug transcript first):
     hooks connected, the toggle shows the connect hint. Talk while an agent
     finishes: Rafu waits until you stop.
 
+### Addition: `agent_configure` (2026-11-10, Phase B)
+
+Delivered on a branch: voice and MCP can change the model, effort or mode of a running Claude Code or Codex agent,
+also mid-conversation, and `terminal_create` takes `model` and `effort` at launch (see
+[`agent-cli-commands.md`](../../references/agent-cli-commands.md)). Owned paths:
+`Sources/RafuCore/CanvasBridge/CanvasAgentConfigure.swift`,
+`Sources/RafuApp/Canvas/Integration/CanvasAgentConfigureRunner.swift`,
+`Sources/RafuApp/Canvas/Integration/CanvasAgentActions+Configure.swift`. Not in scope: the Codex picker drive (B2)
+and a private Codex app-server route (B3).
+
+Open manual checks (Rafu Lightning, not done):
+- [ ] Idle Claude, Ask: "Switch Build to Sonnet, low effort" → Confirm → `/model sonnet` and `/effort low` typed;
+      the reply says whether the terminal confirmed it; the conversation continues.
+- [ ] Working Claude: the reply says busy and offers to queue; accepted, the change runs after the Stop.
+- [ ] Codex: "Use gpt-5 with low reasoning in Tests" → destructive Confirm → Codex quits and resumes with its history.
+- [ ] Record the `/status` output of both CLIs and the `/exit` / `/quit` results in the reference note.
+
 ### Addition: `compose_view` (2026-11-08)
 
 Delivered on `main`: the voice backend tool `compose_view` composes a view from Rafu-owned candidates with the OpenAI
