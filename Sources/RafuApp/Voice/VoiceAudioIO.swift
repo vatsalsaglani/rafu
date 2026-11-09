@@ -55,29 +55,54 @@ final class VoiceAudioIO: VoiceAudioCapturing, VoiceAudioPlaying {
 
     init() {}
 
+    /// Builds and starts the engine with echo cancellation; when that engine
+    /// does not start, builds a new one without it. Order matters: voice
+    /// processing is turned on only after the source → main mixer → output
+    /// graph exists. Turned on first (macOS 27, MacBook Air built-in mic and
+    /// speakers), the output hardware format reads 0 ch / 0 Hz and `start()`
+    /// fails with -10875 (`kAUInitialize` on the output node).
     func startPlayback() throws {
         guard engine == nil else { return }
-        let engine = AVAudioEngine()
-        let input = engine.inputNode
-        // Echo cancellation. Some devices refuse it; then the session runs
-        // without it and local barge-in relies on the RMS threshold.
         do {
-            try input.setVoiceProcessingEnabled(true)
-            voiceProcessingEnabled = true
+            try startEngine(voiceProcessing: true)
         } catch {
-            voiceProcessingEnabled = false
+            // Voice writes no logs (VoiceSourcePolicyTests). When this also
+            // fails, the session's blob reason is the only report.
+            try startEngine(voiceProcessing: false)
         }
+    }
+
+    private func startEngine(voiceProcessing: Bool) throws {
         guard
             let format = AVAudioFormat(
                 commonFormat: .pcmFormatFloat32, sampleRate: VoiceAudioFormat.sampleRate,
                 channels: 1, interleaved: false)
         else { throw VoiceAudioError.converter }
+        let engine = AVAudioEngine()
         let ring = VoicePlaybackRing()
         let source = Self.makeSource(format: format, ring: ring)
         engine.attach(source)
         engine.connect(source, to: engine.mainMixerNode, format: format)
+        // Echo cancellation. Some devices refuse it; then the session runs
+        // without it and local barge-in relies on the RMS threshold.
+        var processing = false
+        if voiceProcessing {
+            do {
+                try engine.inputNode.setVoiceProcessingEnabled(true)
+                processing = true
+            } catch {
+                processing = false
+            }
+        }
         engine.prepare()
-        try engine.start()
+        do {
+            try engine.start()
+        } catch {
+            engine.stop()
+            engine.detach(source)
+            throw error
+        }
+        voiceProcessingEnabled = processing
         self.engine = engine
         self.source = source
         self.ring = ring

@@ -135,6 +135,25 @@ other than `response.output_item.done` with `item.type == "function_call"` and
   only while the key is held or the session is latched. `setVoiceProcessingEnabled(true)` may
   fail on some devices; Rafu then runs without it and disables barge-in
   (Rafu's own voice from the speakers would cut itself).
+- **Turn voice processing on after the graph exists (verified 2026-11-09,
+  macOS 27, MacBook Air built-in mic and speakers, Swift 6.4.2).** Calling
+  `inputNode.setVoiceProcessingEnabled(true)` on a fresh `AVAudioEngine`
+  *before* `attach(source)` / `connect(source, to: mainMixerNode)` succeeds,
+  but the output hardware format then reads 0 ch / 0 Hz and `start()` throws
+  `com.apple.coreaudio.avfaudio -10875` (`PerformCommand(*outputNode,
+  kAUInitialize)`). The session showed "Audio is unavailable". Building the
+  graph first and then enabling voice processing starts cleanly (output
+  2 ch / 48 kHz). Tapping or connecting the input node first does not help.
+  With voice processing the input node reports 9 channels at 48 kHz;
+  `AVAudioConverter` to 24 kHz mono with `downmix = true` gets
+  `channelMap [0]`, the processed voice channel. `VoiceAudioIO.startPlayback`
+  builds the graph first and, when the engine still does not start, builds a
+  new engine without voice processing (barge-in off). Voice writes no logs
+  (`VoiceSourcePolicyTests`); the only report is the status-item tooltip
+  ("Rafu voice: <reason>"), and the timeline is cleared at teardown, so ask
+  the user to hover over "Voice off". Reproduce with a standalone `swiftc -O`
+  program that enables voice processing before and after connecting an
+  `AVAudioSourceNode` to the main mixer.
 - **Capture starts at the key press, not at `session.started`.** The socket
   needs ~1.2 s; a push-to-talk user speaks at once. The capture stream buffers
   the newest 2 s (100 frames) and is sent after `session.started`, even when
