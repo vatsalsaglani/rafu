@@ -159,7 +159,8 @@ private struct VoiceFixture {
     init(
         key: String? = "test-key", microphone: Bool = true, capDollars: Int? = nil,
         transport: ScriptedLiveTransport = ScriptedLiveTransport(),
-        confirmTimeout: Duration = .seconds(30), transcriptDirectory: URL? = nil
+        confirmTimeout: Duration = .seconds(30), transcriptDirectory: URL? = nil,
+        agentActivity: VoiceAgentActivitySource? = nil
     ) async throws {
         let scratch = scratch
         suite = TestDefaultsSuite.name("dev.rafu.voice-tests")
@@ -202,6 +203,7 @@ private struct VoiceFixture {
         dependencies.presentConfirm = confirm.presenter
         dependencies.confirmTimeout = confirmTimeout
         dependencies.debugTranscriptDirectory = transcriptDirectory
+        if let agentActivity { dependencies.agentActivity = agentActivity }
         voice = VoiceSession(dependencies: dependencies)
     }
 
@@ -1494,5 +1496,241 @@ struct VoiceSilentTurnTests {
         #expect((failure["domain"] as? String)?.contains("VoiceAudioError") == true)
         #expect(failure["code"] is Int)
         #expect(lines.count(where: { $0["type"] as? String == "audio_engine" }) == 2)
+    }
+}
+
+// MARK: Agent updates
+
+/// Stands in for the hook store: one counter to observe and the signals.
+@MainActor
+@Observable
+private final class FakeAgentActivity {
+    var revision = 0
+    @ObservationIgnored var signals: [VoiceAgentSignal] = []
+    /// How often the session read the signals: a scan happened.
+    @ObservationIgnored private(set) var signalReads = 0
+
+    var source: VoiceAgentActivitySource {
+        VoiceAgentActivitySource(
+            revision: { self.revision },
+            signals: { _ in
+                self.signalReads += 1
+                return self.signals
+            })
+    }
+
+    /// The agent's state changed: new signals, and the counter moves.
+    func publish(_ signals: [VoiceAgentSignal]) {
+        self.signals = signals
+        revision += 1
+    }
+
+    static func signal(
+        _ card: String, title: String = "Build", agent: String = "Claude Code",
+        state: AgentSessionState, reply: UUID? = nil, row: UUID = UUID(), preview: String? = nil
+    ) -> VoiceAgentSignal {
+        VoiceAgentSignal(
+            cardID: card, title: title, agent: agent, sessionRowID: row, state: state,
+            replyEventID: reply, preview: preview)
+    }
+}
+
+@Suite("Voice agent updates in a session")
+@MainActor
+struct VoiceAgentUpdateSessionTests {
+    private func commentary(_ fixture: VoiceFixture) throws -> [String] {
+        try fixture.transport.sent(type: "session.commentary.append").map {
+            try #require(try json($0)["content"] as? String)
+        }
+    }
+
+    @Test("A reply gives exactly one commentary, after the quiet gate")
+    func replySpeaksOnce() async throws {
+        let fake = FakeAgentActivity()
+        let row = UUID()
+        fake.signals = [FakeAgentActivity.signal("n1", state: .working, row: row)]
+        let fixture = try await VoiceFixture(agentActivity: fake.source)
+        defer { TestDefaultsSuite.remove(fixture.suite) }
+        let voice = fixture.voice
+        try await fixture.openLatched()
+        #expect(voice.isObservingAgents)
+        fake.publish([
+            FakeAgentActivity.signal(
+                "n1", state: .finished, reply: UUID(), row: row,
+                preview: "Fixed the login bug. Added a test.")
+        ])
+        try await until("queued") { voice.queuedAgentUpdates == 1 }
+        // The session just opened: local speech is too recent.
+        #expect(fixture.transport.sent(type: "session.commentary.append").isEmpty)
+        voice.tick(at: .seconds(5))
+        try await until("commentary") {
+            fixture.transport.sent(type: "session.commentary.append").count == 1
+        }
+        #expect(voice.queuedAgentUpdates == 0)
+        voice.tick(at: .seconds(6))
+        voice.tick(at: .seconds(30))
+        await voice.close()
+        let spoken = try commentary(fixture)
+        #expect(spoken == ["Claude Code in “Build” is done. It says: Fixed the login bug."])
+        // No backend turn and no instruction.
+        #expect(fixture.transport.sent(type: "response.create").isEmpty)
+        #expect(fixture.transport.sent(type: "session.instructions.append").isEmpty)
+        let row1 = voice.timeline.rows(lane: .board).first { $0.title == "Agent update" }
+        #expect(row1?.detail.contains("Claude Code in") == true)
+    }
+
+    @Test("A reply that existed when the session opened is not announced")
+    func baseline() async throws {
+        let fake = FakeAgentActivity()
+        fake.signals = [FakeAgentActivity.signal("n1", state: .finished, reply: UUID())]
+        let fixture = try await VoiceFixture(agentActivity: fake.source)
+        defer { TestDefaultsSuite.remove(fixture.suite) }
+        try await fixture.openLatched()
+        // The same reply seen again (the counter moved for another card).
+        let readsBefore = fake.signalReads
+        fake.publish(fake.signals)
+        try await until("scanned") { fake.signalReads > readsBefore }
+        fixture.voice.tick(at: .seconds(5))
+        #expect(fixture.voice.queuedAgentUpdates == 0)
+        await fixture.voice.close()
+        #expect(fixture.transport.sent(type: "session.commentary.append").isEmpty)
+    }
+
+    @Test("Approval and waiting are spoken; two agents share one sentence")
+    func coalescesTwoAgents() async throws {
+        let fake = FakeAgentActivity()
+        fake.signals = [
+            FakeAgentActivity.signal("n1", state: .working),
+            FakeAgentActivity.signal("n2", title: "Tests", agent: "Codex", state: .working),
+        ]
+        let fixture = try await VoiceFixture(agentActivity: fake.source)
+        defer { TestDefaultsSuite.remove(fixture.suite) }
+        let voice = fixture.voice
+        try await fixture.openLatched()
+        fake.publish([
+            FakeAgentActivity.signal("n1", state: .finished, reply: UUID()),
+            FakeAgentActivity.signal(
+                "n2", title: "Tests", agent: "Codex", state: .waitingForPermission),
+        ])
+        try await until("queued") { voice.queuedAgentUpdates == 2 }
+        voice.tick(at: .seconds(5))
+        try await until("commentary") {
+            fixture.transport.sent(type: "session.commentary.append").count == 1
+        }
+        await voice.close()
+        #expect(
+            try commentary(fixture)
+                == ["Claude Code in “Build” is done. Codex in “Tests” needs your approval."])
+    }
+
+    @Test("No update while a Confirm card waits")
+    func heldByConfirm() async throws {
+        let fake = FakeAgentActivity()
+        fake.signals = [FakeAgentActivity.signal("n1", state: .working)]
+        let fixture = try await VoiceFixture(agentActivity: fake.source)
+        defer { TestDefaultsSuite.remove(fixture.suite) }
+        let voice = fixture.voice
+        try await fixture.openLatched()
+        let call = Task { await fixture.run("node_remove", #"{"node_id":"Review"}"#) }
+        try await until("card") { fixture.confirm.requests.count == 1 }
+        fake.publish([FakeAgentActivity.signal("n1", state: .finished, reply: UUID())])
+        try await until("queued") { voice.queuedAgentUpdates == 1 }
+        voice.tick(at: .seconds(5))
+        #expect(voice.queuedAgentUpdates == 1)
+        #expect(fixture.transport.sent(type: "session.commentary.append").isEmpty)
+        fixture.confirm.click(.cancel)
+        _ = await call.value
+        await voice.close()
+        #expect(fixture.transport.sent(type: "session.commentary.append").isEmpty)
+    }
+
+    @Test("No update while local speech is heard; it waits for a later tick")
+    func heldBySpeech() async throws {
+        let fake = FakeAgentActivity()
+        fake.signals = [FakeAgentActivity.signal("n1", state: .working)]
+        let fixture = try await VoiceFixture(agentActivity: fake.source)
+        defer { TestDefaultsSuite.remove(fixture.suite) }
+        let voice = fixture.voice
+        try await fixture.openLatched()
+        var speech = Data()
+        for _ in 0..<VoiceAudioFormat.inputFrameSamples { speech.append(contentsOf: [0x00, 0x20]) }
+        let frames = VoiceAudioFormat.localSpeechFrames + 1
+        for _ in 0..<frames { fixture.audio.push(speech) }
+        try await until("frames") {
+            fixture.transport.sent(type: "session.input_audio.append").count == frames
+        }
+        fake.publish([FakeAgentActivity.signal("n1", state: .finished, reply: UUID())])
+        try await until("queued") { voice.queuedAgentUpdates == 1 }
+        // The speech was noted a moment ago: this instant is inside 1.5 s of it.
+        voice.tick(at: voice.sessionElapsed)
+        #expect(voice.queuedAgentUpdates == 1)
+        voice.tick(at: voice.sessionElapsed + .seconds(5))
+        #expect(voice.queuedAgentUpdates == 0)
+        try await until("commentary") {
+            fixture.transport.sent(type: "session.commentary.append").count == 1
+        }
+        await voice.close()
+    }
+
+    @Test("Settings off: nothing is said and the queue is dropped")
+    func toggledOff() async throws {
+        let fake = FakeAgentActivity()
+        fake.signals = [FakeAgentActivity.signal("n1", state: .working)]
+        let fixture = try await VoiceFixture(agentActivity: fake.source)
+        defer { TestDefaultsSuite.remove(fixture.suite) }
+        let voice = fixture.voice
+        UserDefaults(suiteName: fixture.suite)?.set(false, forKey: VoicePreferences.agentUpdatesKey)
+        try await fixture.openLatched()
+        let readsBefore = fake.signalReads
+        fake.publish([FakeAgentActivity.signal("n1", state: .finished, reply: UUID())])
+        // The observer read the change; with the setting off it drops the news.
+        try await until("scanned") { fake.signalReads > readsBefore }
+        voice.tick(at: .seconds(5))
+        #expect(voice.queuedAgentUpdates == 0)
+        await voice.close()
+        #expect(fixture.transport.sent(type: "session.commentary.append").isEmpty)
+    }
+
+    @Test("Close stops the observer; a later change queues nothing")
+    func closeStopsObserving() async throws {
+        let fake = FakeAgentActivity()
+        fake.signals = [FakeAgentActivity.signal("n1", state: .working)]
+        let fixture = try await VoiceFixture(agentActivity: fake.source)
+        defer { TestDefaultsSuite.remove(fixture.suite) }
+        let voice = fixture.voice
+        try await fixture.openLatched()
+        #expect(voice.isObservingAgents)
+        await voice.close()
+        #expect(!voice.isObservingAgents)
+        fake.publish([FakeAgentActivity.signal("n1", state: .finished, reply: UUID())])
+        await Task.yield()
+        await Task.yield()
+        #expect(voice.queuedAgentUpdates == 0)
+        #expect(fixture.transport.sent(type: "session.commentary.append").isEmpty)
+    }
+
+    @Test("A spoken update does not hold the session open")
+    func updateDoesNotResetIdleClock() async throws {
+        let fake = FakeAgentActivity()
+        fake.signals = [FakeAgentActivity.signal("n1", state: .working)]
+        let fixture = try await VoiceFixture(agentActivity: fake.source)
+        defer { TestDefaultsSuite.remove(fixture.suite) }
+        let voice = fixture.voice
+        try await fixture.openLatched()
+        fake.publish([FakeAgentActivity.signal("n1", state: .finished, reply: UUID())])
+        try await until("queued") { voice.queuedAgentUpdates == 1 }
+        voice.tick(at: .seconds(5))
+        try await until("commentary") {
+            fixture.transport.sent(type: "session.commentary.append").count == 1
+        }
+        // The server speaks the update.
+        var loud = Data()
+        for _ in 0..<2_400 { loud.append(contentsOf: [0x00, 0x10]) }
+        fixture.transport.push(
+            #"{"type":"session.output_audio.delta","delta":"\#(loud.base64EncodedString())"}"#)
+        try await until("speaking") { voice.blobState == .speaking }
+        // 90 s after the open, with no word from the user: the session closes.
+        voice.tick(at: .seconds(90))
+        try await until("closed") { voice.blobState == .idle }
     }
 }

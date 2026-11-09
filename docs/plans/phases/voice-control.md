@@ -225,6 +225,18 @@ checked live; turn on the debug transcript first):
     goes back to Paused within about 8 s ("Rafu did not hear anything"), or
     20 s after a delegation ("No reply").
 
+28. Settings ▸ Agents ▸ Activity tracking: connect Claude Code. Open an Ask
+    Ensemble, start Claude in a terminal, latch the voice session, and give
+    Claude a short task by typing. Stay quiet. Within about 2 s of its Stop
+    Rafu says "Claude Code in “<title>” is done. It says: ...". Record what you
+    hear, or the `agent_update` line and any `server_error` of the newest
+    debug transcript.
+29. Two agents finish within a few seconds: one sentence names both. Ask for
+    approval (a tool that needs it): "... needs your approval."
+30. Turn off "Speak when an agent finishes or needs you": no update. With no
+    hooks connected, the toggle shows the connect hint. Talk while an agent
+    finishes: Rafu waits until you stop.
+
 ### Addition: `compose_view` (2026-11-08)
 
 Delivered on `main`: the voice backend tool `compose_view` composes a view from Rafu-owned candidates with the OpenAI

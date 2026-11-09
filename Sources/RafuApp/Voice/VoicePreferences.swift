@@ -9,6 +9,7 @@ nonisolated struct VoicePreferences: Sendable {
     static let personalizationKey = "voice.personalization"
     static let monthlyCapKey = "voice.monthlyCapUSD"
     static let debugTranscriptKey = "voice.debugTranscript"
+    static let agentUpdatesKey = "voice.agentUpdates"
 
     static let capRange = 1...50
 
@@ -41,6 +42,12 @@ nonisolated struct VoicePreferences: Sendable {
 
     /// Default off (opt-in). Read when a session opens.
     var keepsDebugTranscript: Bool { defaults.bool(forKey: Self.debugTranscriptKey) }
+
+    /// Default on: Rafu speaks when an agent finishes or needs you, while a
+    /// voice session is open. Read each time an update is due.
+    var speaksAgentUpdates: Bool {
+        defaults.object(forKey: Self.agentUpdatesKey) as? Bool ?? true
+    }
 
     var monthlyCapDollars: Double {
         let stored = defaults.object(forKey: Self.monthlyCapKey) as? Int

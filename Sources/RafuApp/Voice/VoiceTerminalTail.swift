@@ -8,11 +8,18 @@ enum VoiceTerminalTail {
     /// Raw viewport lines of the card's first pane, or `nil` when the card is
     /// not a terminal or its view is not mounted.
     static func recentOutputLines(for card: CanvasCard, session: WorkspaceSession) -> [String]? {
+        controller(for: card, session: session)?.recentOutputLines(maxLines: 40)
+    }
+
+    /// The terminal that runs in the card's first pane; `nil` for a card that
+    /// is not a terminal.
+    static func controller(
+        for card: CanvasCard, session: WorkspaceSession
+    ) -> WorkspaceTerminalController? {
         guard case .terminal(let groupID) = card.content,
-            let sessionID = session.terminal.terminalGroup(groupID)?.panes.first?.sessionID,
-            let controller = session.terminal.sessions.first(where: { $0.id == sessionID })
+            let sessionID = session.terminal.terminalGroup(groupID)?.panes.first?.sessionID
         else { return nil }
-        return controller.recentOutputLines(maxLines: 40)
+        return session.terminal.sessions.first(where: { $0.id == sessionID })
     }
 
     /// Node id → scrubbed text, for every terminal on the board that has a

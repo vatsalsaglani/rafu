@@ -36,6 +36,10 @@ final class AgentActivityStore {
     /// Ensemble card's `.onChange` has something to key off without ticking
     /// on every no-op call (every tab-selection sync calls `markReplyRead`).
     private(set) var acknowledgedRevision = 0
+    /// Bumped when a session ends a turn with a new reply, or starts waiting
+    /// for approval or an answer. Rafu Voice observes only this counter, so a
+    /// tool event in a busy session does not wake it.
+    private(set) var replyRevision = 0
 
     let paths: AgentTrackingPaths
     @ObservationIgnored private var ledger = AgentSessionLedger()
@@ -136,11 +140,31 @@ final class AgentActivityStore {
     /// Folds events into the ledger and publishes. Internal for tests.
     func apply(_ events: [AgentHookEvent], at date: Date) {
         var changed = false
+        let before = Self.attentionMarks(ledger)
         for event in events where ledger.apply(event) { changed = true }
+        if changed, Self.attentionMarks(ledger) != before { replyRevision += 1 }
         if ledger.expire(now: date) { changed = true }
         now = date
         if changed { sessions = ledger.sessions }
         updateClock()
+    }
+
+    /// What Voice announces per session: the reply, or the waiting state.
+    /// Equal marks before and after a fold mean nothing new to say.
+    private static func attentionMarks(_ ledger: AgentSessionLedger) -> [UUID: AttentionMark] {
+        var marks: [UUID: AttentionMark] = [:]
+        for row in ledger.sessionsByKey.values {
+            let mark = AttentionMark(
+                replyEventID: row.replyEventID,
+                state: row.needsAttention ? row.state : nil)
+            if mark.replyEventID != nil || mark.state != nil { marks[row.rowID] = mark }
+        }
+        return marks
+    }
+
+    private struct AttentionMark: Equatable {
+        let replyEventID: UUID?
+        let state: AgentSessionState?
     }
 
     /// The clock runs only while sessions exist: each tick drains (which

@@ -13,10 +13,12 @@ struct VoiceSettingsSection: View {
     @AppStorage(VoicePreferences.monthlyCapKey) private var monthlyCap = Int(
         VoiceCostMeter.defaultCapDollars)
     @AppStorage(VoicePreferences.debugTranscriptKey) private var keepsDebugTranscript = false
+    @AppStorage(VoicePreferences.agentUpdatesKey) private var speaksAgentUpdates = true
     @State private var microphone = VoiceMicrophonePermission.access
     @State private var isResetPresented = false
     @State private var chordConflict = false
 
+    private let activity = AgentActivityStore.shared
     private let costs = VoiceSession.shared.costStore
     private let profileStore = VoiceStyleProfileStore()
 
@@ -63,6 +65,24 @@ struct VoiceSettingsSection: View {
                 }
             }
             .help("Applies to the next voice session.")
+        }
+
+        Section {
+            Toggle("Speak when an agent finishes or needs you", isOn: $speaksAgentUpdates)
+            if speaksAgentUpdates, activity.connectedProviders.isEmpty {
+                Label(
+                    "Connect agent hooks in Settings ▸ Agents ▸ Activity tracking. Without them, Rafu cannot tell when an agent is done.",
+                    systemImage: "info.circle"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("Agent Updates")
+        } footer: {
+            Text(
+                "While a voice session is open, Rafu says one short sentence when Claude Code or Codex in the shown Ensemble finishes, needs your approval, or waits for you. It waits while you talk. It reads the first sentence of the agent's reply, with secrets removed."
+            )
         }
 
         Section {

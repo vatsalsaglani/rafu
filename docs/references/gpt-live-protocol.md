@@ -258,6 +258,16 @@ other than `response.output_item.done` with `item.type == "function_call"` and
   `delegation_id` was tested only under client delegation. Under Responses
   delegation Rafu sends it with the key omitted; on an `error` reply only the
   check-in glyph shows. Record the manual result here.
+- **Agent updates reuse the commentary event (2026-11-10).** Rafu sends the
+  finished-or-waiting sentence of an agent terminal as
+  `session.commentary.append` with no `delegation_id`, like the check-in. Same
+  caveat: unverified under Responses delegation. An `error` reply to it is
+  swallowed (`checkInPending`), so the user hears nothing and sees no error;
+  the timeline row "Agent update" and the debug transcript entry
+  `agent_update` still show what Rafu tried to say. Audio that follows within
+  15 s of the send does not reset the silence clock. Record the manual result
+  (voice-control checks 28 to 30) here. Tests: `VoiceAgentUpdatePolicyTests`,
+  `VoiceAgentUpdateSessionTests` (fake source, scripted transport).
 - **Hardened runtime.** A notarized build needs the
   `com.apple.security.device.audio-input` entitlement. Rafu Lightning is
   ad-hoc signed without hardened runtime and needs only

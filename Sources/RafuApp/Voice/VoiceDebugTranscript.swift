@@ -20,6 +20,8 @@ nonisolated struct VoiceDebugTranscript: Sendable {
         case serverError(code: String?, message: String?)
         case userSaid(String)
         case rafuSaid(String)
+        /// The sentence Rafu composed for an agent that finished or waits.
+        case agentUpdate(String)
         case delegation(id: String, target: String?)
         case call(callID: String, name: String, arguments: String)
         case callResult(
@@ -229,6 +231,8 @@ nonisolated struct VoiceDebugTranscript: Sendable {
             object = ["type": "user_said", "text": clean(text)]
         case .rafuSaid(let text):
             object = ["type": "rafu_said", "text": clean(text)]
+        case .agentUpdate(let text):
+            object = ["type": "agent_update", "text": clean(text)]
         case .delegation(let id, let target):
             object = ["type": "delegation", "delegation_id": clean(id)]
             object["target"] = target.map(clean)

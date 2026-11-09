@@ -246,6 +246,35 @@ the lease-cap advice tells Rafu to ask the user which terminal to stop. Reason: 
 backend sent `"link":true,"x":0,"y":0`; the link failed on the missing node, the node landed at the board origin,
 and the model said "my node isn't available".
 
+## Amendment (2026-11-10): agent updates by voice
+
+The user said Rafu does not speak when Codex or Claude Code replies. Decision: while a voice session is open, Rafu
+speaks one short sentence, unprompted, when an agent terminal on the shown Ensemble ends a turn, needs approval, or
+waits for an answer. Setting `voice.agentUpdates`, **on by default** (Settings ▸ Voice ▸ "Speak when an agent
+finishes or needs you"); it includes "needs your approval".
+
+- **Signal: agent hooks, not terminal output.** `AgentActivityStore` folds `Stop`, `PermissionRequest` and
+  `Notification` events into `TrackedAgentSession`. It has a new `replyRevision` counter, bumped only when a session
+  gets a new reply or starts waiting. `VoiceAgentUpdates` observes that counter with `withObservationTracking`
+  (re-armed per change, stopped in `releaseSession`; no polling). Without connected hooks Rafu says nothing and
+  Settings ▸ Voice shows a hint. Detecting a quiet terminal tail is out of scope.
+- **Rafu writes the sentence.** `VoiceAgentUpdatePolicy` (pure, `RafuCore`) builds "<Agent> in “<title>” is done. It
+  says: <first sentence>." from the hook preview, scrubbed with `VoiceOutputScrubber`, at most 120 scalars, and
+  dropped when it holds code, a path or a secret. The text goes to GPT-Live as `session.commentary.append`: no
+  backend turn, no `response.create`, and no instruction, so a reply text cannot steer the model.
+- **Rules.** Speak only when the session is started and latched or paused, no Confirm card waits, no call runs, the
+  key is not held, no local speech in the last 1.5 s and no audible reply in the last 600 ms; otherwise the update
+  stays queued and the 1 s tick retries. At most one sentence per 10 s (updates merge: "Claude Code in “Build” and
+  Codex in “Tests” are done."), queue depth 3 (oldest dropped), 6 a minute, an update older than 2 minutes is
+  dropped. Replies that exist when the session opens are not announced.
+- **The idle close stays.** Audio of an update does not reset the 90 s silence clock, so updates never keep a
+  session open. A user who leaves for more than 90 s no longer hears updates until the next session.
+- **Consent.** No new tool, no board change, nothing leaves the Mac that the session did not already send: the
+  sentence is the preview the hook already stored. The debug transcript records it as `agent_update`.
+- **Open.** `session.commentary.append` is unverified under Responses delegation (see
+  [`gpt-live-protocol.md`](../references/gpt-live-protocol.md)). If it fails, a fallback (a `response.create` turn
+  with a fixed prompt) must be added; the policy and the gates stay.
+
 ## Related
 
 - Code: `Sources/RafuCore/Voice/`, `Sources/RafuApp/Voice/`,

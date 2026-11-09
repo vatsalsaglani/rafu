@@ -60,6 +60,8 @@ final class VoiceSession {
         /// Where the opt-in debug transcript goes. `nil` means
         /// `VoiceDebugTranscript.defaultDirectory()`.
         var debugTranscriptDirectory: URL? = nil
+        /// Where spoken agent updates read hook activity. Tests give a double.
+        var agentActivity: VoiceAgentActivitySource = .live
 
         static var live: Dependencies {
             Dependencies(
@@ -154,7 +156,15 @@ final class VoiceSession {
     @ObservationIgnored private var youRow: String?
     @ObservationIgnored private var replyRow: String?
     @ObservationIgnored private var replyCharacters = 0
+    /// A `session.commentary.append` (check-in or agent update) not yet
+    /// acknowledged. An error then is swallowed: commentary is unverified
+    /// under Responses delegation.
     @ObservationIgnored private var checkInPending = false
+    /// Watches agent hooks while a session is open; nil while idle.
+    @ObservationIgnored private var agentUpdates: VoiceAgentUpdates?
+    /// Audio that starts before this instant is a spoken agent update. It
+    /// does not reset the silence clock, so updates never hold a session open.
+    @ObservationIgnored private var updateAudioUntil: Duration?
     @ObservationIgnored private weak var lastKeySession: WorkspaceSession?
     /// Function calls whose arguments may stream, by output item id.
     @ObservationIgnored private var argumentStreams: [String: ArgumentStream] = [:]
@@ -163,6 +173,10 @@ final class VoiceSession {
     var runningCalls: Int { inFlightCalls }
     /// How many function calls are tracked now. Tests read it.
     var argumentStreamCount: Int { argumentStreams.count }
+    /// Agent updates waiting for a quiet moment. Tests read it.
+    var queuedAgentUpdates: Int { agentUpdates?.policy.queue.count ?? 0 }
+    /// True while the agent-activity observer runs. Tests read it.
+    var isObservingAgents: Bool { agentUpdates != nil }
     /// The opt-in debug transcript of the open session; nil when off.
     @ObservationIgnored private var transcript: VoiceDebugTranscript?
     /// The newest transcript, kept after close so tests can await its drain.
@@ -408,6 +422,7 @@ final class VoiceSession {
             turn.take(capture.takeCaptureStats(), beforeStart: true)
         }
         apply(.connected)
+        startAgentUpdates()
         if !pendingFrames.isEmpty {
             // Sends what was said while connecting; a stream that already
             // ended (key released early) drains and then mutes.
@@ -500,6 +515,9 @@ final class VoiceSession {
 
     /// Forgets every per-session resource and counter. Idle again after it.
     private func releaseSession() {
+        agentUpdates?.stop()
+        agentUpdates = nil
+        updateAudioUntil = nil
         endTranscript()
         cancelViewStreams()
         callChain = nil
@@ -841,7 +859,9 @@ final class VoiceSession {
             }
             lastAudibleAt = now
             // The check-in's own prompt does not reset the silence clock.
-            if blobState != .checkIn { clock.noteServerActivity(at: now) }
+            // A spoken agent update does not either.
+            let isUpdate = updateAudioUntil.map { now < $0 } ?? false
+            if blobState != .checkIn, !isUpdate { clock.noteServerActivity(at: now) }
         } else if let last = lastAudibleAt, now - last > .milliseconds(600) {
             endReply()
         }
@@ -859,6 +879,7 @@ final class VoiceSession {
 
     private func endReply() {
         lastAudibleAt = nil
+        updateAudioUntil = nil
         if let replyRow {
             timeline.finish(
                 replyRow, endMS: milliseconds(elapsed()), detail: "\(replyCharacters) characters")
@@ -1122,6 +1143,55 @@ final class VoiceSession {
         buffer += text
     }
 
+    // MARK: Agent updates
+
+    /// How long audio after an update counts as that update's audio.
+    static let updateAudioWindow: Duration = .seconds(15)
+
+    private func startAgentUpdates() {
+        guard agentUpdates == nil else { return }
+        let updates = VoiceAgentUpdates(
+            source: dependencies.agentActivity, target: { [weak self] in self?.voiceTarget() },
+            elapsed: { [weak self] in self?.elapsed() ?? .zero },
+            onChange: { [weak self] in
+                guard let self else { return }
+                self.speakAgentUpdateIfDue(at: self.elapsed())
+            })
+        agentUpdates = updates
+        updates.start()
+    }
+
+    /// True when nothing is going on that an update would talk over: the
+    /// session listens (latched) or is paused, no Confirm card waits, no call
+    /// runs, the user is not holding the key or talking, and Rafu is quiet.
+    private func canSpeakUpdate(at now: Duration) -> Bool {
+        guard isStarted, !isClosing, blobState == .listeningLatched || blobState == .paused,
+            machine.mic != .held, !confirmGate.isPending, inFlightCalls == 0
+        else { return false }
+        return VoiceAgentUpdatePolicy.isQuiet(
+            now: now, lastSpeech: clock.lastSpeech, lastAudibleAt: lastAudibleAt)
+    }
+
+    /// Speaks the queued agent news as one sentence when the gates allow;
+    /// otherwise it stays queued for the next tick. Rafu composes the text
+    /// (never sent to the backend as an instruction) and hands it to
+    /// `session.commentary.append`: no backend turn.
+    private func speakAgentUpdateIfDue(at now: Duration) {
+        guard let agentUpdates, let client else { return }
+        guard dependencies.preferences.speaksAgentUpdates else {
+            agentUpdates.discardQueued()
+            return
+        }
+        guard canSpeakUpdate(at: now), let sentence = agentUpdates.nextSentence(at: now)
+        else { return }
+        guard resumeEngineIfSuspended() else { return }
+        updateAudioUntil = now + Self.updateAudioWindow
+        checkInPending = true
+        transcript?.record(.agentUpdate(sentence))
+        noteBoardEffect("Agent update", detail: sentence)
+        Task { try? await client.send(.commentaryAppend(delegationID: nil, sentence)) }
+    }
+
     // MARK: Timers
 
     private func startClock() {
@@ -1146,6 +1216,7 @@ final class VoiceSession {
         guard !confirmGate.isPending else { return }
         endThinkingIfStalled(at: now)
         suspendEngineIfQuiet(at: now)
+        speakAgentUpdateIfDue(at: now)
         switch clock.nextAction(at: now) {
         case .checkIn:
             clock.checkedIn = true
