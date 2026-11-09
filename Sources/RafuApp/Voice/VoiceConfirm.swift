@@ -37,12 +37,17 @@ struct VoiceConfirmRequest: Equatable {
     let ensemble: String
     let title: String
     let summary: [String]
+    /// `agent_configure` with strategy resume: the agent quits and resumes.
+    let restartsAgent: Bool
 
-    /// Removals are destructive (ADR 0033): Return never runs them, and
-    /// they never get a session grant.
-    var isDestructive: Bool { tool == .nodeRemove || tool == .edgeRemove }
+    /// Removals and agent restarts are destructive (ADR 0033): Return never
+    /// runs them, and they never get a session grant.
+    var isDestructive: Bool { tool == .nodeRemove || tool == .edgeRemove || restartsAgent }
     var offersSessionGrant: Bool { !isDestructive }
-    var actionTitle: String { isDestructive ? "Remove" : "Allow Once" }
+    var actionTitle: String {
+        if restartsAgent { return "Restart" }
+        return isDestructive ? "Remove" : "Allow Once"
+    }
 
     var message: String {
         let lines = ["Rafu (voice) wants to do this on \(ensemble)."] + summary
@@ -53,12 +58,26 @@ struct VoiceConfirmRequest: Equatable {
         tool = call.tool
         boardID = board.id
         ensemble = CanvasAgentText.singleLine(board.title, limit: 80)
-        title = "\(call.tool.actionTitle)?"
+        restartsAgent =
+            call.tool == .agentConfigure
+            && call.strategy == CanvasAgentConfigureStrategy.resume.rawValue
+        if restartsAgent {
+            let agent =
+                call.agent.flatMap(CanvasAgentConfigureAgent.init(agent:))?.displayName
+                ?? "the agent"
+            let node = call.title.map { " in “\(CanvasAgentText.singleLine($0, limit: 40))”" } ?? ""
+            title = "Restart \(agent)\(node) with the same conversation?"
+        } else {
+            title = "\(call.tool.actionTitle)?"
+        }
         summary = Array(call.approvalSummary.prefix(8))
     }
 
-    /// A grant key: one tool on one Ensemble.
-    var grantKey: String { "\(tool.rawValue)|\(boardID.rawValue.uuidString)" }
+    /// A grant key: one tool on one Ensemble. A restart has its own key, so a
+    /// session grant for an in-place change never covers it.
+    var grantKey: String {
+        "\(tool.rawValue)\(restartsAgent ? "+restart" : "")|\(boardID.rawValue.uuidString)"
+    }
 }
 
 /// Shows a card and reports one answer. Returns a closure that removes the
@@ -145,7 +164,8 @@ enum VoiceConfirmCard {
         RafuPopupPresenter.presentSheet(size: NSSize(width: 420, height: 240)) { dismiss in
             handle.dismiss = dismiss
             return RafuConfirmPopup(
-                symbol: request.isDestructive ? "trash" : "waveform",
+                symbol: request.restartsAgent
+                    ? "arrow.clockwise" : (request.isDestructive ? "trash" : "waveform"),
                 title: request.title, message: request.message,
                 actions: actions(for: request, answer: answer),
                 defaultActionID: request.isDestructive ? nil : request.actionTitle

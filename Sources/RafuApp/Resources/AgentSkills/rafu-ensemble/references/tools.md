@@ -20,7 +20,8 @@ Off blocks edit and sensitive tools.
 | `node_create` | edit | `kind` (note, terminal, file, image, web, mermaid, shape, text, service_icon, frame) and per kind: `text`, `path`, `url`, `shape`, `pack_id`+`icon_id`+`label`, `member_ids`; `title`?, `width`?, `height`?, `near`?, `x`?, `y`? |
 | `node_update` | edit | `node_id`, `title`?, `x`?, `y`?, `width`? (96–2000), `height`? (64–2000) |
 | `node_remove` | sensitive | `node_id` (not your own node) |
-| `terminal_create` | edit; sensitive with `agent` or `command` | `title`?, `cwd`? (workspace-relative folder), `agent`?, `command`? (argument array, ≤ 32 items, ≤ 1,024 bytes each), `prompt`? (claude or codex, ≤ 1,024 bytes), `link`? (true adds a message link, returns `edge_id` and `mention`), `near`?, `x`?, `y`? |
+| `terminal_create` | edit; sensitive with `agent` or `command` | `title`?, `cwd`? (workspace-relative folder), `agent`?, `command`? (argument array, ≤ 32 items, ≤ 1,024 bytes each), `prompt`? (claude or codex, ≤ 1,024 bytes), `model`? and `effort`? (claude or codex only), `link`? (true adds a message link, returns `edge_id` and `mention`), `near`?, `x`?, `y`? |
+| `agent_configure` | sensitive; a resume always asks | `node_id` (a terminal you created), and `model`?, `effort`?, `mode`?; `strategy`? (`in_place` for Claude Code, `resume`), `queue`? |
 | `terminal_start` | sensitive | `node_id` |
 | `terminal_send` | Live link, else sensitive | `node_id`, and `text` (≤ 4 KiB) or `command` (argument array) |
 | `edge_create` | edit | `from`, `to`, `kind` (relationship, message), `label`? |
@@ -80,6 +81,28 @@ on screen. Results never repeat the typed line.
 
 `send_message` returns `delivered: true` when Rafu queued the message. It does
 not mean the peer read it.
+
+## Changing a running agent
+
+`agent_configure` changes the model, effort or mode of a claude or codex
+agent in a terminal you created, also in the middle of its conversation.
+
+- **Claude Code, in place (default):** Rafu types `/model <model>` and
+  `/effort <effort>`. Efforts: low, medium, high, xhigh, max, auto. A `mode`
+  (default, accept_edits, plan) needs `strategy: resume`.
+- **Codex, resume (default):** Codex quits and resumes the same conversation
+  with `-c` config. Efforts: low, medium, high. Modes: read_only,
+  workspace_write.
+- **Busy:** while the agent is mid-turn, or waits on an approval or a
+  question, the call fails with `agent_busy`. Pass `queue: true` to run it
+  when the turn ends (needs agent hooks; one change per node; 15 minutes).
+- **Result:** `strategy` (`in_place`, `resume`, `queued`), `confirmed` (the
+  terminal showed the new value), `readback` (the newest lines, scrubbed, at
+  most 200 characters). `confirmed: false` means not seen; report it and do
+  not retry.
+- To start an agent with a model, use `terminal_create` with `model` and
+  `effort` (claude `--model`/`--effort`; codex `-m` and
+  `model_reasoning_effort`).
 
 ## Placement
 

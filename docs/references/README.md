@@ -117,6 +117,7 @@ A task that discovers a reusable platform, SDK, toolchain, lifecycle, concurrenc
 | [`voice-compose-view.md`](voice-compose-view.md) | Changing voice `compose_view`: when it runs, what is sent to the Decisions API and what never leaves, candidates, the preview-then-final undo rule, stop reasons, known gaps |
 | [`view-tools-and-vocabulary.md`](view-tools-and-vocabulary.md) | Changing `view_render` / `view_update`: MCP shapes and caps, the 48 KiB rule, why the schema is not strict, how to regenerate the vocabulary constant, and the two-skill install |
 | [`swift-6-4-2-catalog-registration-traps.md`](swift-6-4-2-catalog-registration-traps.md) | Registering json-render catalog entries: the Swift 6.4.2 SILGen crash with `inout Catalog` plus typed throws in a `@Sendable` closure, `nonisolated` component shells, and the `JSONRenderCore.JSONValue` name clash |
+| [`agent-cli-commands.md`](agent-cli-commands.md) | Changing `agent_configure` or the `terminal_create` `model`/`effort` flags: verified and unverified Claude Code / Codex commands (versions and date), the allowlists, in-place versus resume, the busy gate and why approval dialogs count as busy, the observation-driven queue, the readback matcher and its 200-character bound, consent (a resume always asks), the IPC budget, and the manual checks |
 | [`microphone-permission-listing.md`](microphone-permission-listing.md) | Why Rafu is absent from Privacy ▸ Microphone until `requestAccess` runs, and the "Allow Microphone…" button in Settings ▸ Voice |
 
 ## Reference-note template

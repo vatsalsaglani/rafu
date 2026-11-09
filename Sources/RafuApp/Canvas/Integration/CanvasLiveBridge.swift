@@ -734,6 +734,15 @@ final class CanvasLiveBridge {
         return endpoints.values.first { $0.controller?.id == controllerID }?.provider
     }
 
+    /// The Codex thread id the bridge captured for the terminal, if a live
+    /// Codex client registered there. `agent_configure` resumes it.
+    func codexThreadID(controllerID: UUID) -> String? {
+        guard hasLiveEndpoint(controllerID) else { return nil }
+        let endpoint = endpoints.values.first { $0.controller?.id == controllerID }
+        guard endpoint?.provider == "codex" else { return nil }
+        return endpoint?.threadID
+    }
+
     private func location(of controllerID: UUID) -> Location? {
         if let resolveLocation { return resolveLocation(controllerID) }
         for snapshot in WorkspaceWindowRegistry.shared.sessionSnapshots() {

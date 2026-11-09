@@ -79,6 +79,8 @@ public nonisolated struct VoicePersona: Equatable, Sendable {
             agent runs.
             - When a tool says the node is stopped or queued, say so; do not tell the \
             user to close views unless the tool says the live-view cap is reached.
+            - Change a running agent's model or effort with agent_configure; say which way \
+            it ran and whether the terminal confirmed it; if the agent is busy, offer to queue.
             """,
         scope: .rafu)
 }

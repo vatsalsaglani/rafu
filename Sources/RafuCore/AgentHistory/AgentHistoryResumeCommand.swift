@@ -17,6 +17,31 @@ public enum AgentHistoryResumeCommand {
         }
     }
 
+    /// `arguments(for:)` plus model, effort and mode flags, so History
+    /// "Resume" and `agent_configure` build the same argument vector. `nil`
+    /// when the session id is not safe or a value fails its allowlist
+    /// (`CanvasAgentConfigurePlan.validate`). Claude: `--model`, `--effort`,
+    /// `--permission-mode`. Codex: `-c model="…"`,
+    /// `-c model_reasoning_effort="…"`, `-c sandbox_mode="…"` after
+    /// `resume <id>`.
+    public static func arguments(
+        for key: AgentHistorySessionKey, model: String?, effort: String?, mode: String?
+    ) -> [String]? {
+        guard var arguments = arguments(for: key) else { return nil }
+        let agent = CanvasAgentConfigureAgent(historyProvider: key.provider)
+        let request = CanvasAgentConfigureRequest(model: model, effort: effort, mode: mode)
+        if !request.isEmpty {
+            do {
+                try CanvasAgentConfigurePlan.validate(request, agent: agent)
+            } catch {
+                return nil
+            }
+        }
+        arguments += agent.flags(model: model, effort: effort, resume: true)
+        arguments += agent.modeFlags(mode)
+        return arguments
+    }
+
     /// One shell line for `arguments`, without a trailing newline.
     public static func shellLine(_ arguments: [String]) -> String {
         arguments.map(quoted).joined(separator: " ")

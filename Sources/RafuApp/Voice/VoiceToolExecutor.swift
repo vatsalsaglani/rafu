@@ -171,6 +171,33 @@ enum VoiceToolExecutor {
         "claudecode": "claude", "codex cli": "codex", "gemini cli": "gemini",
         "cursor agent": "cursor-agent",
     ]
+    /// Model names the backend says aloud, mapped to the CLI alias.
+    nonisolated static let modelAliases: [String: String] = [
+        "claude-opus": "opus", "claude-sonnet": "sonnet", "claude-haiku": "haiku",
+        "opus": "opus", "sonnet": "sonnet", "haiku": "haiku",
+    ]
+    nonisolated static let effortAliases: [String: String] = [
+        "extra-high": "xhigh", "x-high": "xhigh", "extra_high": "xhigh", "maximum": "max",
+        "automatic": "auto", "med": "medium",
+    ]
+    nonisolated static let modeAliases: [String: String] = [
+        "accept": "accept_edits", "acceptedits": "accept_edits", "plan_mode": "plan",
+        "readonly": "read_only", "read": "read_only", "workspace": "workspace_write",
+    ]
+
+    /// Lowercased and trimmed, with spaces turned into `separator`. Only
+    /// shapes the word; the allowlist in `CanvasAgentConfigurePlan` decides.
+    nonisolated static func spokenToken(_ value: String, separator: String = "-") -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            .split(whereSeparator: \.isWhitespace).joined(separator: separator)
+    }
+
+    /// "Claude Sonnet" → `sonnet`, "GPT 5" → `gpt-5`.
+    nonisolated static func spokenModel(_ value: String) -> String {
+        let word = spokenToken(value)
+        return modelAliases[word] ?? word
+    }
+
     /// Keys where an empty string has its own meaning (an empty body).
     private nonisolated static let keepsEmptyString: Set<String> = ["text", "markdown", "source"]
 
@@ -203,6 +230,20 @@ enum VoiceToolExecutor {
                 cleaned["agent"] = alias
             } else if CanvasAgentLaunch.executable(for: name) != nil {
                 cleaned["agent"] = name
+            }
+        }
+        if let model = cleaned["model"] as? String { cleaned["model"] = spokenModel(model) }
+        if let effort = cleaned["effort"] as? String {
+            let word = spokenToken(effort)
+            cleaned["effort"] = effortAliases[word] ?? word
+        }
+        if tool == CanvasAgentTool.agentConfigure.rawValue {
+            if let mode = cleaned["mode"] as? String {
+                let word = spokenToken(mode, separator: "_")
+                cleaned["mode"] = modeAliases[word] ?? word
+            }
+            if let strategy = cleaned["strategy"] as? String {
+                cleaned["strategy"] = spokenToken(strategy, separator: "_")
             }
         }
         if let cwd = cleaned["cwd"] as? String, let workspaceRoot {
@@ -303,7 +344,7 @@ enum VoiceToolExecutor {
         {
             arguments["near"] = anchor
         }
-        let call: CanvasAgentToolCall
+        var call: CanvasAgentToolCall
         do {
             call = try CanvasAgentToolCall.parse(tool: name, arguments: arguments)
             try call.validate()
@@ -313,7 +354,7 @@ enum VoiceToolExecutor {
         if call.tool == .ensembleDescribe {
             return describe(caller: caller, host: host)
         }
-        let decision = VoicePolicy.decide(mode: board.agentControlMode, risk: call.risk)
+        var decision = VoicePolicy.decide(mode: board.agentControlMode, risk: call.risk)
         switch decision {
         case .deny(let reason):
             CanvasAgentCenter.shared.record(
@@ -322,6 +363,16 @@ enum VoiceToolExecutor {
             return failure("agent_control_off", reason)
         case .confirm, .run, .runWithNotice:
             break
+        }
+        // agent_configure: a busy or unknown agent is refused before the
+        // Confirm card, and the card names the strategy. A restart always asks.
+        if call.tool == .agentConfigure {
+            switch CanvasAgentActions.prepareConfigure(call, caller: caller) {
+            case .failure(let refused): return failure(refused.code, refused.message)
+            case .success(let prepared):
+                call = prepared.call
+                if prepared.plan.restartsAgent { decision = .confirm }
+            }
         }
         // The same 30-per-minute limit as an agent (`CanvasAgentActions.handle`):
         // a looping backend cannot flood the board.

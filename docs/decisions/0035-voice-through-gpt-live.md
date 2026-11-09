@@ -233,6 +233,18 @@ them): one ordered `AsyncStream` from the main actor and one `@concurrent` drain
 of the setting applies from the next session. See
 [`gpt-live-protocol.md`](../references/gpt-live-protocol.md) "Debug transcript and argument cleanup".
 
+## Amendment (2026-11-10): `agent_configure`
+
+Voice and MCP agents can change the model, effort or mode of a Claude Code or Codex agent in a terminal node, also
+mid-conversation (`agent_configure`; `terminal_create` also takes `model` and `effort` at launch). Consent: risk
+`sensitive`, like `terminal_send` (Ask asks, Allow runs, Off denies). Voice keeps §9 (any terminal); MCP keeps the
+creator rule. A strategy that quits and resumes the agent (`resume`) always asks, in Allow too, and its voice Confirm
+is destructive ("Restart", no session grant). Rafu refuses a busy agent before it asks (`agent_busy`), including one
+that waits on an approval or question dialog; `queue: true` runs the change at the end of the turn and needs hooks.
+Every typed line is a fixed template plus an allowlisted token. Readback to the model is scrubbed and at most 200
+characters. Facts, unverified CLI details and manual checks:
+[`agent-cli-commands.md`](../references/agent-cli-commands.md).
+
 ## Amendment (2026-11-09): voice has no node on the board
 
 The voice caller's card is synthetic and never on the board (`CanvasAgentCaller.voice`). Voice therefore gets no

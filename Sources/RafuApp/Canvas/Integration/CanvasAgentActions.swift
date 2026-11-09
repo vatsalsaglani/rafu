@@ -286,9 +286,10 @@ enum CanvasAgentActions {
         session.canvasResources[board.id]?.isPresented == true
     }
 
-    static func handle(_ call: CanvasAgentToolCall, caller: CanvasAgentCaller) async
+    static func handle(_ original: CanvasAgentToolCall, caller: CanvasAgentCaller) async
         -> CanvasBridgeResponse
     {
+        var call = original
         do { try call.validate() } catch { return .init(error: error.message) }
         let center = CanvasAgentCenter.shared
         if call.tool == .actionStatus, let id = call.requestID.flatMap(UUID.init(uuidString:)) {
@@ -311,6 +312,18 @@ enum CanvasAgentActions {
             alwaysAllowed: center.isAlwaysAllowed(call.tool, on: board.id))
         // A Live message link is the user's consent for messages, like send_message.
         if routedByLink, decision == .ask { decision = .allow }
+        // agent_configure: refuse a busy or unknown agent before asking, and
+        // name the strategy in the question. A resume always asks.
+        let denied: Bool
+        if case .deny = decision { denied = true } else { denied = false }
+        if call.tool == .agentConfigure, !denied {
+            switch prepareConfigure(call, caller: caller) {
+            case .failure(let failure): return .init(error: failure.agentText)
+            case .success(let prepared):
+                call = prepared.call
+                if prepared.plan.restartsAgent, decision == .allow { decision = .ask }
+            }
+        }
         switch decision {
         case .deny(let reason):
             center.record(
@@ -416,6 +429,7 @@ enum CanvasAgentActions {
         case .diagramBuild: return try diagramBuild(call, caller: caller)
         case .viewRender: return try viewRender(call, caller: caller)
         case .viewUpdate: return try await viewUpdate(call, caller: caller)
+        case .agentConfigure: return await agentConfigure(call, caller: caller)
         case .actionStatus: return .init(error: "No action matches that request_id.")
         }
     }
@@ -430,7 +444,7 @@ enum CanvasAgentActions {
         return .init(toolResult: result)
     }
 
-    private static func findCard(_ id: String?, in board: CanvasBoardState) throws -> CanvasCard {
+    static func findCard(_ id: String?, in board: CanvasBoardState) throws -> CanvasCard {
         guard let id, let uuid = UUID(uuidString: id),
             let card = board.cards.first(where: { $0.id.rawValue == uuid })
         else { throw CanvasAgentToolError.invalidArgument("node_id") }
@@ -799,7 +813,10 @@ enum CanvasAgentActions {
         guard call.startsProcess else { return nil }
         let argv =
             call.command
-            ?? call.agent.flatMap { CanvasAgentLaunch.argv(agent: $0, prompt: call.prompt) }
+            ?? call.agent.flatMap {
+                CanvasAgentLaunch.argv(
+                    agent: $0, prompt: call.prompt, model: call.model, effort: call.effort)
+            }
         guard let argv else { throw CanvasAgentToolError.invalidArgument("command") }
         if let refusal = CanvasAgentShell.refusal(for: argv) {
             let isPrompt = call.command == nil && call.prompt != nil
@@ -892,7 +909,7 @@ enum CanvasAgentActions {
     /// line, if any, on the board. The wait for the shell stays short so the
     /// agent's bridge call never outlasts its IPC timeout; typing continues
     /// after the reply (`CanvasTerminalStarter`).
-    private static func start(_ card: CanvasCard, line: String?, caller: CanvasAgentCaller)
+    static func start(_ card: CanvasCard, line: String?, caller: CanvasAgentCaller)
         async throws -> CanvasTerminalStartReport
     {
         guard case .terminal(let groupID) = card.content else {
