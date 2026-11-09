@@ -144,9 +144,16 @@ other than `response.output_item.done` with `item.type == "function_call"` and
   kAUInitialize)`). The session showed "Audio is unavailable". Building the
   graph first and then enabling voice processing starts cleanly (output
   2 ch / 48 kHz). Tapping or connecting the input node first does not help.
-  With voice processing the input node reports 9 channels at 48 kHz;
-  `AVAudioConverter` to 24 kHz mono with `downmix = true` gets
-  `channelMap [0]`, the processed voice channel. `VoiceAudioIO.startPlayback`
+  With voice processing the input node reports 9 channels at 48 kHz (all
+  nine carry the same processed signal). **An `AVAudioConverter` from that
+  9-channel format to 24 kHz mono PCM16 writes only zeros**, with
+  `downmix = true` (`channelMap [0]`) or false (`channelMap [-1]`), although
+  the raw channels carry speech; GPT-Live then hears silence, never detects
+  speech, and the session goes to "Still there?" with an empty timeline.
+  `VoiceCaptureFramer` therefore copies channel 0 into a preallocated mono
+  Float32 buffer and converts that (measured: converted RMS 0.006–0.014 while
+  `say` played, against 0.0000 before); `VoiceCaptureFramerTests` covers 1,
+  2 and 9 channels. `VoiceAudioIO.startPlayback`
   builds the graph first and, when the engine still does not start, builds a
   new engine without voice processing (barge-in off). Voice writes no logs
   (`VoiceSourcePolicyTests`); the only report is the status-item tooltip

@@ -117,20 +117,26 @@ final class VoiceAudioIO: VoiceAudioCapturing, VoiceAudioPlaying {
         stopCapture()
         let input = engine.inputNode
         let inputFormat = input.outputFormat(forBus: 0)
+        // The converter reads a mono copy of channel 0, never the tap format:
+        // with voice processing the input node has 9 channels (macOS 27), and
+        // an `AVAudioConverter` from that format writes only zeros, with or
+        // without `downmix`. Channel 0 is the processed voice.
         guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0,
+            let monoFormat = AVAudioFormat(
+                commonFormat: .pcmFormatFloat32, sampleRate: inputFormat.sampleRate,
+                channels: 1, interleaved: false),
             let outputFormat = AVAudioFormat(
                 commonFormat: .pcmFormatInt16, sampleRate: VoiceAudioFormat.sampleRate,
                 channels: 1, interleaved: true),
-            let converter = AVAudioConverter(from: inputFormat, to: outputFormat)
+            let converter = AVAudioConverter(from: monoFormat, to: outputFormat)
         else { throw VoiceAudioError.converter }
-        converter.downmix = true
         // 2 s of frames: speech said while the socket connects (about 1.2 s)
         // is sent once the session starts.
         let (stream, continuation) = AsyncStream.makeStream(
             of: Data.self, bufferingPolicy: .bufferingNewest(100))
         let framer = VoiceCaptureFramer(
-            converter: converter, outputFormat: outputFormat,
-            inputRate: inputFormat.sampleRate, continuation: continuation)
+            converter: converter, monoFormat: monoFormat, outputFormat: outputFormat,
+            continuation: continuation)
         Self.installTap(on: input, format: inputFormat, framer: framer)
         tapInstalled = true
         captureContinuation = continuation
@@ -181,20 +187,25 @@ final class VoiceAudioIO: VoiceAudioCapturing, VoiceAudioPlaying {
     }
 }
 
-/// Converts tap buffers to 24 kHz mono PCM16 and cuts them into 20 ms frames.
-/// Used only on the tap thread; its buffers are allocated up front.
+/// Copies channel 0 of each tap buffer, converts it to 24 kHz mono PCM16 and
+/// cuts it into 20 ms frames. Used only on the tap thread; its buffers are
+/// allocated up front.
 nonisolated final class VoiceCaptureFramer {
     private let converter: AVAudioConverter
+    private let mono: AVAudioPCMBuffer?
     private let converted: AVAudioPCMBuffer?
     private let continuation: AsyncStream<Data>.Continuation
     private var pending: [Int16]
 
     init(
-        converter: AVAudioConverter, outputFormat: AVAudioFormat, inputRate: Double,
+        converter: AVAudioConverter, monoFormat: AVAudioFormat, outputFormat: AVAudioFormat,
         continuation: AsyncStream<Data>.Continuation
     ) {
         self.converter = converter
         self.continuation = continuation
+        // 500 ms of input: room for a large tap buffer at any device rate.
+        mono = AVAudioPCMBuffer(
+            pcmFormat: monoFormat, frameCapacity: AVAudioFrameCount(monoFormat.sampleRate * 0.5))
         // Room for a large tap buffer (100 ms at 192 kHz) after conversion.
         let capacity = AVAudioFrameCount(VoiceAudioFormat.sampleRate * 0.5)
         converted = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: capacity)
@@ -203,7 +214,12 @@ nonisolated final class VoiceCaptureFramer {
     }
 
     func consume(_ buffer: AVAudioPCMBuffer) {
-        guard let converted else { return }
+        guard let mono, let converted, let source = buffer.floatChannelData?[0],
+            let target = mono.floatChannelData?[0]
+        else { return }
+        let length = min(buffer.frameLength, mono.frameCapacity)
+        target.update(from: source, count: Int(length))
+        mono.frameLength = length
         converted.frameLength = 0
         var supplied = false
         var error: NSError?
@@ -214,7 +230,7 @@ nonisolated final class VoiceCaptureFramer {
             }
             supplied = true
             inputStatus.pointee = .haveData
-            return buffer
+            return mono
         }
         guard status != .error, let samples = converted.int16ChannelData?[0] else { return }
         let count = Int(converted.frameLength)
