@@ -139,6 +139,46 @@ folder-trust dialog first can use most of 30 s. The watch now logs, with states
 only, whether it started and why it ended (`docs/references/canvas-live-sessions.md`,
 "Diagnostics"). All other rules stand.
 
+Amendment, 2026-11-12: the user still had to answer the dialog in Allow mode:
+"if the user has selected allow on top right we should just by ourselves 'select
+yes' to communication channels and not wait for the user at all. Same goes in
+voice as well." The one-keypress rule stands. Four parts of the rules above
+change; where they differ, this amendment wins:
+
+- **Gates are read at every sample, not once at the launch.** The watch always
+  starts at a recorded launch. While the board is Off or Ask, or the setting is
+  off, it reads nothing from the terminal, presses nothing, and looks again once
+  a second. If the user switches the board to Allow later in the window, the
+  watch answers a dialog that still waits. Before, a launch in Ask or Off never
+  started a watch, so a switch to Allow after the start did nothing. The board is
+  looked up by terminal at every sample, so a terminal moved to another Ensemble
+  uses the new board's Agent control. The window is still 60 s from the launch.
+- **The footer is not part of the match.** The dialog must still be the tail of
+  the screen: after the selected `❯ 1. I am using this for local development`
+  row come only blank rows, the `2. Exit` row, and at most a key-hint footer
+  (`Enter to confirm · Esc to cancel`, or any row made only of `<Key> to
+  <action>` parts). Claude Code builds that footer from its active key bindings,
+  so its words can change; the old rule that the last row must say "Enter to
+  confirm" could stop the match. Text below the dialog, such as a tool-permission
+  prompt or agent output, still gives no match. The `Channels:` list also ends at
+  the first option row, so a layout with no blank row still parses.
+- **The folder-trust dialog extends the window.** While Claude's folder-trust
+  dialog ("Quick safety check", "Yes, I trust this folder") is on screen, the
+  60 s window restarts at every sample, up to 600 s after the launch. Rafu never
+  answers that dialog; the user does. This replaces "the window ends and the
+  channel dialog is not answered" for a slow answer.
+- **Voice.** Rafu voice starts Claude with `terminal_create`, which makes an
+  ordinary terminal card and types `claude` into it. The `claude` wrapper sends
+  the same `launch` request, so the board's Agent control decides. Voice has no
+  allow/ask setting of its own, so no new setting is added: Settings ▸ Ensemble ▸
+  "Confirm Rafu's development-channel prompt automatically" and the board's Allow
+  apply to Voice-started terminals too. In Ask, Voice's spoken yes confirms the
+  action, not Claude's dialog; the dialog waits for the user.
+
+The diagnostics now log at notice level, so they persist; before, info-level
+lines were not kept and a failed run left no evidence. They still hold states
+only. See `docs/references/canvas-live-sessions.md`.
+
 ## Cross-reference (2026-11-10): `agent_configure`
 
 The MCP server `instructions` string gained one sentence about `agent_configure`. It adds no bridge operation. The

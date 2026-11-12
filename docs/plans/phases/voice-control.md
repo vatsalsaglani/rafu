@@ -204,11 +204,16 @@ re-checked live):
     and Rafu says four terminals show live views and asks which one to stop.
     Press Start Shell on a stopped node that you stopped earlier: the shell
     shows in the card (not "Terminal view is not attached").
-24. Allow mode, Claude's development-channel dialog shows: if Rafu does not
+24. Allow mode, "start a Claude session" by voice (a board with Allow, the
+    Settings ▸ Ensemble toggle on): Claude's development-channel dialog answers
+    itself within a second or two of showing, with the board notice. Rafu voice
+    has no allow/ask setting of its own; the board's Agent control decides
+    (ADR 0026 amendment 2026-11-12). On an Ask board the dialog waits for you,
+    and switching the board to Allow within 60 s answers it. If Rafu does not
     answer it, read the `ChannelPrompt` log lines (see
-    `docs/references/canvas-live-sessions.md`, "Diagnostics") and record the
-    end reason and the Claude Code version. Ask Rafu to "answer the dialog":
-    it uses `terminal_send`, not `voice_confirm`.
+    `docs/references/canvas-live-sessions.md`, "Diagnostics"; they are `notice`
+    level now) and record the end reason and the Claude Code version. Ask Rafu to
+    "answer the dialog": it uses `terminal_send`, not `voice_confirm`.
 
 Stuck on Thinking after the first press (2026-11-09; see
 `docs/references/gpt-live-protocol.md`, "Stuck on Thinking"; not yet

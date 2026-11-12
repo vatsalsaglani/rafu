@@ -567,6 +567,34 @@ Uncommitted on `main` at the time of writing.
   cluster spacing with 640 × 420 pt terminals at 16:10; the quit-path
   `flushAll`.
 
+## Status (2026-11-12, Allow answers Claude's channel dialog by itself)
+
+User direction: on Allow, Rafu selects "yes" to Claude's development-channel
+dialog without waiting, in the Ensemble and in Voice. ADR 0026 amendment
+2026-11-12; evidence in `docs/references/canvas-live-sessions.md`, "2026-11-12:
+why Allow still waited".
+
+- Delivered: the watch starts at every recorded launch and reads the Agent
+  control, the setting, and the board at every sample (a switch to Allow after
+  the start answers a waiting dialog); the matcher no longer needs the words
+  "Enter to confirm" in the footer, only the dialog as the tail of the screen;
+  Claude's folder-trust dialog extends the window (cap 600 s) and is never
+  answered; the `ChannelPrompt` log lines are `notice` level; fixtures follow
+  the `DevChannelsDialog` source read from Claude Code 2.1.322.
+- Voice: no code path of its own. A Voice-started Claude is a normal board
+  terminal; the board's Allow and the existing Settings ▸ Ensemble toggle apply.
+- Owned paths: `Sources/RafuCore/CanvasBridge/CanvasChannelPrompt.swift`,
+  `Sources/RafuApp/Canvas/Integration/CanvasChannelPromptConfirmer.swift`, and
+  `CanvasLiveBridge.recordClaudeLaunch` (one new test seam, `terminalIO`).
+- Open: no live run on Claude Code 2.1.322 yet (the footer words were not
+  read from a screen). A Claude killed without `unregister` and restarted
+  within 15 s is not watched (logged).
+- Manual checks (the user; Rafu Lightning only): Allow with the board visible;
+  Allow with the board on another tab; Allow with a slow folder-trust answer;
+  start in Ask, then switch to Allow; Voice "start a Claude session" on an Allow
+  board; Ask must still wait for you. Read the `ChannelPrompt` log lines if one
+  fails.
+
 ## Generated views (wave 3)
 
 Status (2026-11-08): wave 3 of the swift-json-render integration is merged on

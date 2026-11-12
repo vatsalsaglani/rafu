@@ -448,6 +448,18 @@ Verified 2026-11-09, same toolchain, by `VoiceSilentTurnTests`,
 - **Not verified.** A 15 s burst sent faster than real time after a slow
   start has not been tried against the server (2 s bursts work).
 
+### Voice-started Claude and the channel dialog (2026-11-12)
+
+Verified 2026-11-12 by `CanvasChannelPromptVoiceTests` and code reading. A Claude
+that voice starts with `terminal_create` is an ordinary board terminal: the
+`claude` shell function sends the same `launch` bridge request as a hand-typed
+Claude. Voice has no allow/ask setting for Claude's own development-channel
+dialog, so the board's Agent control (Allow) and Settings ▸ Ensemble ▸ "Confirm
+Rafu's development-channel prompt automatically" decide whether Rafu presses
+Return for it (ADR 0026, amendment 2026-11-12;
+[`canvas-live-sessions.md`](canvas-live-sessions.md)). In Ask, a spoken yes
+confirms the action, not Claude's dialog.
+
 ## Why it matters
 
 The server rejects unknown fields, refuses partial updates, needs a manual
