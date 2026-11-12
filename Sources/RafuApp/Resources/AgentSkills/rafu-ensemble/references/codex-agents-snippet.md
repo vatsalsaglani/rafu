@@ -17,7 +17,9 @@ means changes run at once. To delegate: `terminal_create` with `agent`,
 you start, even one meant for the user; pause the link for quiet, do not skip
 it. After `terminal_create` or `terminal_start` read the result `state`, then
 `ensemble_describe` and `list_connections`, before you tell the user an agent
-runs; `stopped` means the line is queued, not typed. Put a long prompt,
+runs; `stopped` means the line is queued, not typed. A started agent needs a
+few seconds to connect: wait until `list_connections` shows it connected, then
+`send_message`. Put a long prompt,
 message or brief in a file or a Rafu note and send a one-line prompt or
 message that names it (limits: prompt 1,024 bytes, `terminal_send` text 4,096
 bytes, `send_message` 16 KiB). If `terminal_send` says no agent is connected

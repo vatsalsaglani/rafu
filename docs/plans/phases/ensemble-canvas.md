@@ -100,8 +100,9 @@ themselves (to avoid conflicts). New strings may already say "Ensemble".
 4. Visual rules: gold only for focus/selection/live/primary; theme tokens only;
    help + accessibility labels on icon-only controls; Reduce Motion paths.
 5. Security: agents act only through an Ensemble that is open in the workspace;
-   it need not be on screen. Tools that start a process or dock an app still
-   need it shown (see ADR 0026, amendment of 2026-10-22). Every agent-started
+   it need not be on screen. Tools that start a terminal also work with the
+   Ensemble in the background (ADR 0026, amendment of 2026-11-12; it
+   superseded the 2026-10-22 "still need it shown" rule). Every agent-started
    process appears as a terminal node; per-Ensemble "Agent control" (Off / Ask /
    Allow, default Ask) gates mutating tools; bounded payloads; no secrets or
    message bodies in logs.
@@ -566,6 +567,47 @@ Uncommitted on `main` at the time of writing.
   undo of a Tidy; zoom-to-fit with Reduce Motion; the sidecar file on disk;
   cluster spacing with 640 × 420 pt terminals at 16:10; the quit-path
   `flushAll`.
+
+## Status (2026-11-12, background agent starts and held messages)
+
+Two reported bugs: an agent-started peer sometimes waited for the user to press
+Start, and a message sent to a peer that was still starting turned the link
+Failed.
+
+- **Agent starts no longer need a card view.** Root cause: a shell spawns only
+  after a terminal view exists, and only a mounted card created it. With the
+  Ensemble on another tab the tool refused ("Show this Ensemble ..."); with the
+  window occluded the card consumed `terminalStartRequest` and silently did not
+  start. Now `CanvasTerminalStarter` starts the pane itself and creates the
+  view unmounted when no card can host it (`startTerminalPane(_, background:)`,
+  `hostCanvasTerminalView`). No lease, no reveal, no focus. A card re-takes its
+  lease when the window is visible again. `needsShownBoard` and
+  `notShownMessage` are removed. ADR 0026 amended.
+- **Messages to a starting peer are held, not failed.** `CanvasLiveBridge` holds
+  up to 8 messages per target for 2 minutes and delivers them in order when the
+  peer registers, when the Codex `bind` supplies the thread, or on a heartbeat.
+  A Codex queue refusal within 45 s of connecting is retried every 3 s. Failed
+  keeps meaning a real failure (expiry, refusal after the grace, full inbox,
+  send limit). Agent guidance (MCP instructions, tool descriptions,
+  `rafu-ensemble` skill and references) says: start, wait until
+  `list_connections` shows `connected`, then send.
+- **Docs:** [`canvas-live-sessions.md`](../../references/canvas-live-sessions.md)
+  (two new sections),
+  [`ensemble-agent-terminal-tools.md`](../../references/ensemble-agent-terminal-tools.md)
+  section 2, ADR 0026 amendment. No new reference note and no row in
+  `docs/references/README.md`.
+- **Open checks, all live (the user; Rafu Lightning only; no synthetic input):**
+  - [ ] Claude to Codex, Codex to Claude and Claude to Claude: `terminal_create`
+        with `agent`, `prompt` and `link: true` while another editor tab is
+        selected. The node starts, its line types, the edge reaches Live, no
+        click.
+  - [ ] The same with the window minimized or hidden behind another app.
+  - [ ] A second message right after the start says Held, arrives after the
+        peer connects, and the edge never shows Failed.
+  - [ ] Show the Ensemble afterwards: the cards attach to the running shells
+        (no "Terminal view is not attached"), and the shell is resized.
+  - [ ] Whether Claude Code's first turn can already call Rafu tools before its
+        MCP server connects (the prompt is a launch argument).
 
 ## Generated views (wave 3)
 

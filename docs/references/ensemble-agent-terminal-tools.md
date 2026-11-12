@@ -6,7 +6,8 @@
   `CanvasLiveBridge.swift`, `Canvas/Adapters/CanvasTerminalCard.swift`,
   `Sources/RafuApp/Terminal/TerminalReplyWriter.swift`,
   `WorkspaceTerminalController.sendReply`
-- **Last verified:** Swift 6.2 language mode, macOS Darwin 27.0.0, on 2026-11-09
+- **Last verified:** Swift 6.2 language mode, macOS Darwin 27.0.0, on 2026-11-09;
+  section 2 amended 2026-11-12 (Apple Swift 6.4, unit tests only)
 
 ## Rule or observed behavior
 
@@ -41,10 +42,28 @@ A refusal is a `CanvasAgentShellRefusal` turned into
 limits only — never the text. `terminal_create` validates the launch line before
 it creates anything, so a refused create leaves no node on the board.
 
-### 2. Only the card's own view starts a process; a start can therefore be missed
+### 2. A card view starts a process when one can host it; otherwise Rafu starts the pane itself
 
-ADR 0023 and ADR 0025 stand: a terminal process starts only through the mounted
-`CanvasTerminalCard`. The agent path never calls `performTerminalGroupViewAction`.
+Amended 2026-11-12 (ADR 0026, amendment of that date). Before it: "a terminal
+process starts only through the mounted `CanvasTerminalCard`", so a start was
+lost whenever the card was unmounted or could not take the view (board on
+another tab, window occluded). Now `CanvasTerminalStarter.start` picks:
+
+- **A card can host** (`canvasResources[board].permitsLiveContent`: the board is
+  the visible tab and its window is not hidden): the flow below (reveal, set
+  `terminalStartRequest`, wait 2.5 s). If the card took the request and the pane
+  is still not live, Rafu starts the pane itself.
+- **No card can host**: `WorkspaceSession.startTerminalPane(_, background: true)`
+  starts the pane and `hostCanvasTerminalView` creates the terminal view without
+  mounting it, which spawns the shell. No lease, no reveal, no focus, no view
+  move. A card shown later reuses the view. `terminal_create` and
+  `terminal_start` report `running`, and the queued line types without a click.
+
+The agent path still never calls `performTerminalGroupViewAction`. The detail of
+the root causes is in [`canvas-live-sessions.md`](canvas-live-sessions.md),
+"Agent starts without a card view".
+
+The original card-view flow, still used when a card can host:
 
 Root cause of the reported bug: `CanvasBoardState.terminalStartRequest` is
 consumed only by a *mounted* card. A card culled by the viewport

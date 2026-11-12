@@ -7,6 +7,9 @@
   The Claude launch argument form was re-verified on 2026-10-21 against Claude
   Code 2.1.304 (see "Claude bridge flags are variadic").
   The automatic answer to the channel dialog was added on 2026-11-07.
+Background agent starts and held messages were added on 2026-11-12 (Apple Swift
+6.4, macOS 27.0.1; source and unit-test verification only, no live provider
+check; see the last two sections).
 
 ## Rules and verified provider interfaces
 
@@ -200,7 +203,8 @@ gone. `CanvasLinkStatusItem` replaced it, and state is now per link:
 - Mapping implemented in `CanvasLiveBridge`: stopping a terminal gives
   Disconnected; a changed conversation gives Disconnected; a lost transport
   gives Disconnected; a refused send gives Failed until the next accepted
-  message or a pause/resume.
+  message or a pause/resume. A send to a peer that is still starting is held,
+  not refused (see "Held messages for a peer that is still starting").
 - `CanvasLiveBridge` per-link API: `pause`, `resume`, `pauseAll(in:)`,
   `resumeAll(in:)`, `linkStates(in:)`, `linkState(of:in:)`, `activity(of:in:)`.
 - Accepted-message events carry the connection, direction and date only. They
@@ -776,11 +780,12 @@ view is on screen". Notes, nodes, edges, mermaid and `diagram_build`, frames,
 export, and `terminal_create` without a process work while the Ensemble tab is
 not the selected tab.
 
-Tools that start a process or need a live window still need the Ensemble shown:
-`terminal_start`, `terminal_create` with an
-agent or a command, and `terminal_send` to a terminal that is not live. A
-terminal card starts its process only through its view
-(`terminalStartRequest`, the canvas terminal lease, `permitsLiveContent`).
+Until 2026-11-12, tools that start a process (`terminal_start`, `terminal_create`
+with an agent or a command, `terminal_send` to a stopped terminal) needed the
+Ensemble shown, because a terminal card starts its process only through its view
+(`terminalStartRequest`, the canvas terminal lease, `permitsLiveContent`). That
+guard and the "Show this Ensemble in Rafu ..." error are removed; see
+"Agent starts without a card view" below.
 
 **Amended 2026-10-25.** "Shown" is no longer enough on its own: a card culled by
 the viewport, or drawn as the compact face below 50 % zoom, is not mounted and so
@@ -790,12 +795,146 @@ reports `running` or `stopped` instead of a bare `ok`. A line that cannot be
 typed yet is queued per node and typed when the process runs, so a
 `terminal_send` straight after a `terminal_start` is no longer dropped. See
 [`ensemble-agent-terminal-tools.md`](ensemble-agent-terminal-tools.md).
-Their error text is: "Show this Ensemble in Rafu to let agents open apps or
-start terminals. Other changes work while it is in the background." A closed
-board returns: "This Ensemble is closed in Rafu. Open it to let agents change
-it. Reading still works."
+A closed board returns: "This Ensemble is closed in Rafu. Open it to let agents
+change it. Reading still works."
 
 Ask mode is unchanged off screen: the call waits 12 s and then returns
 `pending_approval`, and the user sees the request when the tab is next shown.
 
 The restore notice derives its paused count from current bridge state. Only its dismissal is view state. Keeping the initial count in `@State` left a paused banner visible after an individual link was resumed. `WorkbenchChromeRedesignTests.canvasLinkStatusLayout` guards the observation boundary and compact badge layout.
+
+## Agent starts without a card view (2026-11-12)
+
+- Applies to: `CanvasTerminalStarter.start`, `WorkspaceSession.startTerminalPane(_:background:)`,
+  `hostCanvasTerminalView`, `CanvasTerminalCard`, `CanvasAgentActions`.
+- Last verified: 2026-11-12, Apple Swift 6.4, macOS 27.0.1. Unit tests only; no
+  live Claude or Codex check yet.
+
+User report: "When the connection is established with Codex or Codex with Claude
+or vice versa we sometimes get start terminal and until the user starts the
+terminal it doesn't start." Root causes, all in one place: a shell process
+exists only after a terminal **view** exists, and the view was created only by a
+mounted `CanvasTerminalCard` (`TerminalHostView.updateNSView` calls
+`makeOrReuseView`). Every path that left the card unmounted or unable to take
+the view left the node `stopped` with its line queued:
+
+1. The Ensemble was not the selected tab. The guard `needsShownBoard` answered
+   "Show this Ensemble in Rafu ..." and started nothing (`terminal_create` with
+   an agent created no node at all).
+2. The window was occluded, minimized, or on another Space. `CanvasScrollBridge`
+   calls `CanvasBoardResources.pause()`, so `permitsLiveContent` is false and
+   `CanvasTerminalCard.startOrRestart` could not take a lease. It then cleared
+   `terminalStartRequest` and returned with no start and no message. The agent
+   saw `stopped`; the user saw the Start Shell button.
+3. A card the viewport culls or the compact face hides is not mounted. That was
+   already handled by `reveal` (it moves the user's view).
+4. In Ask mode an unselected board only pended the approval.
+
+Reasons 1 and 2 are the "board in the background" case that a user hits whenever
+they work in another app while agents talk to each other.
+
+Rule now: when `canvasResources[board].permitsLiveContent` is false, the starter
+calls `startTerminalPane(_, background: true)`. It runs the same
+`terminal.startPane` transaction (so the live-session limit still applies and a
+refusal still raises the Terminal Group alert, reported as `refused`), then
+`hostCanvasTerminalView`, which calls `makeOrReuseView(theme:)` without mounting
+the view anywhere. SwiftTerm opens the pty at its default 80 x 25 (its
+`processSizeChange` ignores a zero-size frame, checked in the SwiftTerm checkout)
+and resizes it (SIGWINCH) when a card mounts the same view later; this is the
+path a parked terminal already uses. It does not call `revealTerminalGroup`, does not focus,
+does not take a presentation lease and does not move the user's view. A card
+that mounts later takes its lease on mount (`.onChange(initial: true)`), and
+that handler now also runs when the window becomes visible again, because
+`pause()` released every lease. The same background path is also the fallback
+when a mounted card consumed `terminalStartRequest` and the pane is still not
+live after the wait.
+
+The invariant is unchanged: a process starts only in a terminal node that exists
+on the board and is recorded in the Agents panel. The node need not be on screen.
+Not changed: the lease cap, the 2.5 s in-call wait, the 8-line queue.
+
+Test seams: `WorkspaceSession.spawnsHeadlessCanvasTerminals` (false in tests, so
+`makeOrReuseView` never spawns a process) and `CanvasTerminalStarter.drainSeams`
+(task-local; replaces readiness and send for the typing task `start` begins).
+
+## Held messages for a peer that is still starting (2026-11-12)
+
+- Applies to: `CanvasLiveBridge` (`send`, `hold`, `flushHeld`, `expireHeldMessages`),
+  `CanvasLinkStateMapper`, the MCP instructions and the `rafu-ensemble` skill.
+- Last verified: 2026-11-12, Apple Swift 6.4, macOS 27.0.1. Unit tests with a
+  fake clock and a fake `codex queue`; no live provider check.
+
+User report: "if the session starts with a prompt and then claude/codex waits for
+the reply and sends another message the edges go failed because we've a
+requirement that on start we send a ping pong".
+
+There is no ping/pong message in Rafu. The requirement the user means is
+registration: a message is deliverable only when the target's MCP client has
+registered and its heartbeat is fresh (`hasLiveEndpoint`: a client id, under 15 s
+old), and a Codex target also needs its thread, endpoint and executable. The
+thread comes from the supervisor `bind` or from `_meta.threadId` on Codex's
+first tool call (the "ask it to list Ensemble connections" status). The MCP
+server registers on start, then heartbeats with `receive` every 300 ms.
+
+What turned a link Failed (`recordFailure`, sticky until the next accepted
+message or a pause/resume), before this change:
+
+- `send` to a Codex peer whose client had registered but whose thread was not
+  known yet: "Codex is waiting for its first Ensemble tool call". The order is
+  real: `codexBindAfterRegistration` shows MCP `register` can arrive before the
+  supervisor `bind`.
+- `codex queue` refused while the Codex TUI and thread were still coming up:
+  "Codex could not accept the message".
+- A full Claude inbox (16) and the 20-per-minute limit. These stay failures.
+
+A send to a peer that had not registered at all returned an error but no Failed;
+the sender simply lost the message.
+
+Rule now:
+
+- A peer is **starting** when its terminal runs (the Live route resolves), no
+  client has ever connected on this capability (`everConnected`), it is not
+  suspended, and either Rafu started an agent there (`CanvasAgentCenter`
+  creator or launched-agent hint) or a Codex route is bound. A quit agent
+  (`unregister`), a suspended route and a plain shell are not starting; their
+  senders still get the old error.
+- A message to a starting peer, to a connected Codex peer without a thread, or
+  behind older held messages is **held** per target terminal: at most 8, in
+  send order, 2 minutes (`heldLifetime`), never saved, never logged, counts only.
+  The sender gets `delivered: false` and "Held: ...".
+- Held messages go out in order when the peer registers, when the supervisor
+  `bind` supplies the thread, and on each heartbeat `receive` (`scheduleFlush`).
+  Every message passes the same route, sender-liveness, rate-limit and inbox
+  checks at delivery. Pause, removal of the link or of either card, and
+  `remove(controller)` drop them. One timer (no polling) expires the oldest.
+- A `codex queue` refusal (`deliveryFailed`, not a timeout, which may have
+  delivered) within 45 s of the client connecting is a start-up race: the
+  message waits and is retried every 3 s. Later, it is a real failure.
+- **Failed means a real failure:** a held message the peer never took in 2
+  minutes ("The peer did not connect in time. Send the message again."), a
+  refusal after the grace, a full inbox, the send limit. While the peer is not
+  connected the link shows Disconnected, as before.
+
+The start prompt is **not** a channel message. `terminal_create` with `prompt`
+types `claude '<prompt>'` or `codex '<prompt>'` as one shell line
+(`CanvasAgentLaunch.argv`), so the agent receives it as its first task at start,
+ordered before any message. What this does not prove: whether Claude Code's
+first turn can already call Rafu tools before its MCP server finishes
+connecting. That needs a live check; the guidance tells the creator to wait for
+`connected` before it sends anything.
+
+Verification:
+
+```bash
+./script/test.sh --filter CanvasHeldMessageTests
+./script/test.sh --filter CanvasLiveBridgeTests
+./script/test.sh --filter CanvasTerminalStartTests
+```
+
+Manual check (the user, Rafu Lightning only): from a Claude node run
+`terminal_create` with `agent: codex`, a one-line `prompt` and `link: true`
+while the Ensemble tab is not selected; the Codex node starts, its line is
+typed, and the edge reaches Live without a click. Send a second message at
+once: the result says Held and the message arrives after Codex connects, the
+edge never shows Failed. Repeat Codex to Claude, Claude to Claude, and with the
+window minimized.

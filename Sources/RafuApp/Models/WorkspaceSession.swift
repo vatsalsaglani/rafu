@@ -649,6 +649,11 @@ final class WorkspaceSession {
         RafuThemeCatalog.resolvedForCurrentAppearance()
     }
 
+    /// Whether `hostCanvasTerminalView` may create a terminal view (and so spawn
+    /// a shell) for a node no card hosts. Tests turn it off.
+    @ObservationIgnored
+    var spawnsHeadlessCanvasTerminals = true
+
     /// Shells discovered on this machine (terminal-manager.md T-C), default
     /// first. See `cachedTerminalShells`'s doc comment for the caching rule.
     var availableTerminalShells: [TerminalShell] { cachedTerminalShells }
@@ -1467,7 +1472,12 @@ final class WorkspaceSession {
         }
     }
 
-    func startTerminalPane(_ paneID: TerminalPaneID) {
+    /// `background` is for a terminal node an Ensemble agent starts while no
+    /// card view can host it (the board is behind another tab, or the window is
+    /// hidden). It starts the same pane, creates the terminal view without
+    /// mounting it so the shell spawns, and neither reveals the group nor moves
+    /// focus. A card that mounts later shows the same view.
+    func startTerminalPane(_ paneID: TerminalPaneID, background: Bool = false) {
         guard let groupID = terminal.terminalGroup(containing: paneID),
             let pane = terminal.terminalGroup(groupID)?.panes.first(where: { $0.id == paneID }),
             let profile = pane.launchProfile,
@@ -1488,6 +1498,10 @@ final class WorkspaceSession {
                     startingDirectory: resolvedTerminalDirectory(
                         profile.startingFolder, rootURL: rootURL),
                     shell: shell, profile: profile))
+            if background {
+                hostCanvasTerminalView(paneID)
+                return
+            }
             if selectedCanvasID == nil || selectedTerminalGroupID != groupID {
                 revealTerminalGroup(groupID)
             } else {
@@ -1496,6 +1510,29 @@ final class WorkspaceSession {
             }
             terminalGroupFocusRequest &+= 1
         } catch { presentTerminalGroupError(error.localizedDescription) }
+    }
+
+    /// Restarts an exited ordinary shell for an Ensemble agent without a card
+    /// view (see `startTerminalPane(_:background:)`).
+    func restartTerminalPaneInBackground(_ paneID: TerminalPaneID) {
+        restartTerminalPane(paneID)
+        // A refused restart leaves the pane exited; spawning then would bypass it.
+        guard let groupID = terminal.terminalGroup(containing: paneID),
+            terminal.terminalGroup(groupID)?.panes.first(where: { $0.id == paneID })?.status
+                == .live
+        else { return }
+        hostCanvasTerminalView(paneID)
+    }
+
+    /// Creates the pane's terminal view if it has none, which spawns its shell.
+    /// The view is not placed in a window; a card or tab that shows it later
+    /// reuses it (`WorkspaceTerminalController.makeOrReuseView`). Idempotent.
+    /// A test sets `spawnsHeadlessCanvasTerminals` to false to stay process-free.
+    func hostCanvasTerminalView(_ paneID: TerminalPaneID) {
+        guard spawnsHeadlessCanvasTerminals,
+            let controller = terminal.terminalController(for: paneID)
+        else { return }
+        _ = controller.makeOrReuseView(theme: hudThemeProvider())
     }
 
     func restartTerminalPane(_ paneID: TerminalPaneID) {

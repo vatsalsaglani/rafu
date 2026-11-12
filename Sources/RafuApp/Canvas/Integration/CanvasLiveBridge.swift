@@ -12,9 +12,15 @@ final class CanvasLiveBridge {
     typealias ActivityBegin =
         @MainActor (ProcessInfo.ActivityOptions, String) -> any NSObjectProtocol
     typealias ActivityEnd = @MainActor (any NSObjectProtocol) -> Void
+    /// `codex queue` for one message: executable, endpoint, thread, text. A test seam.
+    typealias CodexSend = @Sendable (String, String, String, String) async throws -> Void
     @ObservationIgnored private let beginActivity: ActivityBegin
     @ObservationIgnored private let endActivity: ActivityEnd
     @ObservationIgnored private let channelPrompt: CanvasChannelPromptConfirmer
+    /// True when Rafu started, or was told it started, an agent CLI in the node.
+    /// With a bound Codex route it marks a peer as still starting.
+    @ObservationIgnored private let expectsAgent: @MainActor (CanvasCardID) -> Bool
+    @ObservationIgnored private let sendToCodex: CodexSend
     /// Held only while at least one terminal has a live agent route. See `updateActivity`.
     @ObservationIgnored private var activity: (any NSObjectProtocol)?
 
@@ -26,13 +32,23 @@ final class CanvasLiveBridge {
             ProcessInfo.processInfo.beginActivity(options: $0, reason: $1)
         },
         endActivity: @escaping ActivityEnd = { ProcessInfo.processInfo.endActivity($0) },
-        channelPrompt: CanvasChannelPromptConfirmer = .shared
+        channelPrompt: CanvasChannelPromptConfirmer = .shared,
+        expectsAgent: @escaping @MainActor (CanvasCardID) -> Bool = { card in
+            let center = CanvasAgentCenter.shared
+            return center.creator(of: card)?.agent != nil || center.launchedAgent(of: card) != nil
+        },
+        sendToCodex: @escaping CodexSend = { executable, endpoint, thread, text in
+            try await CanvasCodexSession.send(
+                executable: executable, endpoint: endpoint, threadID: thread, text: text)
+        }
     ) {
         resolveLocation = location
         self.now = now
         self.beginActivity = beginActivity
         self.endActivity = endActivity
         self.channelPrompt = channelPrompt
+        self.expectsAgent = expectsAgent
+        self.sendToCodex = sendToCodex
     }
     private enum SuspensionReason: String {
         case sessionChanged
@@ -65,6 +81,30 @@ final class CanvasLiveBridge {
             && now().timeIntervalSince(endpoint.lastSeen) < Self.routeFreshness
     }
 
+    /// A message for a peer that is still starting waits here, per target
+    /// terminal, in send order. It is never saved and never logged.
+    private struct HeldMessage {
+        let message: CanvasBridgeMessage
+        let sourceController: UUID
+        /// The target card's id, to find the route again at delivery time.
+        let destination: String
+        let queuedAt: Date
+        /// The earliest time to try again after a Codex delivery refusal.
+        var notBefore: Date
+    }
+    @ObservationIgnored private var held: [UUID: [HeldMessage]] = [:]
+    @ObservationIgnored private var flushing: Set<UUID> = []
+    @ObservationIgnored private var expiryTask: Task<Void, Never>?
+    /// At most this many messages wait for one peer.
+    static let heldLimit = 8
+    /// A held message the peer never took is dropped after this long, and the
+    /// link then shows Failed: the peer did not come up.
+    static let heldLifetime: TimeInterval = 120
+    /// A Codex delivery refusal this soon after the client connected is a start-up
+    /// race, not a failure: Rafu tries again every `retryInterval`.
+    static let codexStartupGrace: TimeInterval = 45
+    static let retryInterval: TimeInterval = 3
+
     private struct Endpoint {
         weak var controller: WorkspaceTerminalController?
         let generation: Int
@@ -77,6 +117,10 @@ final class CanvasLiveBridge {
         var inbox: [CanvasBridgeMessage] = []
         var suspended = false
         var suspensionReason: SuspensionReason = .sessionChanged
+        /// When the current client registered, and whether any client ever did on
+        /// this capability. A terminal that never had a client may still be starting.
+        var connectedSince: Date?
+        var everConnected = false
     }
     @ObservationIgnored private var endpoints: [String: Endpoint] = [:]
     @ObservationIgnored private var directories: [UUID: URL] = [:]
@@ -195,6 +239,12 @@ final class CanvasLiveBridge {
         if let directory = directories.removeValue(forKey: controller.id) {
             Task.detached { try? FileManager.default.removeItem(at: directory) }
         }
+        held[controller.id] = nil
+        for (target, queue) in held {
+            let kept = queue.filter { $0.sourceController != controller.id }
+            held[target] = kept.isEmpty ? nil : kept
+        }
+        scheduleExpiry()
         updateActivity()
         revision &+= 1
     }
@@ -212,6 +262,7 @@ final class CanvasLiveBridge {
         let key = SessionLinkPermission(board: ObjectIdentifier(board), edge: edge)
         enabledEdges.removeValue(forKey: key)
         linkRuntime[key]?.failure = nil
+        purgeUnroutableHeld()
         revision &+= 1
     }
     func isEnabled(_ edge: UUID, in board: CanvasBoardState) -> Bool {
@@ -419,6 +470,7 @@ final class CanvasLiveBridge {
                 source.endpoint == route
             else { return .init(error: "This terminal cannot release that Codex session.") }
             source.clientID = nil
+            source.connectedSince = nil
             source.provider = nil
             source.threadID = nil
             source.endpoint = nil
@@ -466,11 +518,14 @@ final class CanvasLiveBridge {
             endpoints[request.token] = source
             updateActivity()
             revision &+= 1
+            // The thread is known now: a message held for it can go.
+            scheduleFlush(for: controller.id)
             return .init()
         }
         if request.operation == "unregister" {
             guard source.clientID == request.clientID else { return Self.unregistered }
             source.clientID = nil
+            source.connectedSince = nil
             source.inbox = []
             source.threadID = nil
             source.lastSeen = now()
@@ -520,6 +575,8 @@ final class CanvasLiveBridge {
                     source.threadID = nil
                 }
             }
+            if source.clientID != request.clientID { source.connectedSince = now() }
+            source.everConnected = true
             source.clientID = request.clientID
             source.provider = request.provider
             if let threadID = request.threadID {
@@ -534,6 +591,8 @@ final class CanvasLiveBridge {
             endpoints[request.token] = source
             updateActivity()
             revision &+= 1
+            // The peer just connected: messages held while it started go out now.
+            scheduleFlush(for: controller.id)
             return .init(peers: peers(for: controller.id))
         }
         guard source.clientID == request.clientID else { return Self.unregistered }
@@ -559,6 +618,8 @@ final class CanvasLiveBridge {
             }
             return await CanvasAgentActions.handle(call, caller: caller)
         case "receive":
+            // The heartbeat also retries held messages.
+            scheduleFlush(for: controller.id)
             guard source.provider == "claude" else { return .init() }
             source.inbox = source.inbox.filter { message in
                 guard let sender = liveTarget(from: controller.id, cardID: message.source) else {
@@ -603,19 +664,10 @@ final class CanvasLiveBridge {
                         "This link is paused. Resume it in Rafu Ensemble. Do not restart the terminals."
                 )
             }
-            guard let targetID = liveTarget(from: controller.id, cardID: destinationID),
-                let targetToken = endpoints.first(where: { $0.value.controller?.id == targetID })?
-                    .key,
-                var target = endpoints[targetToken], hasLiveEndpoint(targetID),
+            guard let route = liveRoute(from: controller.id, cardID: destinationID),
                 let sourceCard = location(of: controller.id)?.card
             else {
                 return .init(error: "Connect two live terminal nodes before sending a message.")
-            }
-            let route = liveRoute(from: controller.id, cardID: destinationID)
-            sentAt.removeAll { now().timeIntervalSince($0) > 60 }
-            guard sentAt.count < 20 else {
-                recordFailure(route, "Message limit reached. Wait one minute.")
-                return .init(error: "Message limit reached. Wait one minute.")
             }
             let message = CanvasBridgeMessage(
                 id: UUID().uuidString, source: sourceCard.id.rawValue.uuidString, text: text)
@@ -623,60 +675,268 @@ final class CanvasLiveBridge {
             else {
                 return .init(error: "The message is too large after JSON encoding.")
             }
-            if target.provider == "claude" {
-                guard target.inbox.count < 16 else {
-                    recordFailure(route, "The destination inbox is full.")
-                    return .init(error: "The destination inbox is full.")
+            let targetToken = endpoints.first(where: { $0.value.controller?.id == route.target })?
+                .key
+            guard let targetToken, hasLiveEndpoint(route.target) else {
+                // Still starting: hold the message and send it when the peer connects.
+                guard peerIsStarting(route, token: targetToken) else {
+                    return .init(error: "Connect two live terminal nodes before sending a message.")
                 }
-                target.inbox.append(message)
-                endpoints[targetToken] = target
-                sentAt.append(now())
-            } else {
-                guard let threadID = target.threadID, let endpoint = target.endpoint,
-                    let executable = target.executable, endpoint.hasPrefix("unix:///"),
-                    executable.hasPrefix("/")
-                else {
-                    let reason =
-                        "Codex is waiting for its first Ensemble tool call. Ask it to list Ensemble connections."
-                    recordFailure(route, reason)
-                    return .init(error: reason)
-                }
-                let reservation = now()
-                sentAt.append(reservation)
-                let deliveryID = UUID()
-                let task = Task {
-                    try await CanvasCodexSession.send(
-                        executable: executable, endpoint: endpoint,
-                        threadID: threadID,
-                        text: "Ensemble message from \(sourceCard.id.rawValue.uuidString):\n\(text)"
-                    )
-                }
-                deliveries[deliveryID] = Delivery(
-                    sourceToken: request.token, targetToken: targetToken, task: task)
-                defer { deliveries.removeValue(forKey: deliveryID) }
-                do {
-                    try await task.value
-                } catch {
-                    if let index = sentAt.firstIndex(of: reservation) { sentAt.remove(at: index) }
-                    if task.isCancelled {
-                        return .init(
-                            error: "Message delivery stopped because the session changed or closed."
-                        )
-                    }
-                    notice = "Codex could not accept the message. Check its terminal."
-                    recordFailure(route, "Codex could not accept the message. Check its terminal.")
-                    return .init(error: notice)
-                }
+                return hold(message, route: route, source: controller.id)
             }
-            notice = "Message queued. The receiving agent has not acknowledged it."
-            recordAccepted(route)
-            revision &+= 1
-            var delivery = CanvasAgentToolResult(
-                message:
-                    "Queued for the receiving agent. It has not acknowledged the message yet.")
-            delivery.delivered = true
-            return .init(toolResult: delivery)
+            // Messages already held for this peer go first, so the order stays.
+            if held[route.target]?.isEmpty == false {
+                return hold(message, route: route, source: controller.id)
+            }
+            let outcome = await deliver(
+                message, sourceToken: request.token, targetToken: targetToken)
+            switch outcome {
+            case .accepted:
+                return accepted(route)
+            case .rateLimited:
+                recordFailure(route, "Message limit reached. Wait one minute.")
+                return .init(error: "Message limit reached. Wait one minute.")
+            case .inboxFull:
+                recordFailure(route, "The destination inbox is full.")
+                return .init(error: "The destination inbox is full.")
+            case .notReady:
+                return hold(message, route: route, source: controller.id)
+            case .refused(let retryable):
+                if retryable, withinStartupGrace(targetToken) {
+                    return hold(
+                        message, route: route, source: controller.id,
+                        notBefore: now().addingTimeInterval(Self.retryInterval))
+                }
+                notice = "Codex could not accept the message. Check its terminal."
+                recordFailure(route, "Codex could not accept the message. Check its terminal.")
+                return .init(error: notice)
+            case .cancelled:
+                return .init(
+                    error: "Message delivery stopped because the session changed or closed.")
+            }
         default: return .init(error: "Unsupported bridge request.")
+        }
+    }
+
+    // MARK: Delivery and held messages
+
+    private enum DeliveryOutcome: Equatable {
+        case accepted
+        case rateLimited
+        case inboxFull
+        /// A Codex peer that has no thread or route yet (it is still starting).
+        case notReady
+        case cancelled
+        /// Codex's queue command failed. A timeout may still have delivered, so it
+        /// is not retryable.
+        case refused(retryable: Bool)
+    }
+
+    /// Hands one message to the target terminal's agent. It records no link
+    /// state: callers decide what each outcome means.
+    private func deliver(
+        _ message: CanvasBridgeMessage, sourceToken: String, targetToken: String
+    ) async -> DeliveryOutcome {
+        guard var target = endpoints[targetToken] else { return .cancelled }
+        sentAt.removeAll { now().timeIntervalSince($0) > 60 }
+        guard sentAt.count < 20 else { return .rateLimited }
+        if target.provider == "claude" {
+            guard target.inbox.count < 16 else { return .inboxFull }
+            target.inbox.append(message)
+            endpoints[targetToken] = target
+            sentAt.append(now())
+            return .accepted
+        }
+        guard let threadID = target.threadID, let endpoint = target.endpoint,
+            let executable = target.executable, endpoint.hasPrefix("unix:///"),
+            executable.hasPrefix("/")
+        else { return .notReady }
+        let reservation = now()
+        sentAt.append(reservation)
+        let deliveryID = UUID()
+        let send = sendToCodex
+        let text = "Ensemble message from \(message.source):\n\(message.text)"
+        let task = Task { try await send(executable, endpoint, threadID, text) }
+        deliveries[deliveryID] = Delivery(
+            sourceToken: sourceToken, targetToken: targetToken, task: task)
+        defer { deliveries.removeValue(forKey: deliveryID) }
+        do {
+            try await task.value
+        } catch {
+            if let index = sentAt.firstIndex(of: reservation) { sentAt.remove(at: index) }
+            if task.isCancelled { return .cancelled }
+            return .refused(
+                retryable: (error as? CanvasCodexSession.SessionError) == .deliveryFailed)
+        }
+        return .accepted
+    }
+
+    private func noteAccepted(_ route: LiveRoute) {
+        notice = "Message queued. The receiving agent has not acknowledged it."
+        recordAccepted(route)
+        revision &+= 1
+    }
+
+    private func accepted(_ route: LiveRoute) -> CanvasBridgeResponse {
+        noteAccepted(route)
+        var delivery = CanvasAgentToolResult(
+            message: "Queued for the receiving agent. It has not acknowledged the message yet.")
+        delivery.delivered = true
+        return .init(toolResult: delivery)
+    }
+
+    /// True while the peer terminal runs and an agent is expected in it, but no
+    /// client has connected there yet. A quit agent, a suspended route and a
+    /// plain shell are not starting: their senders get an error.
+    private func peerIsStarting(_ route: LiveRoute, token: String?) -> Bool {
+        let endpoint = token.flatMap { endpoints[$0] }
+        if endpoint?.suspended == true || endpoint?.everConnected == true { return false }
+        return expectsAgent(route.targetCard) || endpoint?.provider != nil
+    }
+
+    private func withinStartupGrace(_ token: String) -> Bool {
+        guard let since = endpoints[token]?.connectedSince else { return false }
+        return now().timeIntervalSince(since) < Self.codexStartupGrace
+    }
+
+    /// Queues a message behind the ones already waiting for the same peer.
+    private func hold(
+        _ message: CanvasBridgeMessage, route: LiveRoute, source: UUID, notBefore: Date? = nil
+    ) -> CanvasBridgeResponse {
+        var queue = held[route.target] ?? []
+        guard queue.count < Self.heldLimit else {
+            return .init(
+                error:
+                    "\(Self.heldLimit) messages already wait for that peer to connect. Wait until list_connections shows it connected, then send again."
+            )
+        }
+        let current = now()
+        queue.append(
+            HeldMessage(
+                message: message, sourceController: source,
+                destination: route.targetCard.rawValue.uuidString, queuedAt: current,
+                notBefore: notBefore ?? current))
+        held[route.target] = queue
+        scheduleExpiry()
+        revision &+= 1
+        // A connected peer with an older queue ahead of this message takes it at once.
+        scheduleFlush(for: route.target)
+        var result = CanvasAgentToolResult(
+            message:
+                "Held: that peer is not connected yet. Rafu sends the message when it connects, within \(Int(Self.heldLifetime / 60)) minutes. Do not send it again."
+        )
+        result.delivered = false
+        return .init(toolResult: result)
+    }
+
+    private func scheduleFlush(for target: UUID) {
+        guard let head = held[target]?.first, now() >= head.notBefore,
+            !flushing.contains(target)
+        else { return }
+        flushing.insert(target)
+        Task { [weak self] in await self?.flushHeld(target) }
+    }
+
+    /// Sends the held messages for `target` in order, stopping at the first one
+    /// the peer cannot take yet. Never records a failure for a start-up wait.
+    private func flushHeld(_ target: UUID) async {
+        defer { flushing.remove(target) }
+        while let next = held[target]?.first {
+            guard now() >= next.notBefore else { return }
+            // The sender or the link can be gone since the message was held.
+            guard let route = liveRoute(from: next.sourceController, cardID: next.destination),
+                route.target == target, hasLiveEndpoint(next.sourceController),
+                let sourceToken = endpoints.first(where: {
+                    $0.value.controller?.id == next.sourceController
+                })?.key
+            else {
+                removeHeld(next.message.id, from: target)
+                continue
+            }
+            guard hasLiveEndpoint(target),
+                let targetToken = endpoints.first(where: { $0.value.controller?.id == target })?.key
+            else { return }
+            let outcome = await deliver(
+                next.message, sourceToken: sourceToken, targetToken: targetToken)
+            switch outcome {
+            case .accepted:
+                removeHeld(next.message.id, from: target)
+                noteAccepted(route)
+            case .cancelled:
+                removeHeld(next.message.id, from: target)
+            case .rateLimited, .inboxFull, .notReady:
+                return
+            case .refused(let retryable):
+                if retryable, withinStartupGrace(targetToken) {
+                    retryHeld(next.message.id, in: target, after: Self.retryInterval)
+                    return
+                }
+                removeHeld(next.message.id, from: target)
+                notice = "Codex could not accept the message. Check its terminal."
+                recordFailure(route, "Codex could not accept the message. Check its terminal.")
+            }
+        }
+    }
+
+    private func removeHeld(_ id: String, from target: UUID) {
+        let kept = (held[target] ?? []).filter { $0.message.id != id }
+        held[target] = kept.isEmpty ? nil : kept
+        scheduleExpiry()
+        revision &+= 1
+    }
+
+    private func retryHeld(_ id: String, in target: UUID, after delay: TimeInterval) {
+        guard let index = held[target]?.firstIndex(where: { $0.message.id == id }) else { return }
+        held[target]?[index].notBefore = now().addingTimeInterval(delay)
+    }
+
+    /// Drops held messages whose Live link is gone (paused, removed, or a card
+    /// that left the board), like the inbox of a disabled link.
+    private func purgeUnroutableHeld() {
+        for (target, queue) in held {
+            let kept = queue.filter {
+                liveRoute(from: $0.sourceController, cardID: $0.destination) != nil
+            }
+            held[target] = kept.isEmpty ? nil : kept
+        }
+        scheduleExpiry()
+    }
+
+    /// Number of messages waiting for the peer terminal. A count, never a body.
+    func heldMessageCount(for controllerID: UUID) -> Int { held[controllerID]?.count ?? 0 }
+
+    /// Drops held messages the peer never took in `heldLifetime`, and marks their
+    /// links Failed: this is a real failure. One timer calls it; a test calls it
+    /// after it moves the clock.
+    func expireHeldMessages() {
+        let current = now()
+        for (target, queue) in held {
+            let expired = queue.filter {
+                current.timeIntervalSince($0.queuedAt) >= Self.heldLifetime
+            }
+            guard !expired.isEmpty else { continue }
+            for message in expired {
+                recordFailure(
+                    liveRoute(from: message.sourceController, cardID: message.destination),
+                    "The peer did not connect in time. Send the message again.")
+            }
+            let kept = queue.filter { current.timeIntervalSince($0.queuedAt) < Self.heldLifetime }
+            held[target] = kept.isEmpty ? nil : kept
+        }
+        scheduleExpiry()
+        revision &+= 1
+    }
+
+    /// One timer, for the oldest held message. There is no polling.
+    private func scheduleExpiry() {
+        expiryTask?.cancel()
+        expiryTask = nil
+        guard let oldest = held.values.flatMap({ $0 }).map(\.queuedAt).min() else { return }
+        let wait = max(0, oldest.addingTimeInterval(Self.heldLifetime).timeIntervalSince(now()))
+        expiryTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(wait))
+            guard !Task.isCancelled else { return }
+            self?.expireHeldMessages()
         }
     }
 
@@ -833,6 +1093,7 @@ final class CanvasLiveBridge {
         let edge: CanvasConnection
         let board: CanvasBoardState
         let sourceCard: CanvasCardID
+        let targetCard: CanvasCardID
         let target: UUID
     }
 
@@ -849,7 +1110,8 @@ final class CanvasLiveBridge {
             let target = source.session.terminal.terminalGroup(groupID)?.panes.first?.sessionID
         else { return nil }
         return LiveRoute(
-            edge: edge, board: source.board, sourceCard: source.card.id, target: target)
+            edge: edge, board: source.board, sourceCard: source.card.id, targetCard: card.id,
+            target: target)
     }
 
     private func liveTarget(from controllerID: UUID, cardID: String) -> UUID? {

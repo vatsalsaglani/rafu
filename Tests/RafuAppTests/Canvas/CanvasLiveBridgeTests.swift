@@ -27,12 +27,39 @@ private final class CanvasActivityProbe {
     func end() { ended += 1 }
 }
 
+/// Nodes where the test says Rafu started an agent (the bridge asks the agent
+/// center in the app).
+@MainActor
+private final class CanvasStartHints {
+    var cards: Set<CanvasCardID> = []
+}
+
+/// Stands in for `codex queue`: records what a Codex peer would receive and can
+/// refuse a number of calls first.
+@MainActor
+private final class CodexSendProbe {
+    private(set) var sent: [(thread: String, text: String)] = []
+    var refusals = 0
+    private(set) var attempts = 0
+
+    func send(thread: String, text: String) throws {
+        attempts += 1
+        if refusals > 0 {
+            refusals -= 1
+            throw CanvasCodexSession.SessionError.deliveryFailed
+        }
+        sent.append((thread, text))
+    }
+}
+
 @MainActor
 private struct CanvasLiveBridgeFixture {
     let session: WorkspaceSession
     let board: CanvasBoardState
     let controllers: [WorkspaceTerminalController]
     let cards: [CanvasCard]
+    let hints: CanvasStartHints
+    let codex: CodexSendProbe
     let tokens = [
         "first-private-capability", "second-private-capability", "third-private-capability",
     ]
@@ -64,6 +91,8 @@ private struct CanvasLiveBridgeFixture {
         let edge = try #require(board.connections.first?.id)
         let routes = Dictionary(uniqueKeysWithValues: zip(controllers.map(\.id), cards.map(\.id)))
         let clock = CanvasBridgeClock()
+        let hints = CanvasStartHints()
+        let codex = CodexSendProbe()
         let bridge = CanvasLiveBridge(
             location: { id in
                 guard let cardID = routes[id],
@@ -74,7 +103,11 @@ private struct CanvasLiveBridgeFixture {
             beginActivity: { options, reason in
                 activity?.begin(options, reason) ?? NSObject()
             },
-            endActivity: { _ in activity?.end() })
+            endActivity: { _ in activity?.end() },
+            expectsAgent: { hints.cards.contains($0) },
+            sendToCodex: { _, _, thread, text in try await codex.send(thread: thread, text: text) })
+        self.hints = hints
+        self.codex = codex
         board.revokeSessionLinks = { [weak bridge, weak board] edges in
             guard let board else { return }
             for edge in edges { bridge?.disable(edge, in: board) }
@@ -1265,5 +1298,221 @@ struct CanvasLiveBridgeTests {
         fixture.bridge.pause(fixture.edge, in: fixture.board)
         _ = await fixture.bridge.handle(fixture.request(0, "send", destination: 1, text: "held"))
         #expect(fixture.bridge.activity(of: fixture.edge, in: fixture.board).count == 2)
+    }
+}
+
+/// The start-up window of a peer: its terminal runs, but its agent has not
+/// connected yet. A message then waits; it does not fail the link.
+@Suite("Canvas messages to a peer that is still starting")
+@MainActor
+struct CanvasHeldMessageTests {
+    /// Bounded: yields until `done`. The flush runs in its own task.
+    private func settle(_ done: () -> Bool) async {
+        for _ in 0..<1_000 where !done() { await Task.yield() }
+    }
+
+    private func quiet() async {
+        for _ in 0..<100 { await Task.yield() }
+    }
+
+    private func held(_ fixture: CanvasLiveBridgeFixture, _ index: Int) -> Int {
+        fixture.bridge.heldMessageCount(for: fixture.controllers[index].id)
+    }
+
+    private func state(_ fixture: CanvasLiveBridgeFixture) throws -> CanvasLinkState {
+        let edge = try #require(fixture.board.connections.first)
+        return fixture.bridge.linkState(of: edge, in: fixture.board)
+    }
+
+    @Test(
+        "A message to a starting peer is held, keeps the link out of Failed, then arrives in order")
+    func heldUntilTheStartingPeerConnects() async throws {
+        let fixture = try CanvasLiveBridgeFixture()
+        fixture.hints.cards = [fixture.cards[1].id]
+        #expect(await fixture.bridge.handle(fixture.request(0, "register")).error == nil)
+        fixture.bridge.enable(fixture.edge, in: fixture.board)
+
+        let first = await fixture.bridge.handle(
+            fixture.request(0, "send", destination: 1, text: "first"))
+        let second = await fixture.bridge.handle(
+            fixture.request(0, "send", destination: 1, text: "second"))
+        #expect(first.error == nil)
+        #expect(second.error == nil)
+        #expect(first.toolResult?.delivered == false)
+        #expect(first.toolResult?.message?.contains("Held") == true)
+        #expect(held(fixture, 1) == 2)
+        // Not connected yet is Disconnected, never Failed.
+        #expect(try state(fixture) == .disconnected(.agentNotRunning))
+
+        #expect(await fixture.bridge.handle(fixture.request(1, "register")).error == nil)
+        await settle { held(fixture, 1) == 0 }
+        #expect(try state(fixture) == .live)
+        let one = await fixture.bridge.handle(fixture.request(1, "receive"))
+        let two = await fixture.bridge.handle(fixture.request(1, "receive"))
+        #expect([one.messages.first?.text, two.messages.first?.text] == ["first", "second"])
+        #expect(
+            one.messages.first?.source == fixture.cards[0].id.rawValue.uuidString)
+        #expect(fixture.bridge.lastMessageEvent?.connectionID == fixture.edge)
+    }
+
+    @Test(
+        "Codex registers before its supervisor binds the thread: the message waits, the link stays Live"
+    )
+    func codexRegisteredBeforeItHasAThread() async throws {
+        let fixture = try CanvasLiveBridgeFixture()
+        #expect(await fixture.bridge.handle(fixture.request(0, "register")).error == nil)
+        let route = CanvasLiveBridgeFixture.route()
+        // The start order that used to fail the link: A created B with a prompt
+        // and a link, B's MCP client registered, A sent a second message before
+        // the thread and route were known.
+        #expect(
+            await fixture.bridge.handle(
+                fixture.codexRegistration(1, route: route, client: fixture.clients[1])
+            ).error == nil)
+        fixture.bridge.enable(fixture.edge, in: fixture.board)
+
+        let sent = await fixture.bridge.handle(
+            fixture.request(0, "send", destination: 1, text: "second message"))
+        #expect(sent.error == nil)
+        #expect(sent.toolResult?.delivered == false)
+        #expect(fixture.codex.attempts == 0)
+        #expect(held(fixture, 1) == 1)
+        #expect(try state(fixture) == .live)
+
+        let thread = UUID().uuidString
+        #expect(
+            await fixture.bridge.handle(fixture.bind(1, route: route, thread: thread)).error == nil)
+        await settle { held(fixture, 1) == 0 }
+        #expect(fixture.codex.sent.map(\.thread) == [thread])
+        #expect(fixture.codex.sent.first?.text.contains("second message") == true)
+        #expect(try state(fixture) == .live)
+        #expect(fixture.bridge.lastMessageEvent?.connectionID == fixture.edge)
+    }
+
+    /// A Codex peer that is bound and registered, with its link Live.
+    private func codexPeer(_ fixture: CanvasLiveBridgeFixture) async throws {
+        #expect(await fixture.bridge.handle(fixture.request(0, "register")).error == nil)
+        let route = CanvasLiveBridgeFixture.route()
+        #expect(
+            await fixture.bridge.handle(fixture.bind(1, route: route, thread: UUID().uuidString))
+                .error == nil)
+        #expect(
+            await fixture.bridge.handle(
+                fixture.codexRegistration(1, route: route, client: fixture.clients[1])
+            ).error == nil)
+        fixture.bridge.enable(fixture.edge, in: fixture.board)
+    }
+
+    private func heartbeat(_ fixture: CanvasLiveBridgeFixture) async {
+        _ = await fixture.bridge.handle(fixture.request(0, "receive"))
+        _ = await fixture.bridge.handle(fixture.request(1, "receive", provider: "codex"))
+    }
+
+    @Test("A Codex refusal right after it connected is retried, not a failure")
+    func codexRefusalDuringStartIsRetried() async throws {
+        let fixture = try CanvasLiveBridgeFixture()
+        try await codexPeer(fixture)
+        fixture.codex.refusals = 1
+        let sent = await fixture.bridge.handle(
+            fixture.request(0, "send", destination: 1, text: "retry me"))
+        #expect(sent.error == nil)
+        #expect(sent.toolResult?.delivered == false)
+        #expect(try state(fixture) == .live)
+
+        // Before the retry time the heartbeat does not try again.
+        await heartbeat(fixture)
+        await quiet()
+        #expect(fixture.codex.attempts == 1)
+
+        fixture.clock.date.addTimeInterval(CanvasLiveBridge.retryInterval + 1)
+        await heartbeat(fixture)
+        await settle { held(fixture, 1) == 0 }
+        #expect(fixture.codex.attempts == 2)
+        #expect(fixture.codex.sent.count == 1)
+        #expect(try state(fixture) == .live)
+    }
+
+    @Test("A Codex refusal long after it connected is a real failure")
+    func codexRefusalAfterTheGraceFails() async throws {
+        let fixture = try CanvasLiveBridgeFixture()
+        try await codexPeer(fixture)
+        for _ in 0..<5 {
+            fixture.clock.date.addTimeInterval(10)
+            await heartbeat(fixture)
+        }
+        fixture.codex.refusals = 1
+        let sent = await fixture.bridge.handle(
+            fixture.request(0, "send", destination: 1, text: "late"))
+        #expect(sent.error?.contains("could not accept") == true)
+        #expect(held(fixture, 1) == 0)
+        #expect(try state(fixture).kind == .failed)
+    }
+
+    @Test("A held message the peer never takes expires, and the link then shows Failed")
+    func heldMessageExpires() async throws {
+        let fixture = try CanvasLiveBridgeFixture()
+        fixture.hints.cards = [fixture.cards[1].id]
+        #expect(await fixture.bridge.handle(fixture.request(0, "register")).error == nil)
+        fixture.bridge.enable(fixture.edge, in: fixture.board)
+        _ = await fixture.bridge.handle(fixture.request(0, "send", destination: 1, text: "lost"))
+        #expect(held(fixture, 1) == 1)
+
+        fixture.clock.date.addTimeInterval(CanvasLiveBridge.heldLifetime + 1)
+        fixture.bridge.expireHeldMessages()
+        #expect(held(fixture, 1) == 0)
+        // The sender and the late peer both connect: the failure is visible.
+        _ = await fixture.bridge.handle(fixture.request(0, "receive"))
+        #expect(await fixture.bridge.handle(fixture.request(1, "register")).error == nil)
+        #expect(
+            try state(fixture)
+                == .failed("The peer did not connect in time. Send the message again."))
+        #expect(await fixture.bridge.handle(fixture.request(1, "receive")).messages.isEmpty)
+    }
+
+    @Test("A plain shell or a quit agent is not starting: its sender gets an error")
+    func notStartingIsAnError() async throws {
+        let fixture = try CanvasLiveBridgeFixture()
+        #expect(await fixture.bridge.handle(fixture.request(0, "register")).error == nil)
+        fixture.bridge.enable(fixture.edge, in: fixture.board)
+        // No agent was ever expected in the second node.
+        let plain = await fixture.bridge.handle(
+            fixture.request(0, "send", destination: 1, text: "hello"))
+        #expect(plain.error?.contains("Connect two live terminal nodes") == true)
+        #expect(held(fixture, 1) == 0)
+
+        // An agent that connected and then quit is not starting either.
+        fixture.hints.cards = [fixture.cards[1].id]
+        #expect(await fixture.bridge.handle(fixture.request(1, "register")).error == nil)
+        #expect(await fixture.bridge.handle(fixture.request(1, "unregister")).error == nil)
+        let quit = await fixture.bridge.handle(
+            fixture.request(0, "send", destination: 1, text: "hello"))
+        #expect(quit.error?.contains("Connect two live terminal nodes") == true)
+        #expect(held(fixture, 1) == 0)
+        #expect(try state(fixture).kind != .failed)
+    }
+
+    @Test("Held messages are bounded and a paused link drops them")
+    func heldMessagesAreBoundedAndPauseDropsThem() async throws {
+        let fixture = try CanvasLiveBridgeFixture()
+        fixture.hints.cards = [fixture.cards[1].id]
+        #expect(await fixture.bridge.handle(fixture.request(0, "register")).error == nil)
+        fixture.bridge.enable(fixture.edge, in: fixture.board)
+        for index in 0..<CanvasLiveBridge.heldLimit {
+            let held = await fixture.bridge.handle(
+                fixture.request(0, "send", destination: 1, text: "m\(index)"))
+            #expect(held.error == nil)
+        }
+        let over = await fixture.bridge.handle(
+            fixture.request(0, "send", destination: 1, text: "one too many"))
+        #expect(over.error?.contains("already wait") == true)
+        #expect(held(fixture, 1) == CanvasLiveBridge.heldLimit)
+        #expect(try state(fixture).kind != .failed)
+
+        fixture.bridge.pause(fixture.edge, in: fixture.board)
+        #expect(held(fixture, 1) == 0)
+        fixture.bridge.resume(fixture.edge, in: fixture.board)
+        #expect(await fixture.bridge.handle(fixture.request(1, "register")).error == nil)
+        await quiet()
+        #expect(await fixture.bridge.handle(fixture.request(1, "receive")).messages.isEmpty)
     }
 }

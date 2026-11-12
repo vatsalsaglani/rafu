@@ -1141,7 +1141,8 @@ public nonisolated struct CanvasAgentToolResult: Codable, Hashable, Sendable {
     /// A workspace-relative file path, for example an export.
     public var path: String?
     /// `send_message`: true when Rafu queued the message for the receiving
-    /// agent. It does not mean the agent has read it.
+    /// agent. It does not mean the agent has read it. False means Rafu holds the
+    /// message until the peer, which is still starting, connects.
     public var delivered: Bool?
     /// `terminal_create` with `link`: the new peer's `@mention` for `send_message`.
     public var mention: String?
@@ -1354,7 +1355,7 @@ public nonisolated enum CanvasAgentToolCatalog {
             )
         case .terminalCreate:
             return (
-                "Add a terminal node. With agent (claude, codex, opencode, gemini, cursor, kimi, cline) or command (an argument array, never a shell string) Rafu starts the shell in the visible node and types that command. prompt gives claude or codex its first task. A prompt or command is typed as one line (see the limits on those arguments), so a long brief goes in a file or a note and the prompt names it. link true also adds a message link from your node to the new one: use it for every claude or codex peer, even one meant for the user (pause the link for quiet, do not skip it). Starting moves the user's view to the node. The reply has state: running means the shell is up and Rafu is typing the line; stopped means the node exists and the line is queued, not typed. Read state, then ensemble_describe and list_connections, before you tell the user an agent runs. Starting asks the user unless Agent control is Allow.",
+                "Add a terminal node. With agent (claude, codex, opencode, gemini, cursor, kimi, cline) or command (an argument array, never a shell string) Rafu starts the shell in the visible node and types that command. prompt gives claude or codex its first task. A prompt or command is typed as one line (see the limits on those arguments), so a long brief goes in a file or a note and the prompt names it. link true also adds a message link from your node to the new one: use it for every claude or codex peer, even one meant for the user (pause the link for quiet, do not skip it). Starting can move the user's view to the node. The reply has state: running means the shell is up and Rafu is typing the line; stopped means the node exists and the line is queued, not typed. Read state, then ensemble_describe and list_connections, before you tell the user an agent runs. The agent needs a few seconds to connect: wait until list_connections shows it connected, then send_message. Starting asks the user unless Agent control is Allow.",
                 schema(
                     [
                         "title": title,
@@ -1393,7 +1394,7 @@ public nonisolated enum CanvasAgentToolCatalog {
             )
         case .terminalStart:
             return (
-                "Start the shell in a stopped terminal node and type any lines queued for it. Moves the user's view to the node. The reply has state (running or stopped); stopped means queued lines are still not typed. Asks the user unless Agent control is Allow.",
+                "Start the shell in a stopped terminal node and type any lines queued for it. Can move the user's view to the node. The reply has state (running or stopped); stopped means queued lines are still not typed. Asks the user unless Agent control is Allow.",
                 schema(["node_id": nodeID], required: ["node_id"])
             )
         case .terminalSend:

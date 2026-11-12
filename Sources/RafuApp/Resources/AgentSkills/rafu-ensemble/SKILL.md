@@ -58,8 +58,9 @@ logged under "Agents" in the Ensemble bar, and undoable by the user.
    `terminal_create {"agent": "codex", "title": "Codex — Tests", "prompt": "Read the note titled Tests and do what it says", "link": true, "near": "<your node id>"}`
    (`agent` can be `claude`, `codex`, `opencode`, `gemini`, `cursor`, `kimi`,
    `cline`; only `claude` and `codex` take `prompt` and join message links.)
-   Starting the terminal **moves the user's view to the new node**, because a
-   terminal starts only in a node that is on screen. The result says so.
+   The terminal starts even when the Ensemble is not on screen. When it is on
+   screen, starting can move the user's view to the new node; the result says
+   so.
 2. Read the result `state` (same words as `ensemble_describe`):
    - `running`: the shell is up and Rafu is typing the launch line. This does
      not yet mean the agent runs.
@@ -69,8 +70,11 @@ logged under "Agents" in the Ensemble bar, and undoable by the user.
      once that is fixed: Rafu then types the queued line.
 3. Verify before you tell the user an agent runs: call `ensemble_describe`
    (the node `state` is `running` and `agent` is set) and `list_connections`
-   (the peer is listed). Codex connects after its first Rafu tool call, so a
-   Codex peer may show up a little later.
+   (the peer is listed). **Wait until `list_connections` shows the peer
+   `connected`** (it needs a few seconds to start and connect), then send. The
+   prompt you passed to `terminal_create` is already its first task: do not
+   repeat it as a message. A message sent before the peer connects is held and
+   delivered when it does; do not send it again.
 4. **Link peers by default**, also a peer meant for the user to talk to. A
    link costs nothing: pause it (`link_set_state` `paused`) when you want
    quiet; do not skip it. Without `link`, do it by hand:
@@ -82,7 +86,9 @@ logged under "Agents" in the Ensemble bar, and undoable by the user.
 5. Send work: `send_message {"destination": "<node id or @mention>", "text": "..."}`
    (the new peer's `mention` is in the `terminal_create` result). The result
    has `delivered: true` when Rafu queued it; the peer may not have read it
-   yet. A paused link or a peer that is not connected is an error that says so.
+   yet. `delivered: false` means Rafu holds it until the peer, which is still
+   starting, connects. A paused link or a peer that is not connected is an
+   error that says so.
 6. Read replies: Claude Code receives channel messages automatically; also
    call `receive_messages`.
 
@@ -159,7 +165,7 @@ a message link to it (`edge_create` kind `message`), set it live, and use
 - `node_create` kinds `file`/`image` (`path`), `web` (`url` on localhost).
 - `node_update` renames, moves (`x`, `y` top-left) or resizes a node.
 - `node_remove`, `edge_remove` — always confirmed by the user in Ask mode.
-- `terminal_start` starts a stopped terminal node and moves the user's view
+- `terminal_start` starts a stopped terminal node and can move the user's view
   to it. Read the result `state`; lines queued for the node are typed when
   its shell is up.
 
