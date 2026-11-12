@@ -243,33 +243,12 @@ enum CanvasAgentActions {
         "Waiting for the user to approve this action in Rafu. Call action_status with this request_id later."
     static let hiddenMessage =
         "This Ensemble is closed in Rafu. Open it to let agents change it. Reading still works."
-    static let notShownMessage =
-        "Show this Ensemble in Rafu to let agents open apps or start terminals. Other changes work while it is in the background."
     static let resultBytes = 24 * 1_024
 
     /// An open Ensemble accepts changes whether or not its tab is selected, so
     /// agents can keep working while the window is hidden or the display sleeps.
     private static func isOpen(_ board: CanvasBoardState, in session: WorkspaceSession) -> Bool {
         session.canvas.boards[board.id] === board
-    }
-
-    /// Only these need views that exist while the Ensemble is on screen: a
-    /// terminal card that starts a process through its own view.
-    /// Links and live shells work in the background.
-    private static func needsShownBoard(_ call: CanvasAgentToolCall, caller: CanvasAgentCaller)
-        -> Bool
-    {
-        switch call.tool {
-        case .terminalStart: return true
-        case .terminalCreate: return call.startsProcess
-        case .terminalSend:
-            guard !isRoutedByLink(call, caller: caller),
-                let card = try? findCard(call.nodeID, in: caller.board),
-                case .terminal(let groupID) = card.content
-            else { return false }
-            return caller.session.terminal.terminalGroup(groupID)?.panes.first?.status != .live
-        default: return false
-        }
     }
 
     /// A message to a terminal that a Live link reaches is the user's consent.
@@ -280,10 +259,6 @@ enum CanvasAgentActions {
             return false
         }
         return CanvasLiveBridge.shared.hasLiveRoute(from: caller.controllerID, to: node)
-    }
-
-    private static func isShown(_ board: CanvasBoardState, in session: WorkspaceSession) -> Bool {
-        session.canvasResources[board.id]?.isPresented == true
     }
 
     static func handle(_ original: CanvasAgentToolCall, caller: CanvasAgentCaller) async
@@ -301,8 +276,6 @@ enum CanvasAgentActions {
         if routedByLink { risk = .edit }
         if risk != .read {
             guard isOpen(board, in: caller.session) else { return .init(error: hiddenMessage) }
-            guard !needsShownBoard(call, caller: caller) || isShown(board, in: caller.session)
-            else { return .init(error: notShownMessage) }
             guard center.admit(caller.controllerID) else {
                 return .init(error: "Too many Ensemble changes. Wait one minute.")
             }
@@ -366,9 +339,6 @@ enum CanvasAgentActions {
             guard isOpen(caller.board, in: caller.session) else {
                 return .init(error: hiddenMessage)
             }
-            guard
-                !needsShownBoard(call, caller: caller) || isShown(caller.board, in: caller.session)
-            else { return .init(error: notShownMessage) }
             guard caller.board.agentControlMode != .off else {
                 return .init(error: CanvasAgentPolicy.offMessage)
             }
@@ -862,8 +832,13 @@ enum CanvasAgentActions {
         live.state = "live"
         do {
             let linkState = try linkSetState(live, board: caller.board)
-            result.message = [message, "Linked from your node.", linkState.toolResult?.message]
-                .compactMap { $0 }.joined(separator: " ")
+            let connects =
+                call.agent == "claude" || call.agent == "codex"
+                ? "Its agent needs a few seconds to connect: wait until list_connections shows it connected, then send_message."
+                : nil
+            result.message = [
+                message, "Linked from your node.", linkState.toolResult?.message, connects,
+            ].compactMap { $0 }.joined(separator: " ")
         } catch {
             result.message =
                 "\(message) The node exists and the message link was added, but it was not set live: \(failureText(error)) Call link_set_state live with the edge_id."

@@ -68,9 +68,9 @@ reconnects with bounded backoff instead of exiting.
 
 **Off-screen mutation.** Mutating tools need an Ensemble that is open in the
 workspace, not an Ensemble that is on screen. Notes, nodes, edges, diagrams,
-frames, and export apply while the tab is not selected. Tools that start a
-process or dock an app still need the Ensemble shown, because a terminal card
-starts its process only through its view. Off-screen edits in Allow mode apply
+frames, and export apply while the tab is not selected. (Superseded on
+2026-11-12, see the last amendment below: tools that start a terminal no
+longer need the Ensemble shown.) Off-screen edits in Allow mode apply
 without the user watching; they stay undoable and recorded.
 
 **Power.** While a terminal holds a live, non-suspended agent route, the app
@@ -196,3 +196,38 @@ tools follow the same Off / Ask / Allow rules as the other edit tools. See
 The bridge gains one operation, `launch`, sent by the `claude` wrapper before it
 replaces itself with Claude. Existing operations and their shapes are unchanged.
 See [`../references/canvas-live-sessions.md`](../references/canvas-live-sessions.md).
+
+## Amendment (2026-11-12): agent starts without a visible card, and messages to a starting peer
+
+By the user's direction ("until the user starts the terminal it doesn't start
+that has to be updated"; "the edges go failed"). This amendment changes two
+parts of the "Link resilience and off-screen edits" section above.
+
+**Start without a card view.** The clause "Tools that start a process ... still
+need the Ensemble shown, because a terminal card starts its process only
+through its view" is superseded. A permitted start (Allow, or Ask after the
+user approved) starts the node's shell whether or not the Ensemble is on screen.
+When no card can host the terminal (the board is behind another tab, or the
+window is hidden) Rafu starts the same Terminal Group pane itself and creates
+its terminal view without placing it in a window, so the shell runs. A card that
+is shown later reuses that view. The invariant stays: a process starts only in a
+terminal node that exists on the board, visible there, and recorded in the
+Agents panel; the node need not be on screen. No lease is taken and the user's
+view and focus do not move. ADR 0025's presentation lease is unchanged: it
+governs which surface shows the view, not whether the process runs.
+
+**Held messages.** A message sent over a Live link to a peer that is still
+starting is held, per target terminal, at most 8 messages for 2 minutes, and is
+delivered in order when the peer's client registers (or, for Codex, when its
+thread and route are known). It no longer turns the link Failed. A Codex
+`queue` refusal within 45 seconds of the client connecting is retried every 3
+seconds. Failed now means a real failure: a message the peer never took in 2
+minutes, a refusal after the start-up window, a full inbox, or the send limit.
+A quit agent, a suspended route and a plain shell are not "starting": their
+senders still get an error. Held messages are never saved or logged and a
+paused or removed link drops them.
+
+The agent guidance (MCP instructions, `rafu-ensemble` skill) tells agents to
+start a peer, wait until `list_connections` shows it connected, and then send
+the next message. The start prompt is a launch argument typed with the launch
+line, so it is already ordered before any channel message.

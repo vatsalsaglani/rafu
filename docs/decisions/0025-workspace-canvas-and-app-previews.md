@@ -177,3 +177,12 @@ and inert restore), and embedding images in the board document (bounded by
 `CanvasLimits.documentBytes` and duplicated in undo history). See
 `docs/references/canvas-interaction.md`, "Drop preview ownership, board
 notices, and outside images".
+
+## Cross-reference (2026-11-12): agent starts without a card view
+
+[ADR 0026](0026-canvas-live-session-links.md), amendment of 2026-11-12: when no
+card view can host a terminal (the board is behind another tab, or the window is
+hidden), a permitted agent start runs the pane itself and creates its terminal
+view without mounting it. The presentation lease of this ADR is unchanged: it
+governs which surface shows the view, not whether the process runs. Inert
+restore and the explicit-start rules for the user are unchanged.

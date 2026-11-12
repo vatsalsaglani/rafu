@@ -8,7 +8,8 @@
    The brief lives in the Plan note; the prompt is one short line that names it.
 4. Read the result `state`. If it is `stopped`, the line is queued: follow the
    message, then call `terminal_start`. Then check `ensemble_describe` and
-   `list_connections` before you tell the user Codex runs.
+   `list_connections` before you tell the user Codex runs. Wait until
+   `list_connections` shows the Codex peer `connected` before step 7.
 5. `link: true` already added the message link. By hand it is
    `edge_create {"from": "<you>", "to": "<codex node>", "kind": "message", "label": "review"}`
    then `link_set_state {"edge_id": "<edge>", "state": "live"}`.

@@ -35,6 +35,11 @@ private struct CanvasAgentFixture {
                 persistence: CanvasPersistenceStore(directory: scratch.url.appending(path: "state"))
             ))
         #expect(await session.canvas.configure(root: scratch.url))
+        // A started node needs a workspace folder, and no test may spawn a shell.
+        session.descriptor = WorkspaceDescriptor(
+            displayName: "Agent test",
+            location: .local(LocalWorkspaceReference(path: scratch.url.path)))
+        session.spawnsHeadlessCanvasTerminals = false
         let board = try #require(await session.canvas.create(title: "Agent test"))
         let shell = TerminalShell(path: "/bin/zsh", name: "zsh", isDefault: true)
         let profile = TerminalPaneLaunchProfile(shell: .preferredShell, startingFolder: .root)
@@ -187,14 +192,29 @@ struct CanvasAgentActionsTests {
         #expect(fixture.board.cards.count == 2)
     }
 
-    @Test("Starting terminals still needs the Ensemble on screen")
-    func processToolsNeedTheBoardShown() async throws {
+    @Test("Starting a terminal works while the Ensemble is in the background")
+    func processToolsStartWithoutTheBoardShown() async throws {
         let fixture = try await CanvasAgentFixture(presented: false)
         fixture.board.setAgentControlMode(.allow)
+        let viewBefore = fixture.board.viewport
         let started = try await fixture.call(
             "terminal_create", ["title": "Agent", "agent": "claude"])
-        #expect(started.error == CanvasAgentActions.notShownMessage)
-        #expect(fixture.board.cards.count == 2)
+        #expect(started.error == nil)
+        #expect(started.toolResult?.state == "running")
+        #expect(fixture.board.cards.count == 3)
+        let card = try #require(fixture.board.cards.last)
+        guard case .terminal(let groupID) = card.content else {
+            Issue.record("not a terminal card")
+            return
+        }
+        let pane = try #require(fixture.session.terminal.terminalGroup(groupID)?.panes.first)
+        #expect(pane.status == .live)
+        #expect(pane.sessionID != nil)
+        // No card consumed anything, and the user's view and focus stay put.
+        #expect(fixture.board.terminalStartRequest == nil)
+        #expect(fixture.board.viewport == viewBefore)
+        #expect(fixture.session.canvasTerminalOwners[groupID] == nil)
+        #expect(fixture.session.editorLayout.tab(matching: .terminalGroup(groupID: groupID)) == nil)
     }
 
     @Test("Allow runs changes at once; each is undoable and logged")
@@ -795,6 +815,81 @@ struct CanvasTerminalStartTests {
         }
         #expect(report.hold != .refused)
         session.isOpenFolderErrorPresented = false
+    }
+
+    @Test("A start on a background board runs the shell and types its queued line with no click")
+    func backgroundStartTypesTheQueuedLine() async throws {
+        let fixture = try await CanvasAgentFixture(presented: false)
+        fixture.board.setAgentControlMode(.allow)
+        let typed = TypedLines()
+        let seams = CanvasTerminalStarter.DrainSeams(
+            isReady: { _ in true },
+            send: { _, line in
+                typed.lines.append(line)
+                return true
+            })
+        let response = try await CanvasTerminalStarter.$drainSeams.withValue(seams) {
+            let response = try await fixture.call(
+                "terminal_create", ["agent": "claude", "prompt": "fix \(secretLine) now"])
+            // The drain runs in its own task after the reply. Bounded, no sleep.
+            for _ in 0..<1_000 where typed.lines.isEmpty { await Task.yield() }
+            return response
+        }
+        #expect(response.error == nil)
+        let result = try #require(response.toolResult)
+        #expect(result.state == "running")
+        let message = try #require(result.message)
+        #expect(!message.contains(secretLine))
+        #expect(!message.contains("terminal_start"))
+        #expect(typed.lines.count == 1)
+        #expect(typed.lines.first?.contains(secretLine) == true)
+        let card = try #require(fixture.board.cards.last)
+        #expect(fixture.board.pendingTerminalLines[card.id] == nil)
+        #expect(fixture.board.terminalStartRequest == nil)
+    }
+
+    @Test("terminal_start on a stopped node starts it while the window is hidden")
+    func startWorksWhileTheWindowIsHidden() async throws {
+        let fixture = try await CanvasAgentFixture()
+        fixture.board.setAgentControlMode(.allow)
+        let created = try await fixture.call("terminal_create", ["title": "Plain"])
+        #expect(created.toolResult?.state == "stopped")
+        let nodeID = try #require(created.toolResult?.nodeID)
+        // An occluded window mounts no usable card view.
+        fixture.session.canvasResources[fixture.board.id]?.pause()
+        let started = try await fixture.call("terminal_start", ["node_id": nodeID])
+        #expect(started.error == nil)
+        #expect(started.toolResult?.state == "running")
+        #expect(fixture.board.terminalStartRequest == nil)
+    }
+
+    @Test("A card that takes the start request and does not start it is bypassed")
+    func startFallsBackWhenTheCardDropsTheRequest() async throws {
+        let fixture = try await CanvasAgentFixture()
+        fixture.board.setAgentControlMode(.allow)
+        let created = try await fixture.call("terminal_create", ["title": "Plain"])
+        let card = try #require(fixture.board.cards.last)
+        #expect(created.toolResult?.state == "stopped")
+        let board = fixture.board
+        // What a mounted card does when it cannot take the view: it clears the
+        // request and starts nothing.
+        let dropper = Task { @MainActor in
+            for _ in 0..<10_000 {
+                if board.terminalStartRequest == card.id {
+                    board.terminalStartRequest = nil
+                    return
+                }
+                await Task.yield()
+            }
+        }
+        let report = try await withShortStartWait(steps: 3) {
+            try await CanvasTerminalStarter.start(
+                card: card, groupID: terminalGroupID(of: card), line: nil, board: board,
+                session: fixture.session, onGiveUp: {})
+        }
+        await dropper.value
+        #expect(report.running)
+        #expect(report.hold == nil)
     }
 
     @Test("The drain types each queued line once, in order, and clears the queue")

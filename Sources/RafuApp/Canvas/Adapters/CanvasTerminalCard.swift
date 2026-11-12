@@ -72,8 +72,13 @@ struct CanvasTerminalCard: View {
                     notRunningBlock(pane, id: id)
                 }
             }
+            // Also when the window becomes visible again: it released every lease
+            // while hidden, and a terminal that kept running (an agent started it,
+            // or it ran in the background) must show its view again by itself.
             .onChange(
-                of: session.canvasResources[board.id]?.canPresent(owner: presentationID) == true,
+                of: session.canvasResources[board.id].map {
+                    $0.permitsLiveContent && $0.canPresent(owner: presentationID)
+                } == true,
                 initial: true
             ) { _, available in if available { acquire(id, forStart: false) } }
             .onChange(of: active) { _, value in if value { focus(id) } }

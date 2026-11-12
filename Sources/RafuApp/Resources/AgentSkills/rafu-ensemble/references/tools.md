@@ -76,12 +76,16 @@ Off blocks edit and sensitive tools.
   start) and the next call. Rafu sets no limit on live terminals; an
   Ensemble holds at most 100 nodes of all kinds.
 
-Starting a terminal moves the user's view to the node (it pans, or zooms in
-when the board is zoomed out), because a shell starts only in a node that is
-on screen. Results never repeat the typed line.
+A terminal starts even when the Ensemble is not on screen. When the Ensemble
+is on screen, starting moves the user's view to the node (it pans, or zooms in
+when the board is zoomed out) so the node shows; the result says so. Results
+never repeat the typed line.
 
 `send_message` returns `delivered: true` when Rafu queued the message. It does
-not mean the peer read it.
+not mean the peer read it. `delivered: false` means the peer is still starting:
+Rafu holds the message (at most 8 per peer, 2 minutes) and sends it when the
+peer connects, so do not send it again. Wait until `list_connections` shows a
+started peer `connected` before you send.
 
 ## Changing a running agent
 

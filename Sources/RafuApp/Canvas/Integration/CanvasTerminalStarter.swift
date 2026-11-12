@@ -110,6 +110,15 @@ enum CanvasTerminalStarter {
     /// Task-local so a test can shorten the wait for its own call tree only.
     @TaskLocal static var confirmSteps = defaultConfirmSteps
     static let step: Duration = .milliseconds(100)
+
+    /// A test seam for the typing task that `start` begins: when readiness and
+    /// the send are replaced, a test needs no real shell process. It is task-local
+    /// like `confirmSteps`, so it reaches only the call tree that sets it.
+    nonisolated struct DrainSeams: Sendable {
+        var isReady: @MainActor @Sendable (WorkspaceTerminalController) -> Bool
+        var send: @MainActor @Sendable (WorkspaceTerminalController, String) -> Bool
+    }
+    @TaskLocal static var drainSeams: DrainSeams? = nil
     /// After the shell process appears, typing waits this many steps for the
     /// shell to reach its line editor. Input the tty buffered earlier can be lost
     /// while the shell sets up, or echoed twice: once by the tty in cooked mode
@@ -124,8 +133,14 @@ enum CanvasTerminalStarter {
     /// The typing wait is ten seconds, off the reply path.
     static let drainSteps = 100
 
-    /// Reveals the node, asks it to start, and waits up to `confirmSteps` for the
-    /// pane to go live. A `line` is queued first, so a later start still types it.
+    /// Starts the node and queues its `line`, so a later start still types it.
+    ///
+    /// When a card view can host the terminal (its board is on screen and the
+    /// window is visible), this reveals the node, asks the card to start, and
+    /// waits up to `confirmSteps` for the pane to go live. Otherwise it starts the
+    /// pane itself and creates its terminal view without mounting it
+    /// (`startInBackground`), so a permitted start never waits for the user. A
+    /// card that the user shows later reuses the same view.
     static func start(
         card: CanvasCard, groupID: TerminalGroupID, line: String?, board: CanvasBoardState,
         session: WorkspaceSession, onGiveUp: @escaping @MainActor () -> Void
@@ -139,15 +154,30 @@ enum CanvasTerminalStarter {
             return report
         }
         let viewBefore = board.viewport
+        let hosted = canHostView(board, session)
         if first.status == .live {
             if board.pendingTerminalLineCount(for: card.id) > 0, !isTypeable(first, session) {
-                reveal(card, board)
+                if hosted {
+                    reveal(card, board)
+                } else {
+                    session.hostCanvasTerminalView(first.id)
+                }
             }
         } else if !canStart(first) {
             report.hold = .unavailable
+        } else if !hosted {
+            startInBackground(first, session, &report)
         } else {
             reveal(card, board)
-            await requestStart(card, groupID, board, session, &report)
+            let asked = await requestStart(card, groupID, board, session, &report)
+            // The card took the request and still did not start (it could not
+            // take the view, for example). Start the pane without it.
+            if asked, report.hold == nil, board.terminalStartRequest != card.id,
+                let latest = pane(groupID, session), latest.status != .live, canStart(latest),
+                !Task.isCancelled
+            {
+                startInBackground(latest, session, &report)
+            }
         }
         if let latest = pane(groupID, session), latest.status == .live {
             report.running = true
@@ -220,9 +250,16 @@ enum CanvasTerminalStarter {
     ) {
         guard board.pendingTerminalLines[card] != nil, !board.terminalLineDrains.contains(card)
         else { return }
+        let seams = drainSeams
         Task(name: "Type queued lines into Ensemble terminal") { [weak session, weak board] in
             guard let session, let board else { return }
-            await drain(card: card, groupID: groupID, board: board, session: session)
+            if let seams {
+                await drain(
+                    card: card, groupID: groupID, board: board, session: session, settle: 0,
+                    isReady: seams.isReady, isQuiet: { _ in true }, send: seams.send)
+            } else {
+                await drain(card: card, groupID: groupID, board: board, session: session)
+            }
             if board.pendingTerminalLines[card] != nil { onGiveUp() }
         }
     }
@@ -232,17 +269,20 @@ enum CanvasTerminalStarter {
     /// Asks the card to start, again when it took the request and did not start
     /// (the lease was not ready), but not more than three times: every refused
     /// start by the terminal manager shows an alert.
+    /// The result is true when the request was set at least once.
     private static func requestStart(
         _ card: CanvasCard, _ groupID: TerminalGroupID, _ board: CanvasBoardState,
         _ session: WorkspaceSession, _ report: inout CanvasTerminalStartReport
-    ) async {
+    ) async -> Bool {
         let alertBefore = session.isTerminalGroupErrorPresented
         var asks = 0
         for index in 0..<confirmSteps {
-            guard let current = pane(groupID, session), current.status != .live else { return }
+            guard let current = pane(groupID, session), current.status != .live else {
+                return asks > 0
+            }
             if session.isTerminalGroupErrorPresented, !alertBefore {
                 report.hold = .refused
-                return
+                return asks > 0
             }
             // Another card's pending request is never overwritten.
             if index.isMultiple(of: 5), asks < 3,
@@ -251,9 +291,36 @@ enum CanvasTerminalStarter {
                 board.terminalStartRequest = card.id
                 asks += 1
             }
-            if Task.isCancelled { return }
-            do { try await Task.sleep(for: step) } catch { return }
+            if Task.isCancelled { return asks > 0 }
+            do { try await Task.sleep(for: step) } catch { return asks > 0 }
         }
+        return asks > 0
+    }
+
+    /// True when a mounted card can start the node and show its view: the board
+    /// is the visible tab and its window is not hidden. Otherwise no card view
+    /// exists to consume a start request.
+    private static func canHostView(_ board: CanvasBoardState, _ session: WorkspaceSession)
+        -> Bool
+    {
+        session.canvasResources[board.id]?.permitsLiveContent == true
+    }
+
+    /// Starts the pane without a card: the terminal view is created but not
+    /// mounted, so the shell runs while the board is in the background. No lease
+    /// is taken, the user's view does not move, and a card that mounts later
+    /// attaches to the same view. The node still exists on the board.
+    private static func startInBackground(
+        _ pane: TerminalPaneSnapshot, _ session: WorkspaceSession,
+        _ report: inout CanvasTerminalStartReport
+    ) {
+        let alertBefore = session.isTerminalGroupErrorPresented
+        if pane.status == .exited {
+            session.restartTerminalPaneInBackground(pane.id)
+        } else {
+            session.startTerminalPane(pane.id, background: true)
+        }
+        if session.isTerminalGroupErrorPresented, !alertBefore { report.hold = .refused }
     }
 
     /// Before a start: a view-only card in a zoomed-out board is not mounted, so
