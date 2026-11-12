@@ -388,23 +388,36 @@ nonisolated enum TerminalGroupRestorationDiagnostic: Equatable, Sendable {
 /// erase file tabs, editor groups, or the rest of the workspace payload.
 nonisolated struct TerminalGroupWorkspaceRestoration: Codable, Equatable, Sendable {
     static let currentSchemaVersion = 1
+    /// A window payload holds Terminal Group tabs: the window's group bound.
     static let maximumOpenGroups = TerminalGroupLimits.maximumGroupsPerWindow
+    /// An Ensemble payload holds one record per terminal card. Ensemble
+    /// terminals have no count limit, so only the card bound applies.
+    static let maximumEnsembleOpenGroups = CanvasLimits.cards
+    /// The decoder accepts the larger of the two; the owner of each payload
+    /// enforces its own bound when it builds and restores one.
+    static let maximumDecodedGroups = max(maximumOpenGroups, maximumEnsembleOpenGroups)
+    static let maximumDecodedRetainedPanes =
+        maximumDecodedGroups * TerminalGroupLimits.maximumPanesPerGroup
     static let maximumDiagnostics = 16
-    static let maximumRecordsToInspect = maximumOpenGroups + maximumDiagnostics
+    static let maximumRecordsToInspect = maximumDecodedGroups + maximumDiagnostics
 
     let schemaVersion: Int
     let openGroups: [TerminalGroupOpenTabRestorationRecord]
     let diagnostics: [TerminalGroupRestorationDiagnostic]
 
-    init(openGroups: [TerminalGroupOpenTabRestorationRecord]) throws {
-        guard openGroups.count <= Self.maximumOpenGroups else {
+    init(openGroups: [TerminalGroupOpenTabRestorationRecord], ensemble: Bool = false) throws {
+        let groupBound = ensemble ? Self.maximumEnsembleOpenGroups : Self.maximumOpenGroups
+        guard openGroups.count <= groupBound else {
             throw TerminalGroupRestorationError.tooManyOpenGroups(openGroups.count)
         }
         guard Set(openGroups.map(\.groupID)).count == openGroups.count else {
             throw TerminalGroupRestorationError.duplicateOpenGroup
         }
         let retainedPaneCount = openGroups.reduce(into: 0) { $0 += $1.panes.count }
-        guard retainedPaneCount <= TerminalGroupLimits.maximumRetainedPanesPerWindow else {
+        let paneBound =
+            ensemble
+            ? Self.maximumDecodedRetainedPanes : TerminalGroupLimits.maximumRetainedPanesPerWindow
+        guard retainedPaneCount <= paneBound else {
             throw TerminalGroupRestorationError.tooManyOpenGroups(retainedPaneCount)
         }
         schemaVersion = Self.currentSchemaVersion
@@ -451,7 +464,7 @@ nonisolated struct TerminalGroupWorkspaceRestoration: Codable, Equatable, Sendab
             do {
                 let recordDecoder = try records.superDecoder()
                 let record = try TerminalGroupOpenTabRestorationRecord(from: recordDecoder)
-                guard openGroups.count < Self.maximumOpenGroups else {
+                guard openGroups.count < Self.maximumDecodedGroups else {
                     Self.appendBoundedDiagnostic(
                         .terminalGroupRecordLimitExceeded, to: &diagnostics)
                     continue
@@ -468,7 +481,7 @@ nonisolated struct TerminalGroupWorkspaceRestoration: Codable, Equatable, Sendab
             throw TerminalGroupRestorationError.duplicateOpenGroup
         }
         let retainedPaneCount = openGroups.reduce(into: 0) { $0 += $1.panes.count }
-        guard retainedPaneCount <= TerminalGroupLimits.maximumRetainedPanesPerWindow else {
+        guard retainedPaneCount <= Self.maximumDecodedRetainedPanes else {
             throw TerminalGroupRestorationError.tooManyOpenGroups(retainedPaneCount)
         }
         self.init(schemaVersion: schemaVersion, openGroups: openGroups, diagnostics: diagnostics)

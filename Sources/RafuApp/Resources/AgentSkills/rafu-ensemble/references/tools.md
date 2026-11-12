@@ -72,8 +72,9 @@ Off blocks edit and sensitive tools.
 - `stopped`: the shell did not start in 2.5 seconds. The line is **queued,
   not typed**; Rafu keeps up to 8 lines per node for 15 minutes and types
   them when the shell starts, by `terminal_start` or by the user. The
-  message gives the reason (four terminals already hold a live view, the
-  live-session limit, or a refused start) and the next call.
+  message gives the reason (the node has no shell profile, or a refused
+  start) and the next call. Rafu sets no limit on live terminals; an
+  Ensemble holds at most 100 nodes of all kinds.
 
 Starting a terminal moves the user's view to the node (it pans, or zooms in
 when the board is zoomed out), because a shell starts only in a node that is

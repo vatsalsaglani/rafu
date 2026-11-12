@@ -724,13 +724,16 @@ enum CanvasAgentActions {
         guard card.id != caller.card.id else {
             throw CanvasAgentToolError.invalidArgument("node_id")
         }
-        board.select([card.id])
         if case .terminal = card.content {
-            // The ordinary close path: a running process gets the usual confirmation.
-            caller.session.closeCanvasTerminalCard(board.id)
-        } else {
-            caller.session.removeCanvasCards(board.id)
+            // Agent control (Allow, or the user's Ask approval) already covered
+            // this call, so a running process stops with no second confirmation.
+            try caller.session.removeCanvasTerminalCardForAgent(board.id, cardID: card.id)
+            return ok(
+                "Stopped and removed \"\(card.title)\" and its links. Edit > Undo restores the node, not its process.",
+                node: card.id)
         }
+        board.select([card.id])
+        caller.session.removeCanvasCards(board.id)
         return ok("Removed \"\(card.title)\". Edit > Undo restores it.", node: card.id)
     }
 
@@ -764,7 +767,7 @@ enum CanvasAgentActions {
         let record = try SavedTerminalGroupRecord(
             id: SavedTerminalGroupID(), name: name, root: .pane(paneID), focusedPaneID: paneID,
             panes: [pane])
-        let snapshot = try session.terminal.insertStoppedSavedGroup(record)
+        let snapshot = try session.terminal.insertStoppedSavedGroup(record, ensemble: true)
         _ = try session.terminal.perform(.detachDeletedSavedLayout(record.id))
         _ = try session.terminal.perform(.parkGroup(snapshot.id))
         var placed = call
@@ -931,8 +934,8 @@ enum CanvasAgentActions {
     enum StartMessageKind { case create, start, send }
 
     /// What an agent is told after a start. It names states and byte counts, never
-    /// the line itself: this text also goes to the activity log. `isVoice`
-    /// words the lease-cap advice for Rafu voice, which speaks to the user.
+    /// the line itself: this text also goes to the activity log. `isVoice` is
+    /// kept for callers; no advice depends on it now.
     static func startMessage(
         _ report: CanvasTerminalStartReport, title: String, kind: StartMessageKind,
         lineBytes: Int?, isVoice: Bool = false
@@ -974,14 +977,9 @@ enum CanvasAgentActions {
         }
         let advice: String
         switch report.hold {
-        case .leaseCap:
-            advice =
-                isVoice
-                ? " Four terminals already show live views. Tell the user and ask which one to stop; then call terminal_start."
-                : " Four Ensemble terminals already hold a live view. Ask the user to close one, then call terminal_start on this node."
         case .unavailable:
             advice =
-                " This node cannot start a shell now (live-session limit or no saved profile). Ask the user to free a terminal, then call terminal_start."
+                " This node cannot start a shell now (it has no saved shell profile). Ask the user, then call terminal_start."
         case .refused:
             advice =
                 " Rafu tried to start it and the terminal manager refused; Rafu shows the reason to the user. Ask the user, then call terminal_start."

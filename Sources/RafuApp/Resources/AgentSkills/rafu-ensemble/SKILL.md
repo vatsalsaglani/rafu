@@ -64,9 +64,9 @@ logged under "Agents" in the Ensemble bar, and undoable by the user.
    - `running`: the shell is up and Rafu is typing the launch line. This does
      not yet mean the agent runs.
    - `stopped`: the node exists but its shell did not start. The line is
-     **queued, not typed**; the message says why (for example four terminals
-     already hold a live view) and what to call next. Call `terminal_start`
-     once that is fixed: Rafu then types the queued line.
+     **queued, not typed**; the message says why (for example the start was
+     refused, or the node has no shell profile) and what to call next. Call
+     `terminal_start` once that is fixed: Rafu then types the queued line.
 3. Verify before you tell the user an agent runs: call `ensemble_describe`
    (the node `state` is `running` and `agent` is set) and `list_connections`
    (the peer is listed). Codex connects after its first Rafu tool call, so a
@@ -159,6 +159,8 @@ a message link to it (`edge_create` kind `message`), set it live, and use
 - `node_create` kinds `file`/`image` (`path`), `web` (`url` on localhost).
 - `node_update` renames, moves (`x`, `y` top-left) or resizes a node.
 - `node_remove`, `edge_remove` — always confirmed by the user in Ask mode.
+  Removing a terminal node stops its process and removes its links; Rafu asks
+  nothing more after that approval.
 - `terminal_start` starts a stopped terminal node and moves the user's view
   to it. Read the result `state`; lines queued for the node are typed when
   its shell is up.

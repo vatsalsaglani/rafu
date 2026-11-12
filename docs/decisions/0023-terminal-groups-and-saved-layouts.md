@@ -227,3 +227,10 @@ Numeric Terminal Group limits are maintained by ADR 0024.
 - [ADR 0018](0018-conductor-external-agent-orchestration.md)
 - [ADR 0021](0021-agent-terminals.md)
 - [`terminal-groups.md`](../plans/phases/terminal-groups.md)
+
+## Amendment (2026-11-12): Ensemble terminals leave the window bounds
+
+Ensemble terminal cards have no count limit. They are exempt from the 20-group,
+200-retained-pane and 200-live-session bounds, and the four-lease presentation
+cap is gone. Terminal Group editor tabs keep every bound in this ADR and ADR
+0024. See ADR 0024 Amendment 1.

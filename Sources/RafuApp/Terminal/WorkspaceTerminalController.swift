@@ -198,9 +198,10 @@ final class WorkspaceTerminalManager {
     /// split identity and creates no controller, view, process, reservation,
     /// or Process Resources entry.
     @discardableResult
-    func insertStoppedSavedGroup(_ record: SavedTerminalGroupRecord) throws -> TerminalGroupSnapshot
+    func insertStoppedSavedGroup(_ record: SavedTerminalGroupRecord, ensemble: Bool = false) throws
+        -> TerminalGroupSnapshot
     {
-        let groupID = try groupRuntime.insertStoppedSavedGroup(record)
+        let groupID = try groupRuntime.insertStoppedSavedGroup(record, ensemble: ensemble)
         noteTerminalGroupMutation()
         guard let group = groupRuntime.snapshot(groupID: groupID) else {
             throw TerminalGroupValidationError.groupNotFound(groupID)
@@ -212,10 +213,26 @@ final class WorkspaceTerminalManager {
     /// runtime identities and unavailable-start state without re-keying or
     /// constructing a controller.
     @discardableResult
-    func insertInertSnapshot(_ snapshot: TerminalGroupSnapshot) throws -> TerminalGroupSnapshot {
-        let inserted = try groupRuntime.insertInertSnapshot(snapshot)
+    func insertInertSnapshot(_ snapshot: TerminalGroupSnapshot, ensemble: Bool = false) throws
+        -> TerminalGroupSnapshot
+    {
+        let inserted = try groupRuntime.insertInertSnapshot(snapshot, ensemble: ensemble)
         noteTerminalGroupMutation()
         return inserted
+    }
+
+    /// True for a group that belongs to an Ensemble card. Such a group is
+    /// exempt from the window's group, retained-pane and live-session bounds.
+    func isEnsembleTerminalGroup(_ groupID: TerminalGroupID) -> Bool {
+        _ = terminalGroupRevision
+        return groupRuntime.isEnsembleGroup(groupID)
+    }
+
+    /// Marks an existing group as an Ensemble terminal (a tab moved onto an
+    /// Ensemble).
+    func markEnsembleTerminalGroup(_ groupID: TerminalGroupID) {
+        groupRuntime.markEnsembleGroup(groupID)
+        noteTerminalGroupMutation()
     }
 
     /// Wraps one existing legacy controller in a one-pane Terminal Group.
@@ -308,7 +325,8 @@ final class WorkspaceTerminalManager {
     ) throws -> WorkspaceTerminalController {
         var createdCandidates: [WorkspaceTerminalController] = []
         do {
-            try validatePreflight(requested: 1, consuming: reservation)
+            try validatePreflight(
+                requested: 1, consuming: reservation, exempt: isEnsemblePane(paneID))
             try validate(
                 instantiation: instantiation, forStoppedPane: paneID, reservation: reservation)
             let created = try makeControllerCandidate(instantiation, index: sessionCounter + 1)
@@ -380,7 +398,7 @@ final class WorkspaceTerminalManager {
         guard let controller = terminalController(for: paneID) else {
             throw TerminalGroupValidationError.paneNotFound(paneID)
         }
-        try preflightAdditionalLiveCapacity(1)
+        if !isEnsemblePane(paneID) { try preflightAdditionalLiveCapacity(1) }
         var proposedRuntime = groupRuntime
         try proposedRuntime.restartBoundController(sessionID: controller.id, paneID: paneID)
         controller.restart()
@@ -410,7 +428,9 @@ final class WorkspaceTerminalManager {
             guard Set(instantiations.keys) == Set(stopped.map(\.id)) else {
                 throw TerminalGroupValidationError.unsupportedPaneStart
             }
-            try validatePreflight(requested: restartable.count, consuming: reservation)
+            try validatePreflight(
+                requested: restartable.count, consuming: reservation,
+                exempt: groupRuntime.isEnsembleGroup(groupID))
             for pane in stopped {
                 guard let instantiation = instantiations[pane.id] else {
                     throw TerminalGroupValidationError.paneNotFound(pane.id)
@@ -751,9 +771,16 @@ final class WorkspaceTerminalManager {
             startAvailability: .notRestartable)
     }
 
+    private func isEnsemblePane(_ paneID: TerminalPaneID) -> Bool {
+        groupRuntime.groupID(containing: paneID).map { groupRuntime.isEnsembleGroup($0) } ?? false
+    }
+
+    /// `exempt` is true for a pane of an Ensemble terminal group: the
+    /// reservation is still validated, but the live-session bound does not apply.
     private func validatePreflight(
         requested: Int,
-        consuming reservation: TerminalGroupCapacityReservation?
+        consuming reservation: TerminalGroupCapacityReservation?,
+        exempt: Bool = false
     ) throws {
         guard requested >= 0 else {
             throw TerminalGroupCapacityError.invalidReservationCount(requested)
@@ -771,7 +798,8 @@ final class WorkspaceTerminalManager {
         let legacyLive = ungroupedLiveSessionCount
         let allReserved = reservedLiveSessionCount
         let current = legacyLive + groupRuntime.liveSessionCount + allReserved - reservedToConsume
-        guard current + requested <= TerminalGroupLimits.maximumLiveSessionsPerWindow else {
+        guard exempt || current + requested <= TerminalGroupLimits.maximumLiveSessionsPerWindow
+        else {
             throw TerminalGroupCapacityError.liveSessionLimitExceeded(
                 current: current, requested: requested)
         }

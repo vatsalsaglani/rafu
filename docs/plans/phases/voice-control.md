@@ -199,9 +199,9 @@ re-checked live):
     the selection, not at the board's top-left, and the debug transcript's
     `call` has no `link`, `x` or `y`. Rafu does not say "my node isn't
     available".
-23. Put four stopped terminal nodes on screen and ask voice to start a fifth:
-    it starts. With four running terminals on screen, a fifth start is held
-    and Rafu says four terminals show live views and asks which one to stop.
+23. Put four terminal nodes on screen and ask voice to start a fifth:
+    it starts. With four running terminals on screen, a fifth also starts
+    (Ensemble terminals have no count limit since 2026-11-12).
     Press Start Shell on a stopped node that you stopped earlier: the shell
     shows in the card (not "Terminal view is not attached").
 24. Allow mode, Claude's development-channel dialog shows: if Rafu does not

@@ -80,9 +80,7 @@ extension CanvasBoardState {
 struct CanvasTerminalStartReport: Equatable {
     /// Why a stopped node did not start.
     enum Hold: Equatable {
-        /// Four Ensemble terminals already hold a live view.
-        case leaseCap
-        /// The node has no shell to start, or the live-session limit is reached.
+        /// The node has no shell to start (no saved profile).
         case unavailable
         /// Rafu tried and the terminal manager refused (it shows an alert).
         case refused
@@ -125,8 +123,6 @@ enum CanvasTerminalStarter {
     static let quietWaitSteps = 20
     /// The typing wait is ten seconds, off the reply path.
     static let drainSteps = 100
-    /// Mirrors the presentation lease cap in `CanvasTerminalCard.acquire`.
-    static let leaseCap = 4
 
     /// Reveals the node, asks it to start, and waits up to `confirmSteps` for the
     /// pane to go live. A `line` is queued first, so a later start still types it.
@@ -149,8 +145,6 @@ enum CanvasTerminalStarter {
             }
         } else if !canStart(first) {
             report.hold = .unavailable
-        } else if leaseBlocked(groupID, session) {
-            report.hold = .leaseCap
         } else {
             reveal(card, board)
             await requestStart(card, groupID, board, session, &report)
@@ -158,8 +152,6 @@ enum CanvasTerminalStarter {
         if let latest = pane(groupID, session), latest.status == .live {
             report.running = true
             report.hold = nil
-        } else if report.hold == nil, leaseBlocked(groupID, session) {
-            report.hold = .leaseCap
         }
         report.viewMoved = board.viewport != viewBefore
         count(&report, card: card.id, board: board)
@@ -298,46 +290,18 @@ enum CanvasTerminalStarter {
         (pane.status == .stopped && pane.startAvailability == .available)
             || (pane.status == .exited && pane.runtimeKind == .ordinaryShell)
     }
-
-    /// True when the node cannot get a presentation lease. A lease held by a
-    /// terminal that is not live is released first, so stopped nodes never
-    /// fill the cap.
-    private static func leaseBlocked(
-        _ groupID: TerminalGroupID, _ session: WorkspaceSession
-    ) -> Bool {
-        guard session.canvasTerminalOwners[groupID] == nil,
-            session.canvasTerminalOwners.count >= leaseCap
-        else { return false }
-        session.releaseIdleCanvasTerminalLeases()
-        return session.canvasTerminalOwners.count >= leaseCap
-    }
 }
 
 extension WorkspaceSession {
-    /// Gives the presentation lease (ADR 0025) of `groupID` to `board`, within
-    /// the cap of `CanvasTerminalStarter.leaseCap` (ADR 0023). At the cap, the
-    /// leases of terminals that are not live are released first. True when
-    /// `board` holds the lease after the call.
+    /// Gives the presentation lease (ADR 0025) of `groupID` to `board`. There
+    /// is no count limit on Ensemble terminals (ADR 0023 amendment,
+    /// 2026-11-12); the lease only says which board shows the terminal. True
+    /// when `board` holds the lease after the call.
     @discardableResult
     func claimCanvasTerminalLease(_ groupID: TerminalGroupID, for board: CanvasID) -> Bool {
         if canvasTerminalOwners[groupID] == board { return true }
         guard canvasTerminalOwners[groupID] == nil else { return false }
-        if canvasTerminalOwners.count >= CanvasTerminalStarter.leaseCap {
-            releaseIdleCanvasTerminalLeases()
-        }
-        guard canvasTerminalOwners.count < CanvasTerminalStarter.leaseCap else { return false }
         canvasTerminalOwners[groupID] = board
         return true
-    }
-
-    /// Releases the leases of terminals whose pane is not live (stopped,
-    /// exited, unavailable) or whose group is gone. Their cards show the
-    /// Start or Restart block, which needs no view; a card takes a lease again
-    /// before it starts.
-    func releaseIdleCanvasTerminalLeases() {
-        for groupID in canvasTerminalOwners.keys
-        where terminal.terminalGroup(groupID)?.panes.first?.status != .live {
-            canvasTerminalOwners[groupID] = nil
-        }
     }
 }

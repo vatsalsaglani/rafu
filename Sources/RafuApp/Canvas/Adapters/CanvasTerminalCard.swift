@@ -179,7 +179,7 @@ struct CanvasTerminalCard: View {
 
     /// Takes the presentation lease (ADR 0025) for a card that has a terminal
     /// to show, or that is about to start one (`forStart`). A stopped card
-    /// takes none, so stopped cards never fill the cap of four.
+    /// takes none. There is no limit on how many terminals a board holds.
     private func acquire(_ id: TerminalGroupID, forStart: Bool) {
         guard session.canvasResources[board.id]?.permitsLiveContent == true,
             session.canvasResources[board.id]?.canPresent(owner: presentationID) == true,
@@ -226,7 +226,7 @@ extension WorkspaceSession {
             let record = try SavedTerminalGroupRecord(
                 id: SavedTerminalGroupID(), name: name,
                 root: .pane(paneID), focusedPaneID: paneID, panes: [pane])
-            let snapshot = try terminal.insertStoppedSavedGroup(record)
+            let snapshot = try terminal.insertStoppedSavedGroup(record, ensemble: true)
             _ = try terminal.perform(.detachDeletedSavedLayout(record.id))
             _ = try terminal.perform(.parkGroup(snapshot.id))
             try board.add(title: snapshot.name.rawValue, content: .terminal(groupID: snapshot.id))
@@ -251,7 +251,7 @@ extension WorkspaceSession {
             let record = try SavedTerminalGroupRecord(
                 id: SavedTerminalGroupID(), name: name,
                 root: .pane(paneID), focusedPaneID: paneID, panes: [pane])
-            let snapshot = try terminal.insertStoppedSavedGroup(record)
+            let snapshot = try terminal.insertStoppedSavedGroup(record, ensemble: true)
             _ = try terminal.perform(.detachDeletedSavedLayout(record.id))
             _ = try terminal.perform(.parkGroup(snapshot.id))
             try board.edit { document in
@@ -274,6 +274,23 @@ extension WorkspaceSession {
         requestTerminalGroupClose(groupID)
         finishCanvasTerminalRemoval()
     }
+    /// An agent's `node_remove` on a terminal node (Agent control already
+    /// allowed it). Stops the process, closes the group, and removes the card
+    /// and its edges. It asks nothing and posts no notice: the user's approval,
+    /// when Ask applies, came before this call. Edit > Undo restores the node.
+    /// A failure throws to the agent and shows no alert.
+    func removeCanvasTerminalCardForAgent(_ id: CanvasID, cardID: CanvasCardID) throws {
+        guard let board = canvas.boards[id],
+            let card = board.cards.first(where: { $0.id == cardID }),
+            case .terminal(let groupID) = card.content
+        else { throw CanvasError.unavailable }
+        try closeTerminalGroupWithoutConfirmation(groupID)
+        movedTerminalCardSourceGroups.removeValue(forKey: groupID)
+        pendingCanvasTerminalRemoval = nil
+        board.selection = [cardID]
+        removeCanvasCards(id)
+    }
+
     func finishCanvasTerminalRemoval() {
         guard let (id, cardID, groupID) = pendingCanvasTerminalRemoval,
             terminal.terminalGroup(groupID) == nil
