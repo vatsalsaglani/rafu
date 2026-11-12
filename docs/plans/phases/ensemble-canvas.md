@@ -656,3 +656,23 @@ check below has been done by a person.
         idle card.
   - [ ] Microphone: press "Allow Microphone…", then Rafu Lightning appears under
         Privacy ▸ Microphone.
+
+## Status (2026-11-12, silent agent close and no Ensemble terminal limit)
+
+Two user-reported issues. Details: `docs/references/ensemble-agent-terminal-tools.md`
+sections 9 and 11; ADR 0024 Amendment 1; ADR 0023 and ADR 0025 notes.
+
+- **An agent's `node_remove` on a terminal is silent.** It stops the process,
+  closes the group, and removes the node and its edges with no "Close Terminal
+  Group?" sheet, no alert and no notice (`removeCanvasTerminalCardForAgent`). The
+  Agent control approval (Ask) is unchanged and is the only prompt. Undo restores
+  the node, not its process. A user's own close keeps its confirmation.
+- **No limit on Ensemble terminals.** Ensemble groups are exempt from the 20-group,
+  200-retained-pane and 200-live-session bounds; the four-lease presentation cap
+  and the `leaseCap` start hold are deleted; a saved board restores up to
+  `CanvasLimits.cards` terminal groups. Terminal Group editor tabs keep every
+  ADR 0023 and ADR 0024 bound. `CanvasLimits.cards` (100) and `connections` (200)
+  stay as document bounds for every node kind.
+- **Open checks (manual, in Rafu Lightning):** an agent closes a running Claude
+  terminal in Allow and in Ask; five or more live Ensemble terminals at once;
+  relaunch with more than 20 terminal cards; Edit > Undo after an agent close.

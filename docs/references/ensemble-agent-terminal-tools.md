@@ -54,9 +54,9 @@ it — and the old code still replied `ok`.
 `CanvasTerminalStarter.start` now:
 
 - queues the line first, so a later start still types it;
-- refuses early with a named reason — `leaseCap` (four live Ensemble terminals
-  already hold a presentation lease; see section 9), `unavailable` (no shell to start, or
-  `startAvailability` says no), `refused` (the terminal manager put up its alert);
+- refuses early with a named reason — `unavailable` (no shell to start, or
+  `startAvailability` says no), `refused` (the terminal manager put up its alert).
+  The former `leaseCap` reason is gone (section 9);
 - reveals the node: `revealCard` pans at live zoom, `zoomToCard` below it. This
   moves the user's view, and the report says so (`viewMoved`);
 - sets `terminalStartRequest` only when it is `nil` or already this card, so
@@ -144,7 +144,10 @@ and would see each other's writes.
 
 ### 9. Only a terminal that is live (or starting) holds a presentation lease
 
-The ADR 0025 lease cap is four Ensemble terminals per window (ADR 0023). A
+**Superseded 2026-11-12 (section 11):** the four-lease cap no longer exists.
+The text below records why stopped cards do not take a lease; that still holds.
+
+The ADR 0025 lease cap was four Ensemble terminals per window (ADR 0023). A
 mounted card used to take a lease whenever its board could present, also when
 its pane was stopped. Four stopped cards on screen then filled the cap, and the
 fifth start failed with "Four Ensemble terminals already hold a live view"
@@ -160,10 +163,10 @@ Now:
   was released would start and then show "Terminal view is not attached";
 - `.task(id: pane.sessionID)` takes the lease when a session appears by any
   other path;
-- at the cap, `claimCanvasTerminalLease` and the starter's `leaseBlocked`
-  first call `releaseIdleCanvasTerminalLeases`, which drops the leases of
-  panes that are not `.live` (stopped, exited, unavailable) or whose group is
-  gone. Four **live** terminals still block a fifth; the cap stays four.
+- (Removed 2026-11-12.) At the cap, `claimCanvasTerminalLease` and the
+  starter's `leaseBlocked` first called `releaseIdleCanvasTerminalLeases`.
+  Both and the cap are deleted; `claimCanvasTerminalLease` now only refuses a
+  group another board already holds.
 
 ### 10. Return is CR, not LF, and it goes in a second write
 
@@ -232,9 +235,45 @@ start failed with the lease-cap message. Fixed by sections 3, 9 and 10. Unit
 evidence: `TerminalReplyWriterTests` (text then CR, never LF; two lines never
 interleave; refused and discarded CR), `CanvasTerminalStartTests`
 (`drainWaitsForQuiet`, `drainTypesAfterTheQuietWait`,
-`stoppedTerminalsDoNotFillTheLeaseCap`, `liveTerminalsKeepTheLeaseCap`). A
+`ensembleTerminalsHaveNoLeaseCap`). A
 live re-check in Rafu Lightning is still owed (see the voice-control phase
 manual checks).
+
+### 11. An agent's `node_remove` on a terminal is silent; Ensemble terminals have no count limit
+
+Applies to: `CanvasAgentActions.nodeRemove`, `WorkspaceSession
+.removeCanvasTerminalCardForAgent`, `closeTerminalGroupWithoutConfirmation`,
+`TerminalGroupRuntime.ensembleGroupIDs`. Verified 2026-11-12 on Swift 6.2,
+macOS 26 (Darwin 27).
+
+**Close.** The user's close of a running terminal card goes through
+`closeCanvasTerminalCard` and `requestTerminalGroupClose`, which sets
+`pendingTerminalGroupClose` and shows the "Close Terminal Group?" sheet when a
+process runs. The old agent path reused it, so an agent's `node_remove` left that
+sheet open (and did not remove the node until the user confirmed). It also did
+nothing, while it still answered "Removed", when another terminal or Ensemble
+sheet was open (`isTerminalGroupModalInputBlocked`). Now the agent path calls
+`closeTerminalGroupWithoutConfirmation`: `prepareClose`, then `finalizeClose`
+(which stops every process), drops the editor tab, and removes the card and its
+edges in one board edit (`removeCanvasCards`). It never touches
+`pendingTerminalGroupClose` of another group. The Agent control approval (Ask) or
+Allow is the only prompt. No board notice appears, because
+`CanvasAgentProvenanceStore.noteEdit` finds no card to name after a removal. Undo
+restores the node and its edges; the node then has no group, so it shows the
+Start Terminal Here block and no process comes back. The user's own close keeps
+its confirmation.
+
+**Count limit.** Ensemble terminals are exempt from the window's 20-group,
+200-retained-pane and 200-live-session bounds, and the four-lease cap is gone
+(ADR 0024 Amendment 1). Any new creation path that adds an Ensemble card for a
+new group must call `insertStoppedSavedGroup(_:ensemble: true)`; a plain call
+counts toward the tab bounds and fails at 20 groups. `CanvasLimits.cards`
+(100 nodes) is still the practical ceiling.
+
+**Evidence.** `CanvasAgentActionsTests.agentRemovalOfRunningTerminalIsSilent`,
+`agentRemovalOfTerminalAsksOnceThenStaysSilent`,
+`agentCreatesTerminalsPastTheOldBounds`; `EnsembleTerminalCapacityTests`.
+Run `swift test --filter EnsembleTerminalCapacityTests`.
 
 ## Verification
 

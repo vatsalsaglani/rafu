@@ -62,7 +62,8 @@ does not expose group creation or splits. Existing multi-pane references keep
 their stored record; Canvas shows the first pane, while the normal terminal
 workspace retains access to the full group. Board zoom scales a fixed logical
 card frame. Card resize changes that logical frame and the terminal size.
-Terminal presentation remains bounded to four surfaces per window.
+Terminal presentation was bounded to four surfaces per window; ADR 0024
+Amendment 1 (2026-11-12) removed that bound for Ensemble terminals.
 
 Canvas List and visible/menu/keyboard actions provide non-spatial access.
 Undo restores references and geometry, never live resource capability.

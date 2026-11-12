@@ -51,3 +51,37 @@ unbounded groups, panes, or live processes, requires a new decision.
 ## Related
 
 ADR 0018, ADR 0023, `TerminalGroupModel.swift`, and TG-100.
+
+## Amendment 1 (2026-11-12): Ensemble terminals have no count limit
+
+The user directed: "We shouldn't have any soft/hard limit on number of
+terminal agents on the canvas."
+
+- The 20-group, 200-retained-pane and 200-live-session bounds above apply to
+  Terminal Group **editor tabs** only. A group that belongs to an Ensemble card
+  is exempt from all three. `TerminalGroupRuntime.ensembleGroupIDs` records
+  which groups are exempt; `windowGroupCount`, `retainedPaneCount` and
+  `liveSessionCount` do not count them. Groups are marked when an Ensemble
+  creates them (`insertStoppedSavedGroup(_:ensemble: true)`), when a saved
+  board restores them, and when a tab moves onto an Ensemble.
+- A group stays exempt for as long as it exists, also after its card is removed
+  and the group is parked, or after it is shown as a tab again. This is a known
+  loophole and it is bounded by the Ensemble card limit below.
+- The 10-pane group bound, the 32 saved-layout bound and every per-message,
+  queue and byte bound are unchanged.
+- The ADR 0025 presentation-lease cap of four live Ensemble terminals is
+  removed. The lease still says which board shows a terminal; it no longer
+  counts.
+- An Ensemble payload in a saved board holds one record per terminal card
+  (`TerminalGroupWorkspaceRestoration.maximumEnsembleOpenGroups`, equal to
+  `CanvasLimits.cards`); a window payload keeps 20.
+- `CanvasLimits.cards` (100 nodes of all kinds per board) and
+  `CanvasLimits.connections` (200) stay. They are document size bounds for every
+  node kind, not terminal limits. Remove them only with a new decision.
+- Rafu does not claim 200+ live shells are cheap. Each live Ensemble terminal
+  mounts a native terminal view and a PTY. The user accepted this cost.
+
+Supersedes the 200-live-session and 20-group statements for Ensemble terminals,
+and the "four surfaces per window" sentence of ADR 0025. ADR 0023 stays
+unchanged for Terminal Groups. See `docs/references/ensemble-agent-terminal-tools.md`
+section 9 and section 11.

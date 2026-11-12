@@ -183,7 +183,7 @@ extension WorkspaceSession {
             let record = try SavedTerminalGroupRecord(
                 id: SavedTerminalGroupID(), name: name,
                 root: .pane(paneID), focusedPaneID: paneID, panes: [pane])
-            let snapshot = try terminal.insertStoppedSavedGroup(record)
+            let snapshot = try terminal.insertStoppedSavedGroup(record, ensemble: true)
             _ = try terminal.perform(.detachDeletedSavedLayout(record.id))
             _ = try terminal.perform(.parkGroup(snapshot.id))
             try board.add(

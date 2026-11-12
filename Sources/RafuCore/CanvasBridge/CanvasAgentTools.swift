@@ -1349,7 +1349,7 @@ public nonisolated enum CanvasAgentToolCatalog {
             )
         case .nodeRemove:
             return (
-                "Remove a node and its links. Always asks the user unless Agent control is Allow. Undoable.",
+                "Remove a node and its links; a terminal node also stops its process, with no second prompt. Always asks the user unless Agent control is Allow. Undoable.",
                 schema(["node_id": nodeID], required: ["node_id"])
             )
         case .terminalCreate:

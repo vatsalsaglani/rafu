@@ -20,6 +20,12 @@ nonisolated struct TerminalGroupRuntime: Sendable {
     private(set) var parkedGroupIDs: [TerminalGroupID] = []
     private(set) var generation: UInt64 = 1
     private var nextDefaultNameNumber = 1
+    /// Groups that belong to an Ensemble card. Ensemble terminals have no
+    /// count limit, so they stay out of the window's group, retained-pane and
+    /// live-session bounds (ADR 0023 amendment, 2026-11-12). The Terminal
+    /// Group editor tabs keep those bounds. A group stays in this set for as
+    /// long as it exists.
+    private(set) var ensembleGroupIDs: Set<TerminalGroupID> = []
 
     var snapshots: [TerminalGroupSnapshot] {
         groups.values.sorted { lhs, rhs in
@@ -56,22 +62,47 @@ nonisolated struct TerminalGroupRuntime: Sendable {
         return nil
     }
 
-    var retainedPaneCount: Int { groups.values.reduce(into: 0) { $0 += $1.panes.count } }
+    func isEnsembleGroup(_ groupID: TerminalGroupID) -> Bool {
+        ensembleGroupIDs.contains(groupID)
+    }
 
+    /// Marks an existing group as an Ensemble terminal, as when a tab moves
+    /// onto an Ensemble.
+    mutating func markEnsembleGroup(_ groupID: TerminalGroupID) {
+        guard groups[groupID] != nil, ensembleGroupIDs.insert(groupID).inserted else { return }
+        advanceGeneration()
+    }
+
+    /// Groups that count toward the window's group bound: every group that is
+    /// not an Ensemble terminal.
+    var windowGroupCount: Int { groups.keys.filter { !ensembleGroupIDs.contains($0) }.count }
+
+    /// Panes of the groups that count toward the retained-pane bound.
+    var retainedPaneCount: Int {
+        groups.values.reduce(into: 0) { result, group in
+            if !ensembleGroupIDs.contains(group.id) { result += group.panes.count }
+        }
+    }
+
+    /// Live panes of the groups that count toward the live-session bound.
     var liveSessionCount: Int {
         groups.values.reduce(into: 0) { result, group in
-            result += group.panes.filter { $0.status == .live }.count
+            if !ensembleGroupIDs.contains(group.id) {
+                result += group.panes.filter { $0.status == .live }.count
+            }
         }
     }
 
     /// Inserts one inert runtime instance of a saved layout. Saved identities
     /// are deliberately remapped so opening the same record twice cannot
     /// mirror a pane, split, or session. This path creates no controller.
-    mutating func insertStoppedSavedGroup(_ record: SavedTerminalGroupRecord) throws
-        -> TerminalGroupID
-    {
-        try requireGroupCapacity(requested: 1)
-        try requireRetainedCapacity(record.panes.count)
+    mutating func insertStoppedSavedGroup(
+        _ record: SavedTerminalGroupRecord, ensemble: Bool = false
+    ) throws -> TerminalGroupID {
+        if !ensemble {
+            try requireGroupCapacity(requested: 1)
+            try requireRetainedCapacity(record.panes.count)
+        }
         var paneMap: [SavedTerminalPaneID: TerminalPaneID] = [:]
         var panes: [TerminalPaneSnapshot] = []
         for savedPane in record.panes {
@@ -109,18 +140,20 @@ nonisolated struct TerminalGroupRuntime: Sendable {
         let snapshot = try TerminalGroupSnapshot(
             id: groupID, name: record.name, root: root, focusedPaneID: focusedPaneID,
             savedLayoutID: record.id, panes: panes,
-            retainedPaneCount: retainedPaneCount + panes.count)
-        return try insertInertSnapshot(snapshot).id
+            retainedPaneCount: retainedPaneCount + (ensemble ? 0 : panes.count))
+        return try insertInertSnapshot(snapshot, ensemble: ensemble).id
     }
 
     /// Inserts a TG-22-decoded inert instance without remapping its already
     /// re-keyed runtime identities. It accepts only zero-session stopped or
     /// unavailable panes and never constructs a controller or process.
-    mutating func insertInertSnapshot(_ snapshot: TerminalGroupSnapshot) throws
-        -> TerminalGroupSnapshot
+    mutating func insertInertSnapshot(_ snapshot: TerminalGroupSnapshot, ensemble: Bool = false)
+        throws -> TerminalGroupSnapshot
     {
-        try requireGroupCapacity(requested: 1)
-        try requireRetainedCapacity(snapshot.panes.count)
+        if !ensemble {
+            try requireGroupCapacity(requested: 1)
+            try requireRetainedCapacity(snapshot.panes.count)
+        }
         let incomingPaneIDs = Set(snapshot.panes.map(\.id))
         let existingPaneIDs = Set(groups.values.flatMap { $0.panes.map(\.id) })
         let incomingSplitIDs = Set(snapshot.root.splitIDs)
@@ -134,8 +167,10 @@ nonisolated struct TerminalGroupRuntime: Sendable {
         let inserted = try TerminalGroupSnapshot(
             id: snapshot.id, name: snapshot.name, root: snapshot.root,
             focusedPaneID: snapshot.focusedPaneID, savedLayoutID: snapshot.savedLayoutID,
-            panes: snapshot.panes, retainedPaneCount: retainedPaneCount + snapshot.panes.count)
+            panes: snapshot.panes,
+            retainedPaneCount: retainedPaneCount + (ensemble ? 0 : snapshot.panes.count))
         groups[inserted.id] = inserted
+        if ensemble { ensembleGroupIDs.insert(inserted.id) }
         advanceGeneration()
         return inserted
     }
@@ -221,7 +256,7 @@ nonisolated struct TerminalGroupRuntime: Sendable {
         guard pane.startAvailability == .available, pane.launchProfile != nil,
             pane.status == .stopped || pane.status == .exited
         else { throw TerminalGroupValidationError.unsupportedPaneStart }
-        try requireLiveCapacity(1)
+        try requireLiveCapacity(1, in: groupID)
         var panes = group.panes
         panes[index] = try TerminalPaneSnapshot(
             id: pane.id, sessionID: sessionID, explicitUserName: pane.explicitUserName,
@@ -264,7 +299,7 @@ nonisolated struct TerminalGroupRuntime: Sendable {
         guard pane.sessionID == sessionID, pane.status == .exited,
             pane.startAvailability == .available, pane.launchProfile != nil
         else { throw TerminalGroupValidationError.unsupportedPaneStart }
-        try requireLiveCapacity(1)
+        try requireLiveCapacity(1, in: groupID)
         var panes = group.panes
         panes[index] = try withStatus(pane, .live)
         groups[groupID] = try TerminalGroupSnapshot(
@@ -480,6 +515,7 @@ nonisolated struct TerminalGroupRuntime: Sendable {
 
     mutating func shutdown() {
         groups = [:]
+        ensembleGroupIDs = []
         parkedGroupIDs = []
         nextDefaultNameNumber = 1
         advanceGeneration()
@@ -496,6 +532,7 @@ nonisolated struct TerminalGroupRuntime: Sendable {
             let remainingPanes = group.panes.filter { $0.id != paneID }
             if remainingPanes.isEmpty {
                 groups[groupID] = nil
+                ensembleGroupIDs.remove(groupID)
                 parkedGroupIDs.removeAll { $0 == groupID }
                 advanceGeneration()
                 return .removeEditorTab(groupID: groupID)
@@ -514,6 +551,7 @@ nonisolated struct TerminalGroupRuntime: Sendable {
         case .group(let groupID):
             guard groups[groupID] != nil else { throw TerminalGroupValidationError.staleCloseToken }
             groups[groupID] = nil
+            ensembleGroupIDs.remove(groupID)
             parkedGroupIDs.removeAll { $0 == groupID }
             advanceGeneration()
             return .removeEditorTab(groupID: groupID)
@@ -586,10 +624,10 @@ nonisolated struct TerminalGroupRuntime: Sendable {
 
     private func requireGroupCapacity(requested: Int) throws {
         guard requested >= 0,
-            groups.count + requested <= TerminalGroupLimits.maximumGroupsPerWindow
+            windowGroupCount + requested <= TerminalGroupLimits.maximumGroupsPerWindow
         else {
             throw TerminalGroupCapacityError.groupLimitExceeded(
-                current: groups.count, requested: requested)
+                current: windowGroupCount, requested: requested)
         }
     }
 
@@ -601,7 +639,10 @@ nonisolated struct TerminalGroupRuntime: Sendable {
         }
     }
 
-    private func requireLiveCapacity(_ requested: Int) throws {
+    /// An Ensemble terminal never counts toward the live-session bound, so
+    /// starting or restarting its pane is not refused for the bound.
+    private func requireLiveCapacity(_ requested: Int, in groupID: TerminalGroupID? = nil) throws {
+        if let groupID, ensembleGroupIDs.contains(groupID) { return }
         guard liveSessionCount + requested <= TerminalGroupLimits.maximumLiveSessionsPerWindow
         else {
             throw TerminalGroupCapacityError.liveSessionLimitExceeded(

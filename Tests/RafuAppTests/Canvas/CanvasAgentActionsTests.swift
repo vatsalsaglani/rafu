@@ -333,6 +333,104 @@ struct CanvasAgentActionsTests {
         #expect(typed.error != nil)
     }
 
+    @Test("An agent's removal of a running terminal stops it and removes node and links silently")
+    func agentRemovalOfRunningTerminalIsSilent() async throws {
+        let fixture = try await CanvasAgentFixture()
+        let session = fixture.session
+        let board = fixture.board
+        board.setAgentControlMode(.allow)
+        let shell = TerminalShell(path: "/bin/zsh", name: "zsh", isDefault: true)
+        let profile = TerminalPaneLaunchProfile(shell: .preferredShell, startingFolder: .root)
+        let group = try session.terminal.createLiveGroup(
+            instantiation: .ordinaryShell(startingDirectory: "/tmp", shell: shell, profile: profile)
+        )
+        let sessionID = try #require(group.panes.first?.sessionID)
+        let controller = try #require(session.terminal.sessions.first { $0.id == sessionID })
+        controller.markRunningForTesting()
+        #expect(controller.hasLiveProcess)
+        try board.add(title: "Worker", content: .terminal(groupID: group.id))
+        let worker = try #require(board.cards.last)
+        try board.addConnection(
+            from: fixture.cards[0].id, to: worker.id, label: "Message", behavior: .session)
+        session.canvasTerminalOwners[group.id] = board.id
+        #expect(board.connections.count == 1)
+        #expect(board.notice == nil)
+
+        let response = try await fixture.call(
+            "node_remove", ["node_id": worker.id.rawValue.uuidString])
+
+        #expect(response.error == nil)
+        // The process stopped, the group closed, the node and its edge are gone.
+        #expect(session.terminal.terminalGroup(group.id) == nil)
+        #expect(!session.terminal.sessions.contains { $0.id == sessionID })
+        #expect(!board.cards.contains { $0.id == worker.id })
+        #expect(board.connections.isEmpty)
+        #expect(session.canvasTerminalOwners[group.id] == nil)
+        // Nothing asks or announces: no confirmation, alert, dialog, notice or approval.
+        #expect(session.pendingTerminalGroupClose == nil)
+        #expect(session.pendingCanvasRemoval == nil)
+        #expect(session.canvasDialog == nil)
+        #expect(!session.isTerminalGroupErrorPresented)
+        #expect(!session.isOpenFolderErrorPresented)
+        #expect(board.notice == nil)
+        #expect(CanvasAgentCenter.shared.approvals(for: board.id).isEmpty)
+        // Removal stays one undo step.
+        board.performUndo()
+        #expect(board.cards.contains { $0.id == worker.id })
+        #expect(board.connections.count == 1)
+    }
+
+    @Test("In Ask, the approval is the only prompt for an agent's terminal removal")
+    func agentRemovalOfTerminalAsksOnceThenStaysSilent() async throws {
+        let fixture = try await CanvasAgentFixture()
+        let session = fixture.session
+        let board = fixture.board
+        session.addCanvasStoppedTerminal(board.id)
+        let worker = try #require(board.cards.last)
+        guard case .terminal(let groupID) = worker.content else {
+            Issue.record("not a terminal card")
+            return
+        }
+        let removal = Task {
+            try await fixture.call("node_remove", ["node_id": worker.id.rawValue.uuidString])
+        }
+        let approval = try #require(await fixture.pendingApproval())
+        #expect(approval.call.tool == .nodeRemove)
+        CanvasAgentCenter.shared.decide(approval.id, .once)
+        let response = try await removal.value
+        #expect(response.error == nil)
+        #expect(!board.cards.contains { $0.id == worker.id })
+        #expect(session.terminal.terminalGroup(groupID) == nil)
+        #expect(session.pendingTerminalGroupClose == nil)
+        #expect(!session.isTerminalGroupErrorPresented)
+        #expect(board.notice == nil)
+        #expect(CanvasAgentCenter.shared.approvals(for: board.id).isEmpty)
+    }
+
+    @Test("An agent can create more terminals than the old window bounds allowed")
+    func agentCreatesTerminalsPastTheOldBounds() async throws {
+        let fixture = try await CanvasAgentFixture()
+        let session = fixture.session
+        let board = fixture.board
+        board.setAgentControlMode(.allow)
+        let count = TerminalGroupLimits.maximumGroupsPerWindow + 5
+        for index in 0..<count {
+            let response = try await fixture.call("terminal_create", ["title": "Worker \(index)"])
+            #expect(response.error == nil)
+        }
+        let terminals = board.cards.filter {
+            if case .terminal = $0.content { return true }
+            return false
+        }
+        #expect(terminals.count == count + 1)
+        #expect(session.terminal.terminalGroups.count == count + 1)
+        // Only the editor-tab group the fixture made counts toward the window bound.
+        #expect(
+            session.terminal.terminalGroups.filter {
+                !session.terminal.isEnsembleTerminalGroup($0.id)
+            }.count == 1)
+    }
+
     @Test("note_write appends through the note and respects the note limit")
     func noteWrite() async throws {
         let fixture = try await CanvasAgentFixture()
@@ -765,47 +863,15 @@ struct CanvasTerminalStartTests {
         #expect(fixture.board.pendingTerminalLines[lead.id] == nil)
     }
 
-    @Test("Four stopped terminals hold no leases; a fifth start is not held at the cap")
-    func stoppedTerminalsDoNotFillTheLeaseCap() async throws {
-        let fixture = try await CanvasAgentFixture()
-        let session = fixture.session
-        let board = fixture.board
-        for _ in 0..<5 { session.addCanvasStoppedTerminal(board.id) }
-        let lead = fixture.cards[0].id
-        let stopped = board.cards.filter {
-            guard case .terminal = $0.content else { return false }
-            return $0.id != lead
-        }
-        #expect(stopped.count == 5)
-        // Four stopped cards still hold leases, as a card that stopped keeps its own.
-        for card in stopped.prefix(4) {
-            session.canvasTerminalOwners[terminalGroupID(of: card)] = board.id
-        }
-        let fifth = try #require(stopped.last)
-        let report = try await withShortStartWait {
-            try await CanvasTerminalStarter.start(
-                card: fifth, groupID: terminalGroupID(of: fifth), line: nil, board: board,
-                session: session, onGiveUp: {})
-        }
-        #expect(report.hold != .leaseCap)
-        #expect(board.terminalStartRequest == fifth.id)
-        for card in stopped.prefix(4) {
-            #expect(session.canvasTerminalOwners[terminalGroupID(of: card)] == nil)
-        }
-        // The user's start takes a lease first, so the card can show the shell.
-        #expect(session.claimCanvasTerminalLease(terminalGroupID(of: fifth), for: board.id))
-        #expect(session.canvasTerminalOwners[terminalGroupID(of: fifth)] == board.id)
-    }
-
-    @Test("Live terminals keep the cap of four; stopped ones give way")
-    func liveTerminalsKeepTheLeaseCap() async throws {
+    @Test("Ensemble terminals have no lease cap: every live terminal keeps its lease")
+    func ensembleTerminalsHaveNoLeaseCap() async throws {
         let fixture = try await CanvasAgentFixture()
         let session = fixture.session
         let board = fixture.board
         let shell = TerminalShell(path: "/bin/zsh", name: "zsh", isDefault: true)
         let profile = TerminalPaneLaunchProfile(shell: .preferredShell, startingFolder: .root)
         var live = [terminalGroupID(of: fixture.cards[0])]
-        for _ in 0..<3 {
+        for _ in 0..<7 {
             let group = try session.terminal.createLiveGroup(
                 instantiation: .ordinaryShell(
                     startingDirectory: "/tmp", shell: shell, profile: profile))
@@ -814,9 +880,16 @@ struct CanvasTerminalStartTests {
         for id in live { #expect(session.claimCanvasTerminalLease(id, for: board.id)) }
         session.addCanvasStoppedTerminal(board.id)
         let stopped = try #require(board.cards.last)
-        #expect(!session.claimCanvasTerminalLease(terminalGroupID(of: stopped), for: board.id))
-        #expect(session.canvasTerminalOwners.count == CanvasTerminalStarter.leaseCap)
-        for id in live { #expect(session.canvasTerminalOwners[id] == board.id) }
+        #expect(session.claimCanvasTerminalLease(terminalGroupID(of: stopped), for: board.id))
+        #expect(session.canvasTerminalOwners.count == live.count + 1)
+        // A start is never held for a count of terminals.
+        let report = try await withShortStartWait {
+            try await CanvasTerminalStarter.start(
+                card: stopped, groupID: terminalGroupID(of: stopped), line: nil, board: board,
+                session: session, onGiveUp: {})
+        }
+        #expect(report.hold == nil)
+        #expect(board.terminalStartRequest == stopped.id)
     }
 
     @Test("A refused send keeps the line at the front for the next drain")
@@ -912,20 +985,18 @@ struct CanvasTerminalStartTests {
         #expect(message.contains("link_set_state"))
     }
 
-    @Test("Start messages name the lease cap and the start limit, and never a line")
+    @Test("Start messages name the hold reason and never a line")
     func startMessagesNameTheReason() {
         var report = CanvasTerminalStartReport()
         report.queuedLines = 2
-        report.hold = .leaseCap
-        let cap = CanvasAgentActions.startMessage(
-            report, title: "Peer", kind: .create, lineBytes: 120)
-        #expect(cap.contains("Four Ensemble terminals"))
-        #expect(cap.contains("120-byte"))
-        #expect(cap.contains("queued, not typed"))
         report.hold = .unavailable
         let limit = CanvasAgentActions.startMessage(
-            report, title: "Peer", kind: .send, lineBytes: 10)
-        #expect(limit.contains("live-session limit"))
+            report, title: "Peer", kind: .create, lineBytes: 120)
+        #expect(limit.contains("no saved shell profile"))
+        #expect(limit.contains("120-byte"))
+        #expect(limit.contains("queued, not typed"))
+        #expect(!limit.contains("limit"))
+        #expect(!limit.contains("Four"))
         report.hold = nil
         report.running = true
         let live = CanvasAgentActions.startMessage(
@@ -934,12 +1005,6 @@ struct CanvasTerminalStartTests {
         #expect(live.contains("ensemble_describe"))
         #expect(!live.contains("queued, not typed"))
         #expect(CanvasAgentActions.queueFullMessage("Peer").contains("queued lines"))
-        report.running = false
-        report.hold = .leaseCap
-        let voice = CanvasAgentActions.startMessage(
-            report, title: "Peer", kind: .create, lineBytes: 10, isVoice: true)
-        #expect(voice.contains("ask which one to stop"))
-        #expect(!voice.contains("Ensemble terminals"))
     }
 
     private func drain(

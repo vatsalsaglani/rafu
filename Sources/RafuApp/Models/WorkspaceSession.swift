@@ -832,8 +832,10 @@ final class WorkspaceSession {
     /// Grouped snapshots count one committed slot each. The two temporary
     /// Ensemble compatibility callers can still own an ungrouped controller
     /// during this migration, so include only those controller IDs here.
+    /// Ensemble terminals have no count limit and are not counted.
     var liveTerminalSessionCount: Int {
-        let grouped = terminal.terminalGroups.flatMap(\.panes).filter { $0.status == .live }.count
+        let grouped = terminal.terminalGroups.filter { !terminal.isEnsembleTerminalGroup($0.id) }
+            .flatMap(\.panes).filter { $0.status == .live }.count
         let legacy = terminal.sessions.count { controller in
             guard terminal.terminalGroupAndPane(containing: controller.id) == nil else {
                 return false
@@ -899,7 +901,10 @@ final class WorkspaceSession {
         }
         if action == .toggle { return .init(isEnabled: true, reason: nil) }
         if action == .newGroup {
-            guard terminal.terminalGroups.count < TerminalGroupLimits.maximumGroupsPerWindow else {
+            let countedGroups = terminal.terminalGroups.count {
+                !terminal.isEnsembleTerminalGroup($0.id)
+            }
+            guard countedGroups < TerminalGroupLimits.maximumGroupsPerWindow else {
                 return .init(
                     isEnabled: false, reason: "The window has reached its Terminal Group limit.")
             }
@@ -974,7 +979,10 @@ final class WorkspaceSession {
             guard let pane else {
                 return .init(isEnabled: false, reason: "Select a Terminal Pane.")
             }
-            guard liveTerminalSessionCount < TerminalGroupLimits.maximumLiveSessionsPerWindow else {
+            guard
+                terminal.isEnsembleTerminalGroup(groupID)
+                    || liveTerminalSessionCount < TerminalGroupLimits.maximumLiveSessionsPerWindow
+            else {
                 return .init(
                     isEnabled: false, reason: "The window has reached its live Terminal limit.")
             }
@@ -994,8 +1002,9 @@ final class WorkspaceSession {
                     isEnabled: false, reason: "No restartable Terminal Panes are available.")
             }
             guard
-                liveTerminalSessionCount + candidates.count
-                    <= TerminalGroupLimits.maximumLiveSessionsPerWindow
+                terminal.isEnsembleTerminalGroup(groupID)
+                    || liveTerminalSessionCount + candidates.count
+                        <= TerminalGroupLimits.maximumLiveSessionsPerWindow
             else {
                 return .init(
                     isEnabled: false,
@@ -1625,6 +1634,25 @@ final class WorkspaceSession {
             pendingCanvasTerminalRemoval = nil
             presentTerminalGroupError(error.localizedDescription)
         }
+    }
+
+    /// Closes one Terminal Group with no confirmation and no pending-close
+    /// state: it stops every process in the group, finalizes the group, and
+    /// drops its editor tab. Used only for a close an agent asked for through
+    /// Rafu's MCP tools after Agent control allowed it (an Ensemble card's
+    /// terminal); the user's own closes keep the confirmation sheet. It never
+    /// replaces `pendingTerminalGroupClose`, so a sheet the user has open for
+    /// another group stays. A missing group is already closed.
+    func closeTerminalGroupWithoutConfirmation(_ groupID: TerminalGroupID) throws {
+        guard terminal.terminalGroup(groupID) != nil else { return }
+        let effect = try terminal.perform(.prepareClose(.group(groupID)))
+        guard case .requestCloseConfirmation(let token) = effect else { return }
+        cleanupTerminalSessions(token.affectedSessionIDs)
+        _ = try terminal.perform(.finalizeClose(token))
+        if terminal.terminalGroup(groupID) == nil { removeTerminalGroupTab(groupID) }
+        if pendingTerminalGroupClose?.target == .group(groupID) { pendingTerminalGroupClose = nil }
+        synchronizeSelectionFromLayout()
+        persistWorkspaceState()
     }
 
     func confirmTerminalPaneCloseAndSuppressFutureWarnings() {
@@ -5882,7 +5910,7 @@ final class WorkspaceSession {
         where references.contains(record.groupID) {
             guard terminal.terminalGroup(record.groupID) == nil else { continue }
             if let value = try? terminalGroupCodec(for: rootURL).restoreOpenInstance(record) {
-                _ = try? terminal.insertInertSnapshot(value.snapshot)
+                _ = try? terminal.insertInertSnapshot(value.snapshot, ensemble: true)
             }
         }
     }
@@ -5926,7 +5954,8 @@ final class WorkspaceSession {
                 focusedPaneID: snapshot.focusedPaneID, savedLayoutID: snapshot.savedLayoutID,
                 panes: panes)
         }
-        return try? TerminalGroupWorkspaceRestoration(openGroups: records)
+        return try? TerminalGroupWorkspaceRestoration(
+            openGroups: records, ensemble: canvasIDs != nil)
     }
 
     /// Filters a value copy only. Unsaved groups and every legacy live

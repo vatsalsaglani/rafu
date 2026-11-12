@@ -80,6 +80,9 @@ extension WorkspaceSession {
             cardID = board.cards.first(where: { $0.content == content })?.id
         }
         guard let cardID else { return false }
+        // An Ensemble terminal has no count limit, so it leaves the window's
+        // Terminal Group bounds (ADR 0023 amendment, 2026-11-12).
+        terminal.markEnsembleTerminalGroup(groupID)
         hideTerminalGroup(groupID)
         guard parkedTerminalGroupIDs.contains(groupID) else {
             // The group could not be parked: undo the card so the terminal
