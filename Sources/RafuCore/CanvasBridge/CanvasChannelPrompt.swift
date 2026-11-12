@@ -22,9 +22,16 @@ public nonisolated enum CanvasChannelPrompt {
 
     private static let title = "Loadingdevelopmentchannels"
     private static let flag = "--dangerously-load-development-channels"
-    private static let confirmHint = "Entertoconfirm"
     private static let channelsLabel = "Channels:"
     private static let selectedOption = "❯ 1. I am using this for local development"
+    private static let exitOption = "2. Exit"
+    /// Folder-trust dialog parts. Used only to extend the watch window, never to answer.
+    private static let trustTitle = "Quicksafetycheck"
+    private static let trustOption = "Yes,Itrustthisfolder"
+    /// The first word of every segment of the dialog's key-hint footer.
+    private static let hintKeys: Set<String> = [
+        "Enter", "Return", "Esc", "Escape", "Tab", "↑/↓", "↑↓", "↑", "↓",
+    ]
 
     /// True only when `lines` show the complete dialog for Rafu's own channel
     /// with option 1 selected. Every part must be present:
@@ -32,32 +39,73 @@ public nonisolated enum CanvasChannelPrompt {
     /// - the "Loading development channels" title;
     /// - the `--dangerously-load-development-channels` flag name;
     /// - one `Channels:` line whose only entry is exactly `server:rafu`;
-    /// - "I am using this for local development" as the selected option (`❯ 1.`);
-    /// - the "Enter to confirm" hint.
+    /// - "I am using this for local development" as the selected option (`❯ 1.`),
+    ///   followed by the "2. Exit" option.
     ///
-    /// The "Enter to confirm" row must also be the last non-empty row of the
-    /// sample: the dialog sits at the bottom of the screen, so anything shown
-    /// below it (a tool-permission prompt, an agent's text) gives no match.
+    /// The dialog must also be the tail of the sample. After the selected option
+    /// only blank rows, the "2. Exit" row, and then at most the dialog's key-hint
+    /// footer (`Enter to confirm · Esc to cancel`, or any row made only of
+    /// `<Key> to <action>` parts) may follow. The dialog sits at the bottom of
+    /// the screen, so anything shown below it (a tool-permission prompt, an
+    /// agent's text) gives no match. The footer wording is Claude Code's, not
+    /// Rafu's, and Claude Code builds it from its active key bindings, so the
+    /// footer is not required to say "Enter to confirm".
     ///
-    /// Wrapped rows are joined before the title, flag, and hint are searched, so a
+    /// Wrapped rows are joined before the title and flag are searched, so a
     /// dialog wrapped at 60 or 80 columns still matches. The `Channels:` line and
     /// the option line must start their row, so output that merely quotes them
     /// does not match. Any code fence in view means the text is a quotation.
     public static func matches(_ lines: [String]) -> Bool {
         let rows = lines.map { $0.trimmingCharacters(in: .whitespaces) }
-        guard !rows.contains(where: { $0.hasPrefix("```") || $0.hasPrefix("~~~") }) else {
-            return false
-        }
+        guard !hasFence(rows) else { return false }
         let flat = rows.joined().filter { !$0.isWhitespace }
-        guard flat.contains(title), flat.contains(flag), flat.contains(confirmHint) else {
-            return false
+        guard flat.contains(title), flat.contains(flag) else { return false }
+        let selected = rows.indices.filter {
+            normalized(rows[$0]) == normalized(selectedOption)
         }
-        guard let last = rows.last(where: { !$0.isEmpty }),
-            normalized(last).hasPrefix("Enter to confirm"),
-            rows.filter({ normalized($0) == normalized(selectedOption) }).count == 1,
-            channels(in: rows) == [channelEntry]
+        guard selected.count == 1, let selectedRow = selected.first,
+            channels(in: rows) == [channelEntry],
+            isDialogTail(rows[(selectedRow + 1)...])
         else { return false }
         return true
+    }
+
+    /// True when `lines` show Claude Code's folder-trust dialog. The watch uses
+    /// this only to keep waiting while the user answers it; Rafu never answers it.
+    public static func isFolderTrust(_ lines: [String]) -> Bool {
+        let rows = lines.map { $0.trimmingCharacters(in: .whitespaces) }
+        guard !hasFence(rows) else { return false }
+        let flat = rows.joined().filter { !$0.isWhitespace }
+        return flat.contains(trustTitle) && flat.contains(trustOption)
+    }
+
+    private static func hasFence(_ rows: [String]) -> Bool {
+        rows.contains { $0.hasPrefix("```") || $0.hasPrefix("~~~") }
+    }
+
+    /// Rows after the selected option: `2. Exit`, then at most a key-hint footer.
+    private static func isDialogTail(_ rest: ArraySlice<String>) -> Bool {
+        let content = rest.filter { !$0.isEmpty }.map(normalized)
+        guard content.first == exitOption else { return false }
+        // The footer is one row. Rows after it are other output, not the dialog.
+        let footer = content.dropFirst()
+        return footer.isEmpty || (footer.count == 1 && isKeyHint(footer[footer.startIndex]))
+    }
+
+    /// `Enter to confirm · Esc to cancel` and its relatives: short segments split
+    /// on `·`, each starting with a key name and saying what it does.
+    private static func isKeyHint(_ text: String) -> Bool {
+        guard text.count <= 120 else { return false }
+        let segments = text.split(whereSeparator: { $0 == "·" || $0 == "•" })
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+        guard !segments.isEmpty else { return false }
+        for segment in segments {
+            let words = segment.split(separator: " ")
+            guard (2...4).contains(words.count), let key = words.first,
+                hintKeys.contains(String(key))
+            else { return false }
+        }
+        return segments.contains { $0.hasPrefix("Enter") || $0.hasPrefix("Esc") }
     }
 
     /// The entries of the single `Channels:` line, joined across the rows that
@@ -68,12 +116,20 @@ public nonisolated enum CanvasChannelPrompt {
         guard starts.count == 1, let start = starts.first else { return nil }
         var text = String(rows[start].dropFirst(channelsLabel.count))
         var next = start + 1
-        // The list ends at the first blank row; a wrapped list continues until then.
-        while next < rows.count, !rows[next].isEmpty {
+        // The list ends at the first blank row or the first option row; a
+        // wrapped list continues until then.
+        while next < rows.count, !rows[next].isEmpty, !isOptionRow(rows[next]) {
             text += " " + rows[next]
             next += 1
         }
         return text.split(whereSeparator: { $0 == "," || $0.isWhitespace }).map(String.init)
+    }
+
+    /// `❯ 1. …`, `  2. …`: a select row, selected or not.
+    private static func isOptionRow(_ row: String) -> Bool {
+        if row.hasPrefix("❯") { return true }
+        let digits = row.prefix { $0.isNumber }
+        return !digits.isEmpty && row.dropFirst(digits.count).hasPrefix(".")
     }
 
     /// The option row is compared with runs of spaces collapsed, so the dialog's
@@ -123,19 +179,30 @@ public nonisolated struct CanvasChannelPromptWatch: Sendable {
         case stop
     }
 
-    /// The watch ends this long after the launch. A slow Claude start, or a
-    /// folder-trust dialog first, can take more than 30 s.
+    /// The watch ends this long after the launch. A slow Claude start can take
+    /// more than 30 s.
     public static let window: TimeInterval = 60
+    /// While Claude's folder-trust dialog is on screen, the window restarts at
+    /// every sample, so the user has `window` seconds after answering it. The
+    /// whole watch still never lasts longer than this after the launch.
+    public static let maxWindow: TimeInterval = 600
     /// After the Return, the dialog may stay this long before Rafu gives up.
     public static let confirmGrace: TimeInterval = 2
-    /// At most four samples per second.
+    /// At most four samples per second while the gates hold.
     public static let sampleInterval: TimeInterval = 0.25
+    /// While a gate is closed the owner reads nothing; it only looks again, at
+    /// this slower pace, in case the user switches the board to Allow.
+    public static let idleInterval: TimeInterval = 1
 
     private let startedAt: TimeInterval
+    private var deadline: TimeInterval
     private var sentAt: TimeInterval?
     private var finished = false
 
-    public init(startedAt: TimeInterval) { self.startedAt = startedAt }
+    public init(startedAt: TimeInterval) {
+        self.startedAt = startedAt
+        deadline = startedAt + Self.window
+    }
 
     public var isFinished: Bool { finished }
     /// True once `.sendReturn` was answered. There is no second Return.
@@ -143,19 +210,27 @@ public nonisolated struct CanvasChannelPromptWatch: Sendable {
 
     /// `lines` is `nil` when the terminal has no view to read. `eligible` is the
     /// current `CanvasChannelPrompt.mayConfirm` result; it is ignored once the
-    /// Return is sent, because that cannot be taken back.
+    /// Return is sent, because that cannot be taken back. While `eligible` is
+    /// false the watch waits and ignores `lines`: Allow may come later in the
+    /// window (the user switches the board after the start).
     public mutating func advance(now: TimeInterval, lines: [String]?, eligible: Bool) -> Action {
         guard !finished else { return .stop }
-        let visible = lines.map(CanvasChannelPrompt.matches) ?? false
         if let sentAt {
+            let visible = lines.map(CanvasChannelPrompt.matches) ?? false
             if lines != nil, !visible { return finish(.confirmed) }
             if now - sentAt >= Self.confirmGrace {
                 return finish(visible ? .couldNotConfirm : .stop)
             }
             return .wait
         }
-        guard eligible, now - startedAt < Self.window else { return finish(.stop) }
-        guard visible else { return .wait }
+        guard now < deadline else { return finish(.stop) }
+        guard eligible, let lines else { return .wait }
+        if CanvasChannelPrompt.isFolderTrust(lines) {
+            // The user is answering Claude's own dialog; keep waiting for ours.
+            deadline = min(startedAt + Self.maxWindow, max(deadline, now + Self.window))
+            return .wait
+        }
+        guard CanvasChannelPrompt.matches(lines) else { return .wait }
         sentAt = now
         return .sendReturn
     }

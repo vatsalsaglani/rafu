@@ -6,7 +6,9 @@
   (swiftlang-6.4.0.34.1), Claude Code 2.1.303, Codex CLI 0.163.0. Source checks are distinct from live model verification.
   The Claude launch argument form was re-verified on 2026-10-21 against Claude
   Code 2.1.304 (see "Claude bridge flags are variadic").
-  The automatic answer to the channel dialog was added on 2026-11-07.
+  The automatic answer to the channel dialog was added on 2026-11-07 and
+  reworked on 2026-11-12 (dialog source read from Claude Code 2.1.322; no live
+  run yet).
 
 ## Rules and verified provider interfaces
 
@@ -416,14 +418,15 @@ made for this investigation.
   (`Sources/RafuApp/Canvas/Integration/CanvasChannelPromptConfirmer.swift`),
   the launch announcement in `CanvasBridgeLaunch.run`, and the `launch`
   operation in `CanvasLiveBridge`.
-- Dialog text last seen: Claude Code 2.1.304 (screenshot from the user,
-  2026-11-07). The dialog is not a Rafu string; if Claude Code changes it, the
-  matcher stops matching and the user answers the dialog by hand.
-- 2.1.319 not yet confirmed. In the 2026-11-09 live voice test (Allow mode)
-  the dialog was not answered and no board notice appeared, so the watch never
-  matched or never started. The cause is not proven: changed dialog text, the
-  window running out, or the setting off. Diagnostics were added (see
-  "Diagnostics" below) and the window went from 30 s to 60 s.
+- Dialog text last seen on a screen: Claude Code 2.1.304 (screenshot from the
+  user, 2026-11-07). Dialog source read from the installed binary: 2.1.322
+  (2026-11-12, see "2026-11-12: why Allow still waited" below). The dialog is not
+  a Rafu string; if Claude Code changes it, the matcher stops matching and the
+  user answers the dialog by hand.
+- In the 2026-11-09 live voice test (Allow mode) the dialog was not answered and
+  no board notice appeared. Diagnostics were added (see "Diagnostics" below) and
+  the window went from 30 s to 60 s. The 2026-11-12 review found the causes
+  listed below; a live run after that change is not done yet.
 
 User decision, 2026-11-07: "When we open Claude session on a terminal we see
 that allow thing. Can we write one automation for that terminal where if that
@@ -450,27 +453,37 @@ Gates. All must hold, and Rafu checks them on every sample:
    records the launch from that request. Nothing starts from terminal output, so
    a Claude the user starts by hand, `codex`, `claude -p`, and `claude mcp` are
    never watched. A newer launch in the same terminal replaces the older watch.
-2. The Ensemble's Agent control is Allow. In Off or Ask the watch never starts
-   and Rafu reads nothing from the terminal.
+2. The Ensemble's Agent control is Allow. While it is Off or Ask, Rafu reads
+   nothing from the terminal and presses nothing. The watch still runs (since
+   2026-11-12) and looks once a second, so a switch to Allow after the start is
+   honoured. The board is looked up by terminal at every sample.
 3. Settings ▸ Ensemble ▸ "Confirm Rafu's development-channel prompt
-   automatically" is on (`ensemble.confirmChannelPrompt`, default on).
+   automatically" is on (`ensemble.confirmChannelPrompt`, default on). It is
+   read at every sample too.
 
 Window and sampling. There is no terminal content hook, so after the launch one
 task samples the visible rows (`WorkspaceTerminalController.recentOutputLines`
 with `fullViewport: true`: every viewport row, also rows below the cursor, never
 scrollback) at most four times a second for at most
 60 s (30 s until 2026-11-09). It stops at the first match or when the window
-ends. No timer runs outside that window.
+ends. No timer runs outside that window. While Claude's folder-trust dialog is
+on screen the window restarts at every sample, up to 600 s after the launch
+(`CanvasChannelPromptWatch.maxWindow`); Rafu never answers that dialog. While a
+gate is closed the pace is one look per second and no row is read
+(`idleInterval`).
 
 Matcher (`CanvasChannelPrompt.matches`, pure). Every part must be present:
 a "Loading development channels" title; the
 `--dangerously-load-development-channels` flag name; one `Channels:` row, at the
 start of its row, whose only entry is exactly `server:rafu` (a second entry, a
 `plugin:` entry, or another name gives no match); "I am using this for local
-development" as the selected option (`❯ 1.`); and "Enter to confirm". Wrapped
-rows are joined, so 60 and 80 column terminals match. Any code fence in view
-gives no match. The folder-trust dialog, the "New MCP server found" consent, and
-tool-permission prompts lack these parts and never match.
+development" as the selected option (`❯ 1.`) followed by `2. Exit`; and nothing
+after that but blank rows and at most a key-hint footer (`Enter to confirm ·
+Esc to cancel` or any row made only of `<Key> to <action>` parts; the words are
+not fixed, 2026-11-12). Wrapped rows are joined, so 60 and 80 column terminals
+match. Any code fence in view gives no match. The folder-trust dialog, the "New
+MCP server found" consent, and tool-permission prompts lack these parts and
+never match.
 
 Action. Exactly one `"\r"` goes to the terminal's pty through
 `WorkspaceTerminalController.sendReturn`. There is one attempt per launch. When
@@ -493,28 +506,32 @@ two rules stop it from steering the watch toward its own Claude:
    same rule as `register`). The wrapper sends `launch` before `execve`, so no
    client is registered at that time. A running Claude cannot open a new watch,
    and a repeated `launch` cannot replace one.
-2. The matcher needs the "Enter to confirm" row to be the last non-empty row of
-   the sample. The sample includes rows below the cursor, so this rule does not
-   depend on where Claude leaves the cursor. The real dialog sits at the bottom
-   of the screen. Dialog text
-   that an agent prints, followed by a tool-permission prompt or any other
-   output, does not match.
+2. The matcher needs the dialog to be the tail of the sample: after the selected
+   option only `2. Exit` and a key-hint footer may follow (until 2026-11-12 the
+   last row had to say "Enter to confirm"). The sample includes rows below the
+   cursor, so this rule does not depend on where Claude leaves the cursor. The
+   real dialog sits at the bottom of the screen. Dialog text that an agent
+   prints, followed by a tool-permission prompt or any other output, does not
+   match.
 
-If the folder-trust dialog comes first and the user takes more than 60 s to
-answer it, the window ends and Rafu does not answer the channel dialog; the user
-answers it in the terminal.
+If the folder-trust dialog comes first, the window restarts at every sample
+while it is on screen (cap 600 s), so a slow answer no longer ends the watch.
+Rafu does not answer the trust dialog; the user does.
 
-Diagnostics (2026-11-09). `CanvasChannelPromptConfirmer` writes `Logger` lines
-(subsystem `dev.vatsalsaglani.rafu`, category `ChannelPrompt`) with states only,
-never terminal content: watch started; watch not started with the Agent
-control mode and the setting; and why it ended — `confirmed`, `could not
-confirm` (also "Return refused"), `gate closed`, `window elapsed, no view`,
-`window elapsed, dialog never matched`, `no view after the Return`, or
-`cancelled`. The no-logging rule for Voice does not cover Canvas code. Read
+Diagnostics (2026-11-09; changed 2026-11-12). `CanvasChannelPromptConfirmer`
+writes `Logger` lines (subsystem `dev.vatsalsaglani.rafu`, category
+`ChannelPrompt`) with states only, never terminal content: watch started with
+the Agent control mode and the setting at the start; launch not recorded
+because another Claude client is still bound; and why it ended — `confirmed`,
+`could not confirm` (also "Return refused"), `window elapsed, gate closed`,
+`window elapsed, no view`, `window elapsed, dialog never matched`, `no view
+after the Return`, or `cancelled`. The lines are `notice` level since
+2026-11-12: `info` lines are memory-only unless a log stream is open, so
+`log show` found nothing after the 2026-11-09 failure. The no-logging rule for Voice does not cover Canvas code. Read
 them with:
 
 ```bash
-log show --last 10m --predicate 'subsystem == "dev.vatsalsaglani.rafu" && category == "ChannelPrompt"' --info
+/usr/bin/log show --last 10m --predicate 'subsystem == "dev.vatsalsaglani.rafu" && category == "ChannelPrompt"' --info
 ```
 
 "dialog never matched" with the dialog on screen means Claude Code changed the
@@ -531,7 +548,88 @@ swift test --filter CanvasChannelPromptLaunchTests
 
 Manual check: set an Ensemble to Allow, start `claude` in one of its terminals,
 and watch the dialog answer itself with the notice. Set Agent control to Ask, or
-turn the setting off, and start `claude` again: the dialog waits for you.
+turn the setting off, and start `claude` again: the dialog waits for you. Start
+`claude` in Ask, then switch to Allow within 60 s: the waiting dialog answers
+itself.
+
+### 2026-11-12: why Allow still waited, and what changed
+
+Claude Code 2.1.322 (`~/.local/share/claude/versions/2.1.322`, a Bun binary; read
+with `strings`, no run). The component is `DevChannelsDialog`; its source is in
+the binary as plain text:
+
+- title `WARNING: Loading development channels` (a dialog with a top rule and the
+  title in the error colour);
+- paragraph `--dangerously-load-development-channels is for local channel
+  development only. Do not use this option to run channels you have downloaded
+  off the internet.`, a blank row, `Please use --channels to run a list of
+  approved channels.`, a blank row, then the dim row `Channels: ` followed by the
+  entries joined with `, ` (`server:<name>`, `plugin:<name>@<market>`);
+- a two-option select (`confirmLabel` "I am using this for local development",
+  `cancelLabel` "Exit"), confirm first, so `❯ 1. I am using this for local
+  development` and `  2. Exit`. No arming delay (`armAfterMs` unset);
+- the footer is not fixed text. The dialog component builds it from the key
+  bindings active in its focus chain (`Enter` = `confirm`, `Esc` = `cancel`,
+  `↑/↓` = `navigate`, `select:accept` = `select`). On 2.1.304 a screenshot showed
+  `Enter to confirm · Esc to cancel`; on 2.1.322 the words could not be read
+  without running the TUI. The matcher therefore no longer needs them.
+
+Folder trust text (same binary): `Quick safety check: Is this a project you
+created or one you trust? ...` and the option `Yes, I trust this folder`.
+
+Causes found, with the code that held each one:
+
+1. Gates read once (`CanvasChannelPromptConfirmer.recordLaunch`, before the
+   change). A launch in Ask or Off never started a watch, so switching the board
+   to Allow while the dialog waited did nothing. The mode, setting, and board are
+   now read at every sample; the board by terminal (a moved terminal follows its
+   new board).
+2. Footer too strict (`CanvasChannelPrompt.matches`, before the change). The last
+   non-empty row had to start with "Enter to confirm". Claude builds the footer
+   from active bindings, so a different footer would never match. The dialog is
+   now accepted as the tail of the screen instead.
+3. Folder trust first (`CanvasChannelPromptWatch`, before the change). A user who
+   took more than 60 s over the trust dialog lost the watch. The trust dialog now
+   extends the window (cap 600 s); it is never answered.
+4. Diagnostics invisible (`Logger.info`). Info lines are not persisted, so the
+   2026-11-09 run left nothing to read. They are `notice` now.
+5. Stale board (`CanvasLiveBridge.recordClaudeLaunch`, before the change). The
+   watch captured the board at the launch. It looks the board up at every
+   sample now.
+
+Checked and not a cause: an off-screen board. `WorkspaceTerminalController` owns
+its `RafuTerminalView` and process; the SwiftUI card only mounts the view, and
+`recentOutputLines` reads the terminal buffer (`getLine` is relative to the top
+visible row, `yDisp`) whether or not a window shows it. A view that does not
+exist yet reads as `nil`, and the watch already waited through `nil` until the
+window ended; a test now covers rows that appear later. A terminal can only
+launch Claude after its view started the shell, so the launch record never comes
+from a terminal without a view.
+
+Not fixed, with the reason: a `launch` request is still refused while a Claude
+client is bound and fresh (15 s). A clean Claude exit sends `unregister`, which
+clears the binding, so a restart after `/exit` is accepted. A Claude that was
+killed (no `unregister`) leaves the binding for up to 15 s, and a restart within
+that time is not watched; the log says "launch not recorded". Removing the rule
+would let an agent that read the token open a watch for its own Claude.
+
+Voice. `VoiceToolExecutor` `terminal_create` makes an ordinary terminal card in
+the board and types the `claude` line into its shell (`CanvasTerminalStarter`).
+The shell function `claude` is the same wrapper, so it sends the same `launch`
+request. Voice has no allow/ask setting of its own (its tools use the board's
+Agent control through `VoicePolicy`). Decision: no new setting; a Voice-started
+Claude is confirmed when the board is Allow and
+`ensemble.confirmChannelPrompt` is on. In Ask, Voice's spoken yes covers the
+action, not Claude's own dialog.
+
+Verification for this change:
+
+```bash
+swift test --filter CanvasChannelPromptTests
+swift test --filter CanvasChannelPromptConfirmerTests
+swift test --filter CanvasChannelPromptLaunchTests
+swift test --filter CanvasChannelPromptVoiceTests
+```
 
 ## Terminal click focus and Canvas selection
 

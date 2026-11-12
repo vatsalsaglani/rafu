@@ -40,6 +40,12 @@ final class CanvasChannelPromptConfirmer {
         var notice: @MainActor (_ message: String, _ tone: CanvasBoardNotice.Tone) -> Void
     }
 
+    /// How one terminal is read and answered.
+    struct TerminalIO {
+        var read: @MainActor () -> [String]?
+        var sendReturn: @MainActor () -> Bool
+    }
+
     typealias Sleep = @MainActor (Duration) async -> Void
 
     private let now: @MainActor () -> TimeInterval
@@ -60,28 +66,33 @@ final class CanvasChannelPromptConfirmer {
     func isWatching(_ controllerID: UUID) -> Bool { launched.contains(controllerID) }
 
     /// A new launch replaces the watch of an earlier launch in the same terminal.
-    /// When the gates are not met the watch never starts, so Off and Ask boards
-    /// and a switched-off setting read nothing from the terminal.
+    ///
+    /// The watch starts whatever the gates say, because the user may switch the
+    /// board to Allow after the start (the dialog waits for them, and a watch
+    /// that never started could not answer it). While a gate is closed the watch
+    /// reads nothing from the terminal and looks again once a second, so Off and
+    /// Ask boards and a switched-off setting never have their rows read. The
+    /// window still ends 60 s after the launch.
     func recordLaunch(controllerID: UUID, hooks: Hooks) {
         end(controllerID)
         launched.insert(controllerID)
         let mode = hooks.mode()
         let settingOn = hooks.settingOn()
-        guard
-            CanvasChannelPrompt.mayConfirm(
-                mode: mode, settingOn: settingOn, launchedByRafu: true)
-        else {
-            launched.remove(controllerID)
-            Self.logger.info(
-                "Channel prompt watch not started: agent control \(mode.rawValue, privacy: .public), setting \(settingOn ? "on" : "off", privacy: .public)"
-            )
-            return
-        }
-        Self.logger.info("Channel prompt watch started")
+        Self.logger.notice(
+            "Channel prompt watch started: agent control \(mode.rawValue, privacy: .public), setting \(settingOn ? "on" : "off", privacy: .public)"
+        )
         tasks[controllerID] = Task(name: "Watch for Claude's development-channel prompt") {
             [weak self] in
             await self?.watch(controllerID: controllerID, hooks: hooks)
         }
+    }
+
+    /// The launcher announced a start that Rafu refused to record (a Claude
+    /// client is still bound in the terminal). States only.
+    func noteLaunchRefused() {
+        Self.logger.notice(
+            "Channel prompt launch not recorded: another Claude client is still bound in this terminal"
+        )
     }
 
     /// Test seam: returns when the terminal's watch has ended.
@@ -134,9 +145,12 @@ final class CanvasChannelPromptConfirmer {
                     returnRefused: returnRefused, sawView: sawView)
                 return
             }
-            await sleep(.milliseconds(Int(CanvasChannelPromptWatch.sampleInterval * 1000)))
+            let interval =
+                eligible || watch.hasSentReturn
+                ? CanvasChannelPromptWatch.sampleInterval : CanvasChannelPromptWatch.idleInterval
+            await sleep(.milliseconds(Int(interval * 1000)))
         }
-        Self.logger.info("Channel prompt watch ended: cancelled")
+        Self.logger.notice("Channel prompt watch ended: cancelled")
     }
 
     /// Why the watch ended. States only, never terminal content.
@@ -152,14 +166,14 @@ final class CanvasChannelPromptConfirmer {
         case .wait, .sendReturn, .stop:
             if sentReturn {
                 reason = "no view after the Return"
-            } else if !eligible {
-                reason = "gate closed"
+            } else if !sawView, !eligible {
+                reason = "window elapsed, gate closed"
             } else if !sawView {
                 reason = "window elapsed, no view"
             } else {
                 reason = "window elapsed, dialog never matched"
             }
         }
-        logger.info("Channel prompt watch ended: \(reason, privacy: .public)")
+        logger.notice("Channel prompt watch ended: \(reason, privacy: .public)")
     }
 }

@@ -15,6 +15,10 @@ final class CanvasLiveBridge {
     @ObservationIgnored private let beginActivity: ActivityBegin
     @ObservationIgnored private let endActivity: ActivityEnd
     @ObservationIgnored private let channelPrompt: CanvasChannelPromptConfirmer
+    /// Test seam: how the channel-prompt watch reads and answers a terminal.
+    /// When nil, the watch uses the terminal's own view and pty.
+    @ObservationIgnored private let terminalIO:
+        (@MainActor (WorkspaceTerminalController) -> CanvasChannelPromptConfirmer.TerminalIO)?
     /// Held only while at least one terminal has a live agent route. See `updateActivity`.
     @ObservationIgnored private var activity: (any NSObjectProtocol)?
 
@@ -26,13 +30,17 @@ final class CanvasLiveBridge {
             ProcessInfo.processInfo.beginActivity(options: $0, reason: $1)
         },
         endActivity: @escaping ActivityEnd = { ProcessInfo.processInfo.endActivity($0) },
-        channelPrompt: CanvasChannelPromptConfirmer = .shared
+        channelPrompt: CanvasChannelPromptConfirmer = .shared,
+        terminalIO: (
+            @MainActor (WorkspaceTerminalController) -> CanvasChannelPromptConfirmer.TerminalIO
+        )? = nil
     ) {
         resolveLocation = location
         self.now = now
         self.beginActivity = beginActivity
         self.endActivity = endActivity
         self.channelPrompt = channelPrompt
+        self.terminalIO = terminalIO
     }
     private enum SuspensionReason: String {
         case sessionChanged
@@ -695,25 +703,35 @@ final class CanvasLiveBridge {
         _ request: CanvasBridgeRequest, controller: WorkspaceTerminalController,
         source: Endpoint
     ) -> CanvasBridgeResponse {
-        guard request.provider == "claude", let place = location(of: controller.id) else {
+        guard request.provider == "claude", location(of: controller.id) != nil else {
             return .init()
         }
         if source.clientID != nil,
             now().timeIntervalSince(source.lastSeen) < Self.routeFreshness
         {
+            channelPrompt.noteLaunchRefused()
             return .init(error: "Another agent is already connected in this terminal.")
         }
-        let board = place.board
-        channelPrompt.recordLaunch(
-            controllerID: controller.id,
-            hooks: .init(
-                mode: { [weak board] in board?.agentControlMode ?? .off },
-                settingOn: { CanvasChannelPromptPreference.isOn() },
+        let id = controller.id
+        // The board is looked up at every sample, not once: the user may move
+        // the terminal to another Ensemble, or switch its Agent control, after
+        // the launch. A terminal with no board reads as Off.
+        let io =
+            terminalIO?(controller)
+            ?? CanvasChannelPromptConfirmer.TerminalIO(
                 read: { [weak controller] in
                     controller?.recentOutputLines(maxLines: 40, fullViewport: true)
                 },
-                sendReturn: { [weak controller] in controller?.sendReturn() ?? false },
-                notice: { [weak board] message, tone in board?.showNotice(message, tone: tone) }
+                sendReturn: { [weak controller] in controller?.sendReturn() ?? false })
+        channelPrompt.recordLaunch(
+            controllerID: id,
+            hooks: .init(
+                mode: { [weak self] in self?.location(of: id)?.board.agentControlMode ?? .off },
+                settingOn: { CanvasChannelPromptPreference.isOn() },
+                read: io.read, sendReturn: io.sendReturn,
+                notice: { [weak self] message, tone in
+                    self?.location(of: id)?.board.showNotice(message, tone: tone)
+                }
             ))
         return .init()
     }

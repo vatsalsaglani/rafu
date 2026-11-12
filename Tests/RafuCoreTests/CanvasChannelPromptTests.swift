@@ -128,9 +128,122 @@ struct CanvasChannelPromptTests {
         #expect(!CanvasChannelPrompt.matches(Self.dialog(options: ["❯ 1. Exit"])))
     }
 
-    @Test func missingConfirmHintDoesNotMatch() {
-        #expect(!CanvasChannelPrompt.matches(Self.dialog(hint: nil)))
-        #expect(!CanvasChannelPrompt.matches(Self.dialog(hint: "Esc to cancel")))
+    @Test func footerWordingDoesNotDecideTheMatch() {
+        // Claude Code builds the footer from its active key bindings, so its
+        // words change between releases. The dialog must be the tail, not say
+        // "Enter to confirm".
+        #expect(CanvasChannelPrompt.matches(Self.dialog(hint: nil)))
+        for hint in [
+            "Esc to cancel", "Enter to select · Esc to cancel",
+            "↑/↓ to navigate · Enter to select · Esc to cancel", "Enter to confirm",
+            "Enter confirm · Esc cancel",
+        ] {
+            #expect(CanvasChannelPrompt.matches(Self.dialog(hint: hint)), Comment(rawValue: hint))
+        }
+    }
+
+    @Test func aFooterThatIsNotAKeyHintDoesNotMatch() {
+        for hint in [
+            "Run the tests now", "Enter to confirm · rm -rf build", "Enter", "Esc",
+            "Done. Esc to cancel", "Ctrl+C to cancel",
+        ] {
+            #expect(!CanvasChannelPrompt.matches(Self.dialog(hint: hint)), Comment(rawValue: hint))
+        }
+    }
+
+    @Test func aMissingExitOptionDoesNotMatch() {
+        #expect(
+            !CanvasChannelPrompt.matches(
+                Self.dialog(options: ["❯ 1. I am using this for local development"])))
+        #expect(
+            !CanvasChannelPrompt.matches(
+                Self.dialog(options: [
+                    "❯ 1. I am using this for local development", "  2. Stay",
+                ])))
+    }
+
+    // MARK: Matcher, the real dialog (Claude Code 2.1.322)
+
+    /// Laid out from Claude Code's `DevChannelsDialog` component (found in the
+    /// installed 2.1.322 binary; see `docs/references/canvas-live-sessions.md`):
+    /// a pane with a top rule, the bold title, a column with a blank row between
+    /// the two paragraphs and the dim `Channels:` row, then the select with
+    /// "I am using this for local development" first and "Exit" second, then the
+    /// footer. The pane indents every row by one column.
+    private static func realDialog(
+        footer: String? = "Enter to confirm · Esc to cancel", width: Int = 100
+    )
+        -> [String]
+    {
+        var rows = [String(repeating: "─", count: width)]
+        rows += [" WARNING: Loading development channels", ""]
+        rows += wrap(
+            "--dangerously-load-development-channels is for local channel development only. Do not use this option to run channels you have downloaded off the internet.",
+            width: width - 2
+        ).map { " " + $0 }
+        rows += ["", " Please use --channels to run a list of approved channels.", ""]
+        rows += [" Channels: server:rafu", ""]
+        rows += [" ❯ 1. I am using this for local development", "   2. Exit", ""]
+        if let footer { rows.append(" " + footer) }
+        return rows
+    }
+
+    @Test(arguments: [40, 60, 80, 100, 160])
+    func theRealDialogMatchesAtEveryWidth(width: Int) {
+        #expect(CanvasChannelPrompt.matches(Self.realDialog(width: width)))
+        #expect(CanvasChannelPrompt.matches(Self.realDialog(footer: nil, width: width)))
+        #expect(CanvasChannelPrompt.matches(Self.realDialog(footer: "Esc to cancel", width: width)))
+    }
+
+    @Test func theRealDialogMatchesWithBlankRowsBelowAndTerminalRowsAbove() {
+        // The viewport sample has every screen row, also the empty ones below.
+        let screen = ["$ claude", ""] + Self.realDialog() + Array(repeating: "", count: 12)
+        #expect(CanvasChannelPrompt.matches(screen))
+    }
+
+    @Test func theChannelsRowMayTouchTheOptions() {
+        // No blank row between the `Channels:` row and the select.
+        var rows = Self.realDialog()
+        rows.removeAll { $0.isEmpty }
+        #expect(CanvasChannelPrompt.matches(rows))
+    }
+
+    @Test func theRealDialogWithAnExtraChannelDoesNotMatch() throws {
+        var rows = Self.realDialog()
+        let index = try #require(rows.firstIndex { $0.contains("Channels:") })
+        rows[index] = " Channels: server:rafu, plugin:chat@market"
+        #expect(!CanvasChannelPrompt.matches(rows))
+        rows[index] = " Channels: server:evil"
+        #expect(!CanvasChannelPrompt.matches(rows))
+    }
+
+    @Test func theRealDialogFollowedByOtherOutputDoesNotMatch() {
+        #expect(!CanvasChannelPrompt.matches(Self.realDialog() + ["", "Done.", ""]))
+        #expect(
+            !CanvasChannelPrompt.matches(
+                Self.realDialog() + [
+                    "Do you want to proceed?", "❯ 1. Yes", "  2. No", "Esc to cancel",
+                ]))
+    }
+
+    // MARK: Folder trust (extends the window, is never answered)
+
+    private static let folderTrust = [
+        "────────────────────────────────────────",
+        " Accessing workspace:", "", " /Users/example/project", "",
+        " Quick safety check: Is this a project you created or one you trust? (Like your own code, a well-known open source project, or work from your team). If not, take a moment to review what's in this folder first.",
+        "", " Claude Code'll be able to read, edit, and execute files here.", "",
+        " Security guide", "", " ❯ 1. Yes, I trust this folder", "   2. No, exit", "",
+        " Enter to confirm · Esc to cancel",
+    ]
+
+    @Test func theFolderTrustDialogIsRecognisedButNeverMatches() {
+        #expect(CanvasChannelPrompt.isFolderTrust(Self.folderTrust))
+        #expect(!CanvasChannelPrompt.matches(Self.folderTrust))
+        #expect(!CanvasChannelPrompt.isFolderTrust(Self.realDialog()))
+        #expect(!CanvasChannelPrompt.isFolderTrust([]))
+        // A quotation is not the dialog.
+        #expect(!CanvasChannelPrompt.isFolderTrust(["```text"] + Self.folderTrust + ["```"]))
     }
 
     @Test func missingTitleOrFlagDoesNotMatch() {
@@ -258,14 +371,73 @@ struct CanvasChannelPromptTests {
         #expect(!watch.hasSentReturn)
     }
 
-    @Test func watchEndsWithoutReadingWhenAGateFails() {
+    @Test func aClosedGateWaitsAndNeverSendsWhileItIsClosed() {
         var watch = CanvasChannelPromptWatch(startedAt: 0)
-        #expect(watch.advance(now: 1, lines: sample, eligible: false) == .stop)
+        #expect(watch.advance(now: 1, lines: sample, eligible: false) == .wait)
+        #expect(watch.advance(now: 2, lines: nil, eligible: false) == .wait)
         #expect(!watch.hasSentReturn)
-        // A closed gate also stops a watch that has not sent its Return.
+        // The same dialog, still on screen, is answered once the gate opens
+        // (the user switched the board to Allow after the start).
+        #expect(watch.advance(now: 30, lines: sample, eligible: true) == .sendReturn)
+        // A gate that closes again before the dialog shows sends nothing.
         var later = CanvasChannelPromptWatch(startedAt: 0)
         #expect(later.advance(now: 1, lines: ["$ claude"], eligible: true) == .wait)
-        #expect(later.advance(now: 2, lines: sample, eligible: false) == .stop)
+        #expect(later.advance(now: 2, lines: sample, eligible: false) == .wait)
+        #expect(!later.hasSentReturn)
+    }
+
+    @Test func aClosedGateStillEndsWhenTheWindowEnds() {
+        var watch = CanvasChannelPromptWatch(startedAt: 5)
+        #expect(watch.advance(now: 64.75, lines: nil, eligible: false) == .wait)
+        #expect(watch.advance(now: 65, lines: sample, eligible: true) == .stop)
+        #expect(watch.isFinished)
+        #expect(!watch.hasSentReturn)
+    }
+
+    @Test func theFolderTrustDialogKeepsTheWatchOpenButIsNeverAnswered() {
+        var watch = CanvasChannelPromptWatch(startedAt: 0)
+        // Claude's own dialog first; the user takes minutes to answer it.
+        for time in stride(from: 1.0, through: 200.0, by: 1.0) {
+            #expect(watch.advance(now: time, lines: Self.folderTrust, eligible: true) == .wait)
+        }
+        #expect(!watch.hasSentReturn)
+        // The channel dialog then shows up and is answered once.
+        #expect(watch.advance(now: 230, lines: sample, eligible: true) == .sendReturn)
+    }
+
+    @Test func theWindowRestartsAfterTheFolderTrustDialogIsGone() {
+        var watch = CanvasChannelPromptWatch(startedAt: 0)
+        #expect(watch.advance(now: 50, lines: Self.folderTrust, eligible: true) == .wait)
+        // The window now ends 60 s after the last sample that showed the dialog.
+        #expect(watch.advance(now: 109.75, lines: ["$ claude"], eligible: true) == .wait)
+        #expect(watch.advance(now: 110, lines: ["$ claude"], eligible: true) == .stop)
+    }
+
+    @Test func theFolderTrustExtensionHasAHardCap() {
+        var watch = CanvasChannelPromptWatch(startedAt: 0)
+        var last = CanvasChannelPromptWatch.Action.wait
+        for time in stride(from: 1.0, through: 700.0, by: 1.0) {
+            last = watch.advance(now: time, lines: Self.folderTrust, eligible: true)
+            if last == .stop { break }
+        }
+        #expect(last == .stop)
+        #expect(watch.isFinished)
+        #expect(!watch.hasSentReturn)
+        // The window ends at the cap, however long the dialog stays.
+        var capped = CanvasChannelPromptWatch(startedAt: 0)
+        for time in stride(from: 30.0, through: 570.0, by: 30.0) {
+            #expect(capped.advance(now: time, lines: Self.folderTrust, eligible: true) == .wait)
+        }
+        let cap = CanvasChannelPromptWatch.maxWindow
+        #expect(capped.advance(now: cap - 1, lines: Self.folderTrust, eligible: true) == .wait)
+        #expect(capped.advance(now: cap, lines: Self.folderTrust, eligible: true) == .stop)
+    }
+
+    @Test func aClosedGateDoesNotExtendTheWindowForFolderTrust() {
+        // Nothing is read while a gate is closed, so the trust dialog is not seen.
+        var watch = CanvasChannelPromptWatch(startedAt: 0)
+        #expect(watch.advance(now: 59, lines: Self.folderTrust, eligible: false) == .wait)
+        #expect(watch.advance(now: 60, lines: Self.folderTrust, eligible: false) == .stop)
     }
 
     @Test func gateChangeAfterTheReturnDoesNotCancelTheResult() {
@@ -294,7 +466,9 @@ struct CanvasChannelPromptTests {
 
     @Test func samplingStaysAtOrBelowFourPerSecond() {
         #expect(CanvasChannelPromptWatch.sampleInterval >= 0.25)
+        #expect(CanvasChannelPromptWatch.idleInterval >= CanvasChannelPromptWatch.sampleInterval)
         #expect(CanvasChannelPromptWatch.window <= 60)
+        #expect(CanvasChannelPromptWatch.maxWindow <= 600)
     }
 
     // MARK: Launch announcement

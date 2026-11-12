@@ -16,6 +16,12 @@ struct CanvasChannelPromptConfirmerTests {
         "❯ 1. I am using this for local development", "  2. Exit", "",
         "Enter to confirm · Esc to cancel",
     ]
+    private static let trust = [
+        " Accessing workspace:", "", " /Users/example/project", "",
+        " Quick safety check: Is this a project you created or one you trust?", "",
+        " ❯ 1. Yes, I trust this folder", "   2. No, exit", "",
+        " Enter to confirm · Esc to cancel",
+    ]
     private static let welcome = ["Welcome to Claude Code", "> "]
 
     /// A scripted terminal plus the board-side state the hooks read.
@@ -133,11 +139,29 @@ struct CanvasChannelPromptConfirmerTests {
         terminal.rows = Self.dialog
         let confirmer = terminal.confirmer()
         confirmer.recordLaunch(controllerID: terminal.id, hooks: terminal.hooks)
-        #expect(!confirmer.isWatching(terminal.id))
+        // The watch runs (the user may switch to Allow), but it reads nothing.
+        #expect(confirmer.isWatching(terminal.id))
         await confirmer.finishedWatching(terminal.id)
         #expect(terminal.reads == 0)
         #expect(terminal.returns == 0)
         #expect(terminal.notices.isEmpty)
+        #expect(!confirmer.isWatching(terminal.id))
+    }
+
+    @Test(arguments: [CanvasAgentControlMode.off, .ask])
+    func switchingToAllowAfterTheLaunchConfirmsTheDialog(mode: CanvasAgentControlMode) async {
+        let terminal = Terminal()
+        terminal.mode = mode
+        terminal.rows = Self.dialog
+        let confirmer = terminal.confirmer()
+        // The user flips the board to Allow while the dialog waits.
+        terminal.onTick = { time in
+            if time >= 5 { terminal.mode = .allow }
+        }
+        confirmer.recordLaunch(controllerID: terminal.id, hooks: terminal.hooks)
+        await confirmer.finishedWatching(terminal.id)
+        #expect(terminal.returns == 1)
+        #expect(terminal.notices.map(\.0) == [CanvasChannelPrompt.confirmedNotice])
     }
 
     @Test func aSwitchedOffSettingNeverReadsOrActs() async {
@@ -146,10 +170,65 @@ struct CanvasChannelPromptConfirmerTests {
         terminal.rows = Self.dialog
         let confirmer = terminal.confirmer()
         confirmer.recordLaunch(controllerID: terminal.id, hooks: terminal.hooks)
-        #expect(!confirmer.isWatching(terminal.id))
         await confirmer.finishedWatching(terminal.id)
         #expect(terminal.reads == 0)
         #expect(terminal.returns == 0)
+        #expect(terminal.notices.isEmpty)
+    }
+
+    @Test func switchingTheSettingOnAfterTheLaunchConfirmsTheDialog() async {
+        let terminal = Terminal()
+        terminal.settingOn = false
+        terminal.rows = Self.dialog
+        let confirmer = terminal.confirmer()
+        terminal.onTick = { time in
+            if time >= 5 { terminal.settingOn = true }
+        }
+        confirmer.recordLaunch(controllerID: terminal.id, hooks: terminal.hooks)
+        await confirmer.finishedWatching(terminal.id)
+        #expect(terminal.returns == 1)
+    }
+
+    @Test func aTerminalWithoutAViewAtFirstIsConfirmedOnceItsViewShowsTheDialog() async {
+        // The board is off screen at the launch: no view to read. The controller
+        // keeps its view and process, so rows appear later; the watch waits.
+        let terminal = Terminal()
+        terminal.rows = nil
+        let confirmer = terminal.confirmer()
+        terminal.onTick = { time in
+            if time >= 12, terminal.returns == 0 { terminal.rows = Self.dialog }
+        }
+        confirmer.recordLaunch(controllerID: terminal.id, hooks: terminal.hooks)
+        await confirmer.finishedWatching(terminal.id)
+        #expect(terminal.returns == 1)
+        #expect(terminal.notices.map(\.0) == [CanvasChannelPrompt.confirmedNotice])
+    }
+
+    @Test func aSlowFolderTrustAnswerDoesNotEndTheWatch() async {
+        let terminal = Terminal()
+        terminal.rows = Self.trust
+        let confirmer = terminal.confirmer()
+        // The user takes 100 s over Claude's own folder-trust dialog; the
+        // channel dialog follows. Rafu presses nothing for the trust dialog.
+        terminal.onTick = { time in
+            if time >= 100, terminal.returns == 0 { terminal.rows = Self.dialog }
+        }
+        confirmer.recordLaunch(controllerID: terminal.id, hooks: terminal.hooks)
+        await confirmer.finishedWatching(terminal.id)
+        #expect(terminal.returns == 1)
+        #expect(terminal.notices.map(\.0) == [CanvasChannelPrompt.confirmedNotice])
+    }
+
+    @Test func theFolderTrustDialogAloneIsNeverAnswered() async {
+        let terminal = Terminal()
+        terminal.rows = Self.trust
+        let confirmer = terminal.confirmer()
+        confirmer.recordLaunch(controllerID: terminal.id, hooks: terminal.hooks)
+        await confirmer.finishedWatching(terminal.id)
+        #expect(terminal.returns == 0)
+        #expect(terminal.notices.isEmpty)
+        // Bounded: the extension stops at the hard cap.
+        #expect(terminal.clock <= CanvasChannelPromptWatch.maxWindow + 1)
     }
 
     @Test func aTerminalWithoutALaunchRecordNeverActs() async {
@@ -163,17 +242,23 @@ struct CanvasChannelPromptConfirmerTests {
         #expect(terminal.returns == 0)
     }
 
-    @Test func leavingAllowDuringTheWindowStopsTheWatch() async {
+    @Test func leavingAllowDuringTheWindowStopsReadingAndActing() async {
         let terminal = Terminal()
         let confirmer = terminal.confirmer()
+        var readsWhenLeft: Int?
         terminal.onTick = { time in
-            if time >= 2 { terminal.mode = .ask }
+            if time >= 2, readsWhenLeft == nil {
+                terminal.mode = .ask
+                readsWhenLeft = terminal.reads
+            }
             if time >= 3 { terminal.rows = Self.dialog }
         }
         confirmer.recordLaunch(controllerID: terminal.id, hooks: terminal.hooks)
         await confirmer.finishedWatching(terminal.id)
         #expect(terminal.returns == 0)
         #expect(terminal.notices.isEmpty)
+        // Nothing is read after Allow ended.
+        #expect(terminal.reads == readsWhenLeft)
     }
 
     @Test func theWatchEndsWhenTheWindowEndsAndSamplesAtMostFourTimesASecond() async {
