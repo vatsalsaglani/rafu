@@ -57,24 +57,27 @@ struct CanvasCardShell: View {
         let face = CanvasZoomFace(scale: scale)
         let selected = board.selection.contains(card.id)
         let contentFocused = board.contentIsActive && board.focusedCardID == card.id
+        let live = showsLiveFace(face, scale: scale, contentFocused: contentFocused)
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         // Exactly the stored rect, whatever the body asks for: the surface,
         // border, ring and ports must sit where edges are computed.
-        return faceContent(face, scale: scale, selected: selected, contentFocused: contentFocused)
-            .canvasCardFill()
-            .background(theme.palette.elevatedBackground)
-            .clipShape(shape)
-            .background { surface(shape) }
-            .overlay { border(shape, contentFocused: contentFocused) }
-            .overlay { selectionRing(isOn: selected || isConnectionTarget) }
-            .overlay { resizeOverlay(face, scale: scale, selected: selected) }
-            .overlay { portsOverlay(scale: scale) }
-            .onHover { inside in hoverChanged(inside) }
-            .onDisappear { disappeared() }
-            .modifier(cardAccessibility(selected: selected))
-            .onChange(of: commands.agentCardStatus) { _, newStatus in
-                markReadIfAlreadyLookingAt(newStatus, contentFocused: contentFocused)
-            }
+        return faceContent(
+            face, live: live, scale: scale, selected: selected, contentFocused: contentFocused
+        )
+        .canvasCardFill()
+        .background(theme.palette.elevatedBackground)
+        .clipShape(shape)
+        .background { surface(shape) }
+        .overlay { border(shape, contentFocused: contentFocused) }
+        .overlay { selectionRing(isOn: selected || isConnectionTarget) }
+        .overlay { resizeOverlay(live: live, scale: scale, selected: selected) }
+        .overlay { portsOverlay(scale: scale) }
+        .onHover { inside in hoverChanged(inside) }
+        .onDisappear { disappeared() }
+        .modifier(cardAccessibility(selected: selected))
+        .onChange(of: commands.agentCardStatus) { _, newStatus in
+            markReadIfAlreadyLookingAt(newStatus, contentFocused: contentFocused)
+        }
     }
 
     /// A whiteboard item (shape, stroke, text) has no header or card surface:
@@ -137,11 +140,22 @@ struct CanvasCardShell: View {
         !CanvasWhiteboardCardFace.usesCardChrome(card.content)
     }
 
+    /// A terminal the user works in stays live down to 25 %
+    /// (`CanvasTerminalLiveRule`); every other card follows its zoom face.
+    private func showsLiveFace(_ face: CanvasZoomFace, scale: Double, contentFocused: Bool)
+        -> Bool
+    {
+        if case .terminal = card.content {
+            return CanvasTerminalLiveRule.isLive(scale: scale, isContentActive: contentFocused)
+        }
+        return face.showsLiveContent
+    }
+
     @ViewBuilder
     private func faceContent(
-        _ face: CanvasZoomFace, scale: Double, selected: Bool, contentFocused: Bool
+        _ face: CanvasZoomFace, live: Bool, scale: Double, selected: Bool, contentFocused: Bool
     ) -> some View {
-        if face.showsLiveContent {
+        if live {
             liveFace(scale: scale, selected: selected, contentFocused: contentFocused)
         } else {
             compactFace(face, scale: scale)
@@ -159,10 +173,8 @@ struct CanvasCardShell: View {
     }
 
     @ViewBuilder
-    private func resizeOverlay(_ face: CanvasZoomFace, scale: Double, selected: Bool)
-        -> some View
-    {
-        if face.showsLiveContent {
+    private func resizeOverlay(live: Bool, scale: Double, selected: Bool) -> some View {
+        if live {
             resizeZones(scale: scale, selected: selected)
         }
     }

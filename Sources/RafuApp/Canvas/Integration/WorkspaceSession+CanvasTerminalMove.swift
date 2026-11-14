@@ -115,6 +115,9 @@ extension WorkspaceSession {
     private func handleCanvasTerminalUndoRedo(
         board: CanvasBoardState, removed: [CanvasCard], added: [CanvasCard]
     ) {
+        // The card's lease outlives its view; drop it before the tab returns,
+        // or the tab would read "Terminal is in an Ensemble".
+        if !removed.isEmpty { releaseCanvasTerminalLeasesWithoutCards(on: board) }
         for card in removed {
             guard case .terminal(let groupID) = card.content,
                 let sourceGroupID = movedTerminalCardSourceGroups[groupID]

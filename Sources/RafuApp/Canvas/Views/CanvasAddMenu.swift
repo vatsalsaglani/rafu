@@ -39,8 +39,9 @@ enum CanvasAddKind: CaseIterable, Identifiable {
     }
 
     /// Adds the card. With `center` (board units) it appears there; otherwise
-    /// at the middle of the visible board. Nothing starts: a terminal is made
-    /// stopped, a web app unloaded. `animated` false is the keyboard path
+    /// at the middle of the visible board. A terminal starts its shell (the
+    /// add is the user's explicit action); a web app stays unloaded.
+    /// `animated` false is the keyboard path
     /// (N, T): the card appears at once, with no spring.
     @MainActor
     func perform(
@@ -59,7 +60,7 @@ enum CanvasAddKind: CaseIterable, Identifiable {
     private func perform(session: WorkspaceSession, boardID: CanvasID) {
         switch self {
         case .note: session.addCanvasNote(boardID)
-        case .terminal: session.addCanvasStoppedTerminal(boardID)
+        case .terminal: session.addCanvasTerminal(boardID)
         case .file: session.chooseCanvasFile(boardID, imageOnly: false)
         case .image: session.chooseCanvasFile(boardID, imageOnly: true)
         case .webApp: session.canvasDialog = .web(boardID)
@@ -124,7 +125,7 @@ enum CanvasAddItem: Equatable, Identifiable {
         case .kind(let kind): kind.perform(on: board, session: session, center: center)
         case .terminalShell(let shell):
             board.creationCenter = center
-            session.addCanvasStoppedTerminal(board.id, shell: shell)
+            session.addCanvasTerminal(board.id, shell: shell)
         }
     }
 }
@@ -156,7 +157,7 @@ struct CanvasAddMenuItems: View {
             Menu("Terminal with Shell") {
                 ForEach(shells) { shell in
                     Button(TerminalNaming.shellMenuTitle(for: shell, among: shells)) {
-                        session.addCanvasStoppedTerminal(board.id, shell: shell)
+                        session.addCanvasTerminal(board.id, shell: shell)
                     }
                 }
             }

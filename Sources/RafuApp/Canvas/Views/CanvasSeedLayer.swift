@@ -136,7 +136,7 @@ private struct CanvasSeedButton: View {
     private var help: String {
         switch kind {
         case .note: "Add a note (N)"
-        case .terminal: "Add a stopped terminal (T)"
+        case .terminal: "Add a terminal (T)"
         case .drop: "Drop files or a History chat here, or click to add a card"
         }
     }

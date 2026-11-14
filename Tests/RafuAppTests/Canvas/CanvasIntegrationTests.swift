@@ -156,7 +156,7 @@ struct CanvasIntegrationTests {
     }
 
     @Test(
-        "Start Terminal Here replaces an orphaned card's content in place, starting nothing")
+        "Start Terminal Here replaces an orphaned card's content in place and starts its shell")
     func startTerminalHereReplacesOrphanedCard() async throws {
         let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -168,6 +168,7 @@ struct CanvasIntegrationTests {
         #expect(await session.canvas.configure(root: folder))
         let board = try #require(await session.canvas.create(title: "Task"))
         session.presentCanvasBoard(board)
+        session.spawnsHeadlessCanvasTerminals = false
 
         // A card referencing a Terminal Group that no longer exists — e.g. a
         // saved board reopened with ADR 0025 inert restore.
@@ -191,8 +192,10 @@ struct CanvasIntegrationTests {
         #expect(newGroupID != missingGroupID)
         let group = try #require(session.terminal.terminalGroup(newGroupID))
         #expect(group.panes.count == 1)
-        #expect(group.panes.first?.status == .stopped)
-        #expect(session.terminal.sessions.isEmpty)
+        // The button is the user's explicit start: the shell runs at once.
+        #expect(group.panes.first?.status == .live)
+        #expect(session.editorLayout.tab(matching: .terminalGroup(groupID: newGroupID)) == nil)
+        session.teardownTerminalGroups()
     }
 
     @Test("Late teardown of an old native mount cannot detach a transferred terminal")

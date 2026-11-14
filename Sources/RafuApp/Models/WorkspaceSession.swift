@@ -1917,11 +1917,12 @@ final class WorkspaceSession {
     /// inserts a fresh tab for it into the focused group and selects that.
     /// Matches `newTerminalTab()`'s existing tab-selection behavior — clears
     /// file selection, selects the session in `terminal`. A no-op for an
-    /// unknown session id.
+    /// unknown session id. A session whose group has a card on an open
+    /// Ensemble shows that card instead (`revealTerminalGroupWhereItLives`).
     func revealTerminalSession(_ sessionID: UUID) {
         guard terminal.sessions.contains(where: { $0.id == sessionID }) else { return }
         if let (groupID, _) = terminal.terminalGroupAndPane(containing: sessionID) {
-            revealTerminalGroup(groupID)
+            revealTerminalGroupWhereItLives(groupID)
             return
         }
         // Old restoration and Ensemble callers can still reach a legacy
@@ -4031,7 +4032,7 @@ final class WorkspaceSession {
         case .terminal(let sessionID):
             revealTerminalSession(sessionID)
         case .terminalGroup(let groupID):
-            revealTerminalGroup(groupID)
+            revealTerminalGroupWhereItLives(groupID)
         }
     }
 

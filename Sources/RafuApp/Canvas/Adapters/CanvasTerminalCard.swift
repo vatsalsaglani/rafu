@@ -1,19 +1,69 @@
 import SwiftUI
 
-/// Which block a terminal card's body shows, derived purely from whether the
-/// pane is running (a live controller exists) and whether THIS card holds
-/// the ADR 0025 presentation lease. A stopped pane has nothing to attach to
-/// at all, so it is always `.notRunning` regardless of lease state — never
-/// `.notAttached`, which is reserved for a RUNNING pane whose view is on a
-/// different surface (or resources are momentarily unavailable).
+/// Who shows a running terminal's one SwiftTerm view now (ADR 0025 lease).
+/// `.editorTab` is only when no board holds the lease and the group's editor
+/// tab is the selected tab of an editor group (after Transfer Here).
+nonisolated enum CanvasTerminalLeaseHolder: Equatable, Sendable {
+    case none
+    case thisBoard
+    case otherBoard
+    case editorTab
+}
+
+/// Which block a terminal card's body shows. The lease follows the card: a
+/// running terminal whose lease is free is claimed at once (`.claim`), so a
+/// card that comes back into view, that the user zooms in to, or that a
+/// resize mounts again shows its terminal with no click. Only a terminal that
+/// another surface shows asks the user (`.heldElsewhere`). A stopped pane has
+/// nothing to show and is always `.notRunning`.
 nonisolated enum CanvasTerminalCardBlock: Equatable, Sendable {
     case live
-    case notAttached
+    /// Running, lease free: take it now.
+    case claim
+    case heldElsewhere(CanvasTerminalLeaseHolder)
     case notRunning
 
-    static func decide(isRunning: Bool, ownsLease: Bool) -> CanvasTerminalCardBlock {
+    /// `boardCanPresent` is true when this card's board view is the visible
+    /// presenter of the board and its window is visible. When it is false
+    /// the board cannot take the lease, so even a free or own lease reads as
+    /// `.heldElsewhere` (another view of the board presents it).
+    static func decide(
+        isRunning: Bool, holder: CanvasTerminalLeaseHolder, boardCanPresent: Bool
+    ) -> CanvasTerminalCardBlock {
         guard isRunning else { return .notRunning }
-        return ownsLease ? .live : .notAttached
+        switch holder {
+        case .thisBoard: return boardCanPresent ? .live : .heldElsewhere(.thisBoard)
+        case .none: return boardCanPresent ? .claim : .heldElsewhere(.none)
+        case .otherBoard, .editorTab: return .heldElsewhere(holder)
+        }
+    }
+}
+
+/// When a terminal card shows its live face. Other card kinds keep
+/// `CanvasZoomFace.showsLiveContent` (live at 50 % and above). A terminal the
+/// user is working in (content-active) stays live down to 25 %, so zooming
+/// out does not take the shell away from under the keyboard.
+nonisolated enum CanvasTerminalLiveRule {
+    static let readableScale = 0.5
+    static let focusedFloor = 0.25
+
+    static func isLive(scale: Double, isContentActive: Bool) -> Bool {
+        scale >= readableScale || (isContentActive && scale >= focusedFloor)
+    }
+}
+
+/// How a terminal the user adds starts its shell (`startCanvasTerminalCard`).
+nonisolated enum CanvasTerminalAddStart: Equatable, Sendable {
+    /// The card can host the view: focus it, start, the keyboard goes to the shell.
+    case foreground
+    /// The card cannot host the view now (board not presentable, zoomed out
+    /// below 50 %, or no lease): start without moving the view or focus.
+    case background
+
+    static func mode(permitsLiveContent: Bool, faceShowsLiveContent: Bool, holdsLease: Bool)
+        -> CanvasTerminalAddStart
+    {
+        permitsLiveContent && faceShowsLiveContent && holdsLease ? .foreground : .background
     }
 }
 
@@ -32,18 +82,16 @@ struct CanvasTerminalCard: View {
         if case .terminal(let id) = card.content, let group = session.terminal.terminalGroup(id),
             let pane = group.panes.first
         {
+            let controller = session.terminal.terminalController(for: pane.id)
+            let block = CanvasTerminalCardBlock.decide(
+                isRunning: controller != nil,
+                holder: session.canvasTerminalLeaseHolder(id, board: board.id),
+                boardCanPresent: boardCanPresent)
             VStack(spacing: 0) {
                 if pane.status == .exited, pane.runtimeKind == .ordinaryShell {
                     exitedStrip(pane, id: id)
                 }
-                let controller = session.terminal.terminalController(for: pane.id)
-                let ownsLease =
-                    session.canvasTerminalOwners[id] == board.id
-                    && session.canvasResources[board.id]?.canPresent(owner: presentationID)
-                        == true
-                switch CanvasTerminalCardBlock.decide(
-                    isRunning: controller != nil, ownsLease: ownsLease)
-                {
+                switch block {
                 case .live:
                     if let controller {
                         TerminalHostView(
@@ -63,24 +111,24 @@ struct CanvasTerminalCard: View {
                                         owner: presentationID) == true
                             })
                     }
-                case .notAttached:
-                    VStack(spacing: 8) {
-                        Text("Terminal view is not attached.").font(.caption)
-                        Button("Show Terminal") { focus(id) }
-                    }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                case .claim:
+                    // The claim lands in `onChange(of: block)` below; until
+                    // then draw the terminal's background, not a button.
+                    theme.palette.editorBackground
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                case .heldElsewhere(let holder):
+                    heldElsewhereBlock(holder, id: id)
                 case .notRunning:
                     notRunningBlock(pane, id: id)
                 }
             }
-            // Also when the window becomes visible again: it released every lease
-            // while hidden, and a terminal that kept running (an agent started it,
-            // or it ran in the background) must show its view again by itself.
-            .onChange(
-                of: session.canvasResources[board.id].map {
-                    $0.permitsLiveContent && $0.canPresent(owner: presentationID)
-                } == true,
-                initial: true
-            ) { _, available in if available { acquire(id, forStart: false) } }
+            // Level-triggered: whenever the terminal runs and its lease is
+            // free while this card is on screen, the card takes it. This
+            // covers a card that comes back into view, zooms in, remounts
+            // during a resize, or loses the lease to ⌃` while mounted.
+            .onChange(of: block, initial: true) { _, block in
+                if block == .claim { acquire(id, forStart: false) }
+            }
             .onChange(of: active) { _, value in if value { focus(id) } }
             .onChange(of: board.terminalStartRequest, initial: true) { _, request in
                 guard request == card.id else { return }
@@ -92,18 +140,14 @@ struct CanvasTerminalCard: View {
             // or the user's button) delivers them. The drain is idempotent.
             .task(id: pane.sessionID) {
                 guard pane.sessionID != nil else { return }
-                // A session appeared (any start path): the card shows it.
-                acquire(id, forStart: false)
                 guard board.pendingTerminalLines[card.id] != nil else { return }
                 await CanvasTerminalStarter.drain(
                     card: card.id, groupID: id, board: board, session: session)
             }
-            .onDisappear {
-                guard session.canvasResources[board.id]?.canPresent(owner: presentationID) == true,
-                    session.canvasTerminalOwners[id] == board.id
-                else { return }
-                session.canvasTerminalOwners[id] = nil
-            }
+            // No release on disappear: the lease follows the card, not its
+            // view. A cull, a zoom-out or a resize remount keeps it, so the
+            // card shows its terminal again at once. Board hide, window hide,
+            // card removal, Transfer Here and group close release it.
         } else {
             // The referenced Terminal Group no longer exists (e.g. a saved
             // board reopened with ADR 0025 inert restore, before any process
@@ -117,10 +161,46 @@ struct CanvasTerminalCard: View {
                     .foregroundStyle(theme.palette.textPrimary)
                 Button("Start Terminal Here") { session.startTerminalHere(card.id, on: board.id) }
                     .buttonStyle(RafuProminentButtonStyle())
-                    .help("Create a terminal for this card. Nothing runs until you start it.")
+                    .help("Create a terminal for this card and start its shell.")
             }
             .padding(16)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    /// This board view is the visible presenter of the board, in a visible window.
+    private var boardCanPresent: Bool {
+        session.canvasResources[board.id].map {
+            $0.permitsLiveContent && $0.canPresent(owner: presentationID)
+        } == true
+    }
+
+    /// A running terminal that another surface shows. "Show Here" moves the
+    /// one view to this card; the other surface then shows its own notice.
+    private func heldElsewhereBlock(_ holder: CanvasTerminalLeaseHolder, id: TerminalGroupID)
+        -> some View
+    {
+        VStack(spacing: 8) {
+            Text(Self.heldElsewhereMessage(holder)).font(.caption)
+                .foregroundStyle(theme.palette.textSecondary)
+                .multilineTextAlignment(.center)
+            if boardCanPresent {
+                Button("Show Here") {
+                    session.canvasTerminalOwners[id] = board.id
+                    focus(id)
+                }
+                .help("Show this terminal on this card.")
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    static func heldElsewhereMessage(_ holder: CanvasTerminalLeaseHolder) -> String {
+        switch holder {
+        case .editorTab: "This terminal is shown in an editor tab."
+        case .otherBoard: "This terminal is shown on another Ensemble."
+        case .none, .thisBoard: "This terminal is shown in another view."
         }
     }
 
@@ -214,14 +294,26 @@ struct CanvasTerminalCard: View {
 }
 
 extension WorkspaceSession {
-    /// Adds one stopped terminal card. With `shell` the card's one pane
-    /// starts with that shell (and `shell` becomes the recorded preferred
-    /// shell, same as choosing a shell for a new Terminal Group); `nil` keeps
-    /// the preferred shell, same as every existing caller.
-    func addCanvasStoppedTerminal(_ id: CanvasID, shell: TerminalShell? = nil) {
+    /// Adds one terminal card for the user and starts its shell: an add is
+    /// the explicit user action, so no second "Start Shell" click is needed.
+    /// See `startCanvasTerminalCard` for where the view and focus go.
+    func addCanvasTerminal(_ id: CanvasID, shell: TerminalShell? = nil) {
+        guard let cardID = addCanvasStoppedTerminal(id, shell: shell) else { return }
+        startCanvasTerminalCard(cardID, on: id)
+    }
+
+    /// Adds one stopped terminal card and returns its id. With `shell` the
+    /// card's one pane starts with that shell (and `shell` becomes the
+    /// recorded preferred shell, same as choosing a shell for a new Terminal
+    /// Group); `nil` keeps the preferred shell. Nothing starts: user add paths
+    /// use `addCanvasTerminal`, or call `startCanvasTerminalCard` once the
+    /// card has its final place.
+    @discardableResult
+    func addCanvasStoppedTerminal(_ id: CanvasID, shell: TerminalShell? = nil) -> CanvasCardID? {
         guard let board = canvas.boards[id], board.cards.count < CanvasLimits.cards,
             let name = TerminalGroupName("Terminal")
-        else { return }
+        else { return nil }
+        var cardID: CanvasCardID?
         performCanvasEdit(board) {
             let paneID = SavedTerminalPaneID()
             let pane = try SavedTerminalPaneRecord(
@@ -234,15 +326,57 @@ extension WorkspaceSession {
             let snapshot = try terminal.insertStoppedSavedGroup(record, ensemble: true)
             _ = try terminal.perform(.detachDeletedSavedLayout(record.id))
             _ = try terminal.perform(.parkGroup(snapshot.id))
-            try board.add(title: snapshot.name.rawValue, content: .terminal(groupID: snapshot.id))
+            cardID = try board.add(
+                title: snapshot.name.rawValue, content: .terminal(groupID: snapshot.id))
         }
+        return cardID
+    }
+
+    /// Starts the shell of a stopped terminal card the user just added (or
+    /// made with Start Terminal Here), doing what the card's Start Shell does
+    /// but with no card view. When the card can show the terminal now (its
+    /// board is the visible presenter and the zoom shows live content) the
+    /// card takes the lease and keyboard focus, and the shell starts in it.
+    /// Otherwise the shell starts in the background, the card is selected,
+    /// and the view and focus do not move; the card shows the terminal when
+    /// it is next in view. A pane that is not stopped and available is left.
+    func startCanvasTerminalCard(_ cardID: CanvasCardID, on boardID: CanvasID) {
+        guard let board = canvas.boards[boardID],
+            let card = board.cards.first(where: { $0.id == cardID }),
+            case .terminal(let groupID) = card.content,
+            let pane = terminal.terminalGroup(groupID)?.panes.first,
+            pane.status == .stopped, pane.startAvailability == .available
+        else { return }
+        let permits = canvasResources[boardID]?.permitsLiveContent == true
+        if permits { claimCanvasTerminalLease(groupID, for: boardID) }
+        let mode = CanvasTerminalAddStart.mode(
+            permitsLiveContent: permits,
+            faceShowsLiveContent: CanvasZoomFace(scale: board.viewport.scale).showsLiveContent,
+            holdsLease: canvasTerminalOwners[groupID] == boardID)
+        if mode == .foreground {
+            let focusedBefore = board.focusedCardID
+            let activeBefore = board.contentIsActive
+            board.focus(cardID)
+            // Only when the board is the focused editor group's tab: a
+            // foreground start otherwise reveals the group as an editor tab.
+            if selectedTerminalGroupID == groupID {
+                _ = try? terminal.perform(.revealGroup(groupID))
+                startTerminalPane(pane.id)
+                return
+            }
+            board.focusedCardID = focusedBefore
+            board.contentIsActive = activeBefore
+        }
+        board.select([cardID])
+        startTerminalPane(pane.id, background: true)
     }
     /// Creates a fresh stopped ordinary-shell Terminal Group for a card whose
     /// previously referenced group no longer exists, keeping the card's `id`
     /// and `rect` (so its position is preserved) and only replacing its
     /// content and title. Mirrors `addCanvasStoppedTerminal`'s record
     /// construction, but updates the existing card in place instead of
-    /// adding a new one. No process starts until the card's Start Shell.
+    /// adding a new one. The button is an explicit user action, so the
+    /// shell then starts (`startCanvasTerminalCard`).
     func startTerminalHere(_ cardID: CanvasCardID, on boardID: CanvasID) {
         guard let board = canvas.boards[boardID],
             let name = TerminalGroupName("Terminal")
@@ -267,6 +401,71 @@ extension WorkspaceSession {
                 document.cards[index].title = snapshot.name.rawValue
             }
         }
+        startCanvasTerminalCard(cardID, on: boardID)
+    }
+
+    /// Who shows `groupID`'s terminal view now, seen from `board`.
+    func canvasTerminalLeaseHolder(_ groupID: TerminalGroupID, board: CanvasID)
+        -> CanvasTerminalLeaseHolder
+    {
+        if let owner = canvasTerminalOwners[groupID] {
+            return owner == board ? .thisBoard : .otherBoard
+        }
+        let resource = EditorTabResource.terminalGroup(groupID: groupID)
+        let shownInTab = editorLayout.groupIDs.contains { editorGroupID in
+            guard let group = editorLayout.group(id: editorGroupID),
+                let selected = group.selectedTabID
+            else { return false }
+            return group.tabs.contains { $0.id == selected && $0.resource == resource }
+        }
+        return shownInTab ? .editorTab : .none
+    }
+
+    /// The groups whose terminal is on an Ensemble the user can see: the
+    /// lease holders, and every terminal card on a presented board (a card
+    /// culled or zoomed out still lives there). The Terminals panel and the
+    /// tab switcher label these "On an Ensemble", not "Hidden".
+    var canvasCardTerminalGroupIDs: Set<TerminalGroupID> {
+        var ids = Set(canvasTerminalOwners.keys)
+        for (boardID, resources) in canvasResources where resources.isPresented {
+            for card in canvas.boards[boardID]?.cards ?? [] {
+                if case .terminal(let groupID) = card.content { ids.insert(groupID) }
+            }
+        }
+        return ids
+    }
+
+    /// Reveals a terminal where it lives. A group whose own editor tab shows
+    /// it is selected there. A group with a card on an open Ensemble shows
+    /// that Ensemble and focuses the card, so the card (not a new editor tab)
+    /// shows the terminal. Every other group reveals as an editor tab
+    /// (`revealTerminalGroup`, which move and undo flows keep using).
+    func revealTerminalGroupWhereItLives(_ groupID: TerminalGroupID) {
+        let hasOwnTab = editorLayout.tab(matching: .terminalGroup(groupID: groupID)) != nil
+        if !(hasOwnTab && canvasTerminalOwners[groupID] == nil),
+            let (board, cardID) = canvasCard(showing: groupID)
+        {
+            presentCanvasBoard(board)
+            focusCanvasCard(cardID, in: board)
+            return
+        }
+        revealTerminalGroup(groupID)
+    }
+
+    /// The open board and card that show `groupID`: the lease holder first,
+    /// then the board on screen, then any open board.
+    private func canvasCard(showing groupID: TerminalGroupID) -> (CanvasBoardState, CanvasCardID)? {
+        let content = CanvasCardContent.terminal(groupID: groupID)
+        let preferred = [canvasTerminalOwners[groupID], selectedCanvasID].compactMap(\.self)
+        let boards =
+            preferred.compactMap { canvas.boards[$0] }
+            + canvas.boards.values.sorted { $0.id.rawValue.uuidString < $1.id.rawValue.uuidString }
+        for board in boards {
+            if let card = board.cards.first(where: { $0.content == content }) {
+                return (board, card.id)
+            }
+        }
+        return nil
     }
 
     func closeCanvasTerminalCard(_ id: CanvasID) {

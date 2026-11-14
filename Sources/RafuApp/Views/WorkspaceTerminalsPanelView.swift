@@ -90,7 +90,7 @@ struct WorkspaceTerminalsPanelView: View {
             presentedLegacySessionIDs: session.presentedTerminalSessionIDs,
             currentLegacySessionID: session.currentTerminalSessionID,
             workspaceRoot: session.rootURL?.path,
-            canvasOwnedGroupIDs: Set(session.canvasTerminalOwners.keys)
+            canvasOwnedGroupIDs: session.canvasCardTerminalGroupIDs
         )
         let managerItemCount = rows.count { $0.isManagerItem }
         VStack(spacing: 0) {
@@ -263,7 +263,7 @@ struct WorkspaceTerminalsPanelView: View {
                             renamingPaneID: renamingPaneID,
                             paneRenameText: $paneRenameText,
                             paneActions: paneActions,
-                            reveal: { session.revealTerminalGroup(group.id) },
+                            reveal: { session.revealTerminalGroupWhereItLives(group.id) },
                             hide: { session.hideTerminalGroup(group.id) },
                             beginRename: { beginGroupRename(group) },
                             commitRename: { commitGroupRename(group.id) },
@@ -309,7 +309,7 @@ struct WorkspaceTerminalsPanelView: View {
     private var paneActions: TerminalPaneActions {
         TerminalPaneActions(
             revealAndFocus: { pane in
-                session.revealTerminalGroup(pane.groupID)
+                session.revealTerminalGroupWhereItLives(pane.groupID)
                 session.focusTerminalPane(pane.id, in: pane.groupID)
             },
             close: { pane in session.closeTerminalPane(pane.id) },

@@ -88,6 +88,8 @@ struct CanvasAddItemTests {
             ))
         session.descriptor = WorkspaceDescriptor(
             displayName: "Test", location: .local(.init(path: root.path)))
+        // A user add starts the shell; no test may spawn one.
+        session.spawnsHeadlessCanvasTerminals = false
         #expect(await session.canvas.configure(root: root))
         let board = try #require(await session.canvas.create(title: "Items"))
 
