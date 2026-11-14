@@ -195,7 +195,8 @@ extension WorkspaceSession {
     }
 
     /// Duplicate puts a copy 24 pt down and right of the original. A terminal
-    /// copy is a new stopped terminal; nothing starts. A note copy carries the
+    /// copy is a new terminal that starts a fresh shell (nothing of the
+    /// original's process or output is copied). A note copy carries the
     /// note's current text.
     func duplicateCanvasCard(_ boardID: CanvasID, _ cardID: CanvasCardID) {
         guard let board = canvas.boards[boardID], board.cards.count < CanvasLimits.cards,
@@ -217,6 +218,9 @@ extension WorkspaceSession {
                     value.cards[index].title = title
                 }
             }
+            // Duplicate is the user's explicit action: the copy starts its
+            // shell once it has its final place.
+            startCanvasTerminalCard(created.id, on: boardID)
             return
         }
         var content = original.content

@@ -221,6 +221,8 @@ extension WorkspaceSession {
             }
         }
         connectCanvasCards(boardID: boardID, from: source, to: created.id)
+        // A new terminal starts its shell once it has its place and link.
+        if kind == .terminal { startCanvasTerminalCard(created.id, on: boardID) }
     }
 
     private static func snappedCoordinate(_ value: Double) -> Double {

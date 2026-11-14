@@ -1215,7 +1215,7 @@ struct CommandPaletteView: View {
                     keywords: ["card"]
                 ) {
                     dismiss()
-                    session.addCanvasStoppedTerminal(board.id)
+                    session.addCanvasTerminal(board.id)
                 },
                 .init(title: "Ensemble: Add Web App…", symbolName: "globe", keywords: ["card"]) {
                     dismiss()
@@ -1300,7 +1300,7 @@ struct CommandPaletteView: View {
                             keywords: ["card", "shell", "terminal"]
                         ) {
                             dismiss()
-                            session.addCanvasStoppedTerminal(board.id, shell: shell)
+                            session.addCanvasTerminal(board.id, shell: shell)
                         }
                     })
             }

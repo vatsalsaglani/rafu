@@ -321,10 +321,10 @@ struct TerminalGroupManagerHierarchyTests {
     @Test("Manager source routes group and exact-pane actions through WorkspaceSession")
     func managerSourceUsesFrozenWorkspaceActions() throws {
         let source = try source("Sources/RafuApp/Views/WorkspaceTerminalsPanelView.swift")
-        #expect(source.contains("session.revealTerminalGroup(group.id)"))
+        #expect(source.contains("session.revealTerminalGroupWhereItLives(group.id)"))
         #expect(source.contains("session.hideTerminalGroup(group.id)"))
         #expect(source.contains("session.requestTerminalGroupClose(group.id)"))
-        #expect(source.contains("session.revealTerminalGroup(pane.groupID)"))
+        #expect(source.contains("session.revealTerminalGroupWhereItLives(pane.groupID)"))
         #expect(source.contains("session.focusTerminalPane(pane.id, in: pane.groupID)"))
         #expect(source.contains("TerminalGroupSavedLayoutsSection(session: session)"))
     }

@@ -76,6 +76,7 @@ final class CanvasBoardResources {
             webs[id]?.stop()
             webs[id] = nil
         }
+        session?.releaseCanvasTerminalLeasesWithoutCards(on: board)
     }
     func stop(cards: Set<CanvasCardID>) {
         for id in cards {
@@ -129,6 +130,21 @@ final class CanvasBoardResources {
 }
 
 extension WorkspaceSession {
+    /// The lease follows the card, so a card view going away never releases
+    /// it. A card that leaves the board (an undo of its add, a delete, a
+    /// reload) does: this drops every lease `board` holds for a group with no
+    /// terminal card on it, so the group can show in an editor tab again.
+    func releaseCanvasTerminalLeasesWithoutCards(on board: CanvasBoardState) {
+        let onBoard = Set(
+            board.cards.compactMap { card -> TerminalGroupID? in
+                if case .terminal(let id) = card.content { id } else { nil }
+            })
+        for (groupID, owner) in canvasTerminalOwners
+        where owner == board.id && !onBoard.contains(groupID) {
+            canvasTerminalOwners[groupID] = nil
+        }
+    }
+
     func installCanvasResources(for board: CanvasBoardState) {
         if canvasResources[board.id]?.board === board { return }
         canvasResources[board.id]?.stopAll()

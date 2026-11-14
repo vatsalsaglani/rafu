@@ -303,6 +303,10 @@ struct WorkspaceCanvasView: View {
         // A reload installs a new board object under the same view identity
         // (`.id(board.id)`); the size does not change, so hand it over here.
         .onChange(of: ObjectIdentifier(board)) { _, _ in
+            // The new board's resources have no presenter yet, and onAppear
+            // does not run again under the same identity: present it here so
+            // its terminal cards can take their leases (D6).
+            session.canvasResources[board.id]?.present(owner: presentationID)
             board.visibleSize = geometry.size
             board.arriveIfNeeded()
         }

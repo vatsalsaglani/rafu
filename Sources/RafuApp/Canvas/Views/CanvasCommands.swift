@@ -221,12 +221,12 @@ struct CanvasCommands: Commands {
                 Button(
                     "Terminal — \(TerminalNaming.shellMenuTitle(for: shell, among: shells))"
                 ) {
-                    session.addCanvasStoppedTerminal(board.id, shell: shell)
+                    session.addCanvasTerminal(board.id, shell: shell)
                 }
                 .keyboardShortcut(CanvasNavigationShortcuts.shellShortcut(forPosition: offset + 1))
             }
         } else {
-            Button("Add Terminal") { session.addCanvasStoppedTerminal(board.id) }
+            Button("Add Terminal") { session.addCanvasTerminal(board.id) }
                 .keyboardShortcut(CanvasNavigationShortcuts.shellShortcut(forPosition: 1))
         }
     }

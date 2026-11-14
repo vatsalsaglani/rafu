@@ -219,19 +219,28 @@ struct CanvasBoardDragPayloadTests {
                 requestSequence: 1, cachedSequence: nil, cachedContent: nil))
     }
 
-    @Test("A terminal card's block follows pane-running state first, then lease ownership")
+    @Test("A terminal card's block follows pane-running state first, then the lease holder")
     func terminalCardBlockDecidesRunningBeforeLease() {
-        // Stopped: always the Start Shell block, regardless of lease.
+        // Stopped: always the Start Shell block, whoever holds the lease.
+        for holder in [CanvasTerminalLeaseHolder.none, .thisBoard, .otherBoard, .editorTab] {
+            #expect(
+                CanvasTerminalCardBlock.decide(
+                    isRunning: false, holder: holder, boardCanPresent: true) == .notRunning)
+        }
+        // Running and this board holds the lease: the live terminal view.
         #expect(
-            CanvasTerminalCardBlock.decide(isRunning: false, ownsLease: false) == .notRunning)
+            CanvasTerminalCardBlock.decide(
+                isRunning: true, holder: .thisBoard, boardCanPresent: true)
+                == .live)
+        // Running, lease free: the card takes it, with no button.
         #expect(
-            CanvasTerminalCardBlock.decide(isRunning: false, ownsLease: true) == .notRunning)
-        // Running and this card holds the lease: the live terminal view.
-        #expect(CanvasTerminalCardBlock.decide(isRunning: true, ownsLease: true) == .live)
-        // Running but the lease is held elsewhere (or resources are
-        // unavailable): "not attached", never confused with "not running".
+            CanvasTerminalCardBlock.decide(isRunning: true, holder: .none, boardCanPresent: true)
+                == .claim)
+        // Running but another surface shows it: never confused with "not running".
         #expect(
-            CanvasTerminalCardBlock.decide(isRunning: true, ownsLease: false) == .notAttached)
+            CanvasTerminalCardBlock.decide(
+                isRunning: true, holder: .otherBoard, boardCanPresent: true)
+                == .heldElsewhere(.otherBoard))
     }
 }
 
