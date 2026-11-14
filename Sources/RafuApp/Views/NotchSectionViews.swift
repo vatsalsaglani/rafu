@@ -406,6 +406,9 @@ struct CompanionNowPlayingSectionView: View {
 /// explanation live.
 struct CompanionUsageSectionView: View {
     let model: NotchCompanionModel
+    /// Closes the surface that hosts this section (the menu bar popover).
+    /// `nil` on the island card, which closes through the model.
+    var onClose: (@MainActor () -> Void)? = nil
     @Environment(\.rafuTheme) private var theme
     @Environment(\.openSettings) private var openSettings
 
@@ -432,6 +435,23 @@ struct CompanionUsageSectionView: View {
                 .disabled(model.isUsageRefreshing)
                 .help("Refresh usage")
                 .accessibilityLabel("Refresh usage")
+                // An island panel or the menu bar popover has no tab row and
+                // no pin, so the close control lives here; a tap on the
+                // capsule or the status item also closes it.
+                if onClose != nil || model.surface == .island {
+                    Button {
+                        if let onClose { onClose() } else { model.escapePressed() }
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(ink.secondary)
+                            .frame(width: 24, height: 24)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Close")
+                    .accessibilityLabel("Close usage panel")
+                }
             }
             .padding(.horizontal, RafuMetrics.space3)
             if snapshots.isEmpty {

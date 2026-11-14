@@ -49,6 +49,25 @@ nonisolated enum CompanionHoverPolicy {
         state == .pinned ? .peeking : .pinned
     }
 
+    /// A click or a touch-screen tap on the Dynamic Island capsule: a plain
+    /// open/close toggle. `.pinned` closes to `.resting`; anything else
+    /// opens (pins) the card. Unlike `onClick`, there is no unpinned-but-open
+    /// middle state, because hover never opens the card on an island and a
+    /// tap has no hover to leave.
+    static func onIslandTap(_ state: CompanionHoverState) -> CompanionHoverState {
+        state == .pinned ? .resting : .pinned
+    }
+
+    /// Whether hover opens the panel on `surface`. On an island hover only
+    /// widens the capsule: the card covers the system island's zone, so it
+    /// opens only on an explicit click or tap. Elsewhere the person's
+    /// preference holds.
+    static func effectiveOpensOnHover(preference: Bool, surface: NotchCompanionSurface?)
+        -> Bool
+    {
+        surface == .island ? false : preference
+    }
+
     /// Escape always returns to `.resting`, regardless of pin state.
     static func onEscape(_ state: CompanionHoverState) -> CompanionHoverState {
         .resting
@@ -64,15 +83,135 @@ nonisolated enum CompanionHoverPolicy {
     /// `peekShowsPanel` is true while hover-to-open is on: a peek then IS the
     /// open panel, so a bell routes into its feed instead of drawing a second
     /// drop-down over the panel. Default `false` keeps the original table.
+    ///
+    /// `feedAvailable` is false where the open panel has no attention feed
+    /// to show (an island offers Usage only): every bell then takes the
+    /// drop-down. Default `true` keeps the original table.
     static func companionArbitration(
         hoverState: CompanionHoverState,
-        peekShowsPanel: Bool = false
+        peekShowsPanel: Bool = false,
+        feedAvailable: Bool = true
     ) -> (routeToFeed: Bool, showDropDown: Bool) {
-        switch hoverState {
+        guard feedAvailable else { return (false, true) }
+        return switch hoverState {
         case .pinned: (true, false)
         case .peeking: peekShowsPanel ? (true, false) : (false, true)
         case .resting: (false, true)
         }
+    }
+}
+
+/// The companion panel's window level and hover reach on its screen.
+///
+/// On macOS 27 MenuBarAgent draws the menu bar's status items, including the
+/// "»" overflow items, in a window at level 25 — the same level as
+/// `NSWindow.Level.statusBar`, where `NotchHUDPanel` sits — above the
+/// level-24 menu bar. A resting companion strip at `.statusBar` therefore
+/// covers overflow items that expand beside the notch or island. While the
+/// strip is collapsed, it orders one level below the menu bar instead
+/// (`.belowMenuBar`, `mainMenu - 1`), and the leading wing, which is where
+/// the pointer travels to reach an overflow item, does not start hover. Any
+/// hover on the housing or the trailing wing raises the panel back to
+/// `.statusBar` before the expand, so every expanded control works as
+/// before. macOS 26 and earlier keep `.statusBar` and the full hover area:
+/// below the menu bar there, the menu bar's material tints the black strip.
+/// The plain-display pill hangs below the menu bar and never changes.
+///
+/// Detecting the expanded overflow directly would need the window list or
+/// an Accessibility prompt, so the rule uses only Rafu's own state. Every
+/// member lives in the primary declaration — see `CompanionEditorRow`.
+nonisolated struct CompanionPanelLayering: Equatable, Sendable {
+    nonisolated enum Level: Equatable, Sendable {
+        /// `NSWindow.Level.statusBar` (25) — `NotchHUDPanel`'s default.
+        case statusBar
+        /// `NSWindow.Level.mainMenu - 1` (23): one level below the system
+        /// menu-bar window.
+        case belowMenuBar
+    }
+
+    /// The first macOS major version whose status items share level 25.
+    static let firstLoweringOSMajorVersion = 27
+
+    let level: Level
+    /// Whether the pointer entering the leading (left) wing starts the hover
+    /// dwell. The housing and the trailing wing always do.
+    let leadingWingStartsHover: Bool
+
+    /// `.statusBar` with the full hover area — the layering of every state
+    /// except a collapsed notch strip on macOS 27 or later. The island
+    /// surface is never lowered: its pill hangs BELOW the menu bar, so it
+    /// covers no menu-bar item, and a lowered window would lose its hover.
+    static let standard = CompanionPanelLayering(level: .statusBar, leadingWingStartsHover: true)
+
+    /// - Parameters:
+    ///   - osMajorVersion: `ProcessInfo.operatingSystemVersion.majorVersion`.
+    ///   - surface: the companion's surface; `nil` means no companion.
+    ///   - hoverState: the hover/pin state.
+    ///   - isPanelOpen: whether the panel shows its content.
+    ///   - isHoverPending: the hover dwell has started but not fired yet —
+    ///     the panel rises before it expands.
+    static func resolve(
+        osMajorVersion: Int, surface: NotchCompanionSurface?, hoverState: CompanionHoverState,
+        isPanelOpen: Bool, isHoverPending: Bool
+    ) -> CompanionPanelLayering {
+        guard osMajorVersion >= firstLoweringOSMajorVersion,
+            surface == .notch,
+            hoverState == .resting, !isPanelOpen, !isHoverPending
+        else { return standard }
+        return CompanionPanelLayering(level: .belowMenuBar, leadingWingStartsHover: false)
+    }
+}
+
+/// Which companion surfaces exist: the panel (notch strip, island pill or
+/// plain-display pill) and the usage status item in the menu bar. Only a
+/// Dynamic Island screen reads `UsageGlancePosition`; a notched or plain
+/// screen keeps the panel and never gets a status item.
+nonisolated struct CompanionPresence: Equatable, Sendable {
+    let showsPanel: Bool
+    let showsMenuBarItem: Bool
+
+    static let none = CompanionPresence(showsPanel: false, showsMenuBarItem: false)
+
+    /// - Parameters:
+    ///   - surface: the companion's surface on its screen; `nil` means no
+    ///     companion there (a plain screen with the pill off, or no screen).
+    ///   - position: the stored usage glance position.
+    ///   - isEnabled: Settings ▸ "Show notch companion".
+    static func resolve(
+        surface: NotchCompanionSurface?, position: UsageGlancePosition, isEnabled: Bool
+    ) -> CompanionPresence {
+        guard isEnabled, let surface else { return .none }
+        switch (surface, position) {
+        case (.island, .menuBar):
+            return CompanionPresence(showsPanel: false, showsMenuBarItem: true)
+        case (.island, .belowIsland), (.notch, _), (.pill, _):
+            return CompanionPresence(showsPanel: true, showsMenuBarItem: false)
+        }
+    }
+}
+
+/// The text the usage status item shows and speaks for one
+/// `NotchIslandUsageGlance`. Critical is never colour alone: the title gets
+/// a "!" (as the island pill draws one in its ring).
+nonisolated enum UsageMenuBarItemText {
+    /// `"83%"`, `"97%!"` when critical, or `""` with no usage data (the
+    /// item then shows the ring track only).
+    static func title(for glance: NotchIslandUsageGlance?) -> String {
+        guard let glance else { return "" }
+        return glance.level == .critical ? glance.percentText + "!" : glance.percentText
+    }
+
+    /// VoiceOver label and tooltip: `"Rafu usage. Usage: Claude, 5-hour
+    /// session 83%"`, or `"Rafu usage. No usage data"`.
+    static func accessibilityLabel(for glance: NotchIslandUsageGlance?) -> String {
+        "Rafu usage. " + (glance?.spokenLabel ?? "No usage data")
+    }
+
+    /// The ring's side in points for a menu bar `thickness` points tall:
+    /// 16 on the 45 pt Dynamic Island menu bar, smaller on a thin bar so the
+    /// ring keeps a margin.
+    static func ringSize(forBarThickness thickness: CGFloat) -> CGFloat {
+        min(16, max(12, (thickness * 0.6).rounded()))
     }
 }
 
@@ -406,6 +545,88 @@ nonisolated enum UsageDisplayPolicy {
         if percent >= criticalUsageThreshold { return .critical }
         if percent >= highUsageThreshold { return .high }
         return .normal
+    }
+}
+
+/// The one usage figure the Dynamic Island capsule's right lobe shows: the
+/// most constrained front-line window, as a single ring. A small, pure,
+/// `Sendable` value with no clock, theme, or view in it, so the same
+/// value can later become Live Activity content state.
+///
+/// `resolve` lives in this type's primary declaration — see
+/// `CompanionEditorRow`'s doc comment for why.
+nonisolated struct NotchIslandUsageGlance: Equatable, Sendable {
+    /// `0...1` in the active display mode (used or remaining).
+    let fraction: Double?
+    /// `"83%"`, from the same `fraction`.
+    let percentText: String
+    let level: UsageRingLevel
+    let tone: UsageRingTone
+    /// `"Usage: Claude, 5-hour session 83%"` — VoiceOver's reading.
+    let spokenLabel: String
+
+    /// Picks the window with the worst `UsageRingLevel` across every
+    /// front-line provider's ring windows; a tie goes to the window closest
+    /// to its limit (the highest used fraction, which is the LOWEST fraction
+    /// in Remaining mode), then to the earlier window. `nil` when no
+    /// front-line provider has a window with a percentage.
+    static func resolve(
+        frontLine: [UsageSnapshot], observedAt: [UsageProviderID: Date],
+        mode: UsageDisplayMode, displayName: (UsageProviderID) -> String, now: Date
+    ) -> NotchIslandUsageGlance? {
+        var best: (arc: UsageRingArc, name: String)?
+        for snapshot in frontLine {
+            let name = displayName(snapshot.providerID)
+            guard
+                let cluster = UsageRingClusterBuilder.make(
+                    snapshot: snapshot, observedAt: observedAt[snapshot.providerID], mode: mode,
+                    displayName: name, now: now)
+            else { continue }
+            for arc in cluster.legend {
+                guard let current = best else {
+                    best = (arc, name)
+                    continue
+                }
+                if isMoreConstrained(arc, than: current.arc, mode: mode) {
+                    best = (arc, name)
+                }
+            }
+        }
+        guard let (arc, name) = best else { return nil }
+        let spokenName = mode == .remaining ? "\(name) remaining" : name
+        var spoken = "Usage: \(spokenName), \(arc.title) \(arc.percentText)"
+        switch arc.level {
+        case .normal: break
+        case .warning: spoken += ", warning"
+        case .critical: spoken += ", critical"
+        }
+        return NotchIslandUsageGlance(
+            fraction: arc.fraction, percentText: arc.percentText, level: arc.level,
+            tone: arc.tone, spokenLabel: spoken)
+    }
+
+    private static func isMoreConstrained(
+        _ candidate: UsageRingArc, than current: UsageRingArc, mode: UsageDisplayMode
+    ) -> Bool {
+        let candidateRank = rank(candidate.level)
+        let currentRank = rank(current.level)
+        if candidateRank != currentRank { return candidateRank > currentRank }
+        return usedFraction(candidate, mode: mode) > usedFraction(current, mode: mode)
+    }
+
+    private static func rank(_ level: UsageRingLevel) -> Int {
+        switch level {
+        case .normal: 0
+        case .warning: 1
+        case .critical: 2
+        }
+    }
+
+    /// The used share regardless of display mode; `-1` (never chosen over a
+    /// real value) when the window has none.
+    private static func usedFraction(_ arc: UsageRingArc, mode: UsageDisplayMode) -> Double {
+        guard let fraction = arc.fraction else { return -1 }
+        return mode == .used ? fraction : 1 - fraction
     }
 }
 

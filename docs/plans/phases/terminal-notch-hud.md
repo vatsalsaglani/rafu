@@ -99,6 +99,81 @@ Depends on: terminal-manager phase (T-A…T-E), ADR 0016, the shipped v1 HUD
 window/geometry/policy stack, `WorkspaceWindowRegistry`,
 `TerminalAttentionCenter`.
 
+## Dynamic Island Macs (2026-11-15)
+
+Status: implemented and verified on `main`; the "In the menu bar" mode is
+device-verified by the user on Mac17,13. Some device checks remain (below).
+Decision: [ADR 0037](../../decisions/0037-dynamic-island-macs.md). Facts and
+numbers: [`dynamic-island-macs.md`](../../references/dynamic-island-macs.md).
+
+History: the first design drew a shared capsule beside the system island, inside
+the menu-bar band. Device checks showed that no Rafu surface there can be
+interactive (MenuBarAgent gives all hover and tap in that band to the system
+island), and that the capsule collided with menu titles and was moved by AppKit.
+It was replaced. A Dock-icon trial (ring on the Dock tile and a Dock menu) was
+built and removed.
+
+Outcome:
+
+- Surfaces are `notch`, `island` or `pill`. On a Mac with a hole-punch camera
+  and system Dynamic Island (Mac17,13, macOS 27.2) Rafu offers the Usage section
+  only, in one of two places chosen in Settings ▸ Notch ▸ "Usage glance" (island
+  Macs only; key `notchUsageGlancePosition`):
+  - "Below the Dynamic Island" (default): a 109 x 33 pt black pill 4 pt below
+    the menu bar, centred under the island. Hover widens it to 282 pt; a click or
+    tap opens a Usage-only card that grows down. It is never lowered.
+  - "In the menu bar": an `NSStatusItem` with the usage ring and percent among
+    the right-side status items; a click or tap opens a transient 360 x 380 pt
+    `NSPopover` with the Usage section. The user judged this better than the
+    pill.
+  `CompanionPresence.resolve` decides which surface exists. Notched and
+  no-cutout Macs keep their frames, shapes, hover rules and sections, and never
+  get a status item.
+- Companion and attention HUD: the attention HUD uses the no-notch layout on an
+  island; the bell always uses the drop-down there. The mascot sits in the
+  pill's left side.
+- `NotchHUDPanel.constrainFrameRect` returns the frame unchanged, because AppKit
+  moves a window ordered below the menu-bar level out of the menu-bar band.
+- macOS 27 menu-bar "»" overflow fix, for NOTCHED Macs: on macOS 27 or later the
+  collapsed companion orders at `mainMenu - 1` (23), and the leading wing does
+  not start hover. It rises to `.statusBar` (25) when the hover dwell starts.
+  `CompanionPanelLayering` holds the rule.
+- Implementor deviations from the brief: the model surface uses
+  `allowsPill: true`, so it is never `nil` when a screen exists; `spokenLabel`
+  adds ", warning" or ", critical"; the glance uses the cluster's whole legend;
+  the island open radius is stored on the model; `cancelTimers()` and
+  `hoverExited()` also apply layering; `teardown(keepingUsageRefresh:)` keeps the
+  status item's usage read alive across a screen change.
+- Live Activities and WidgetKit are a later phase (ADR 0037 revisit trigger).
+
+Verification on `main` (Xcode toolchain, macOS 27.2, Mac17,13):
+`./script/build.sh` ended with "Build complete!"; `./script/test.sh
+--no-parallel` passed 443 + 3563 tests; `./script/test.sh` (parallel) passed 443
++ 3563 tests; `./script/build_and_run.sh --verify` launched `RafuLightning`. User
+device check: the menu bar mode works. In the first implementation round two
+parallel runs had tests fail under load and pass alone
+(`LauncherRequestRouterTests` stopped-listener restart, and
+`AgentActivityStoreTests` native directory notification). Both are already
+recorded as scheduler starvation; no code change.
+
+Owed device verification (not verified):
+
+- Notched Mac on macOS 27: regression of the unchanged notch path, and the "»"
+  overflow fix with the `constrainFrameRect` override (the user has no notched
+  Mac now).
+- Escape closing the status-item popover (a status-item click does not activate
+  Rafu, so the popover may not get key focus).
+- Full-screen Spaces, for the pill and the status item.
+
+Out of scope (reported to the user, not changed):
+
+- Hidden-feed case: on notched Macs, when Up next is off, the attention feed has
+  no section to show in.
+- Onboarding wording that says "notch".
+
+Also noted: the new toolchain trap on this Mac is in
+[`build-and-run.md`](../../references/build-and-run.md).
+
 ## Vision
 
 The notch stops being dead space and becomes Rafu's **always-on companion

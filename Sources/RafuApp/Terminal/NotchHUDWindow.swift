@@ -13,7 +13,8 @@ enum NotchScreenAdapter {
             safeAreaTopInset: screen.safeAreaInsets.top,
             auxiliaryTopLeft: screen.auxiliaryTopLeftArea,
             auxiliaryTopRight: screen.auxiliaryTopRightArea,
-            isBuiltin: isBuiltin(screen)
+            isBuiltin: isBuiltin(screen),
+            backingScaleFactor: screen.backingScaleFactor
         )
     }
 
@@ -41,7 +42,8 @@ enum NotchScreenAdapter {
         return NotchScreenSelection.preferred(from: candidates.map(metrics(for:)))
     }
 
-    /// The companion's screen: a notched screen, else the built-in display,
+    /// The companion's screen: a screen with a notch or an island camera,
+    /// else the built-in display,
     /// else the active window's screen — see
     /// `NotchScreenSelection.preferredForCompanion(from:)`.
     static func companionMetrics() -> NotchScreenMetrics? {
@@ -110,6 +112,17 @@ final class NotchHUDPanel: NSPanel {
         hasShadow = true
         hidesOnDeactivate = false
         isMovable = false
+    }
+
+    /// Keeps the frame exactly where the geometry put it. AppKit moves a
+    /// window ordered BELOW the menu-bar level (`mainMenu`, 24) out of the
+    /// menu-bar band. The macOS 27 overflow layering orders the resting
+    /// companion at level 23, so without this override the Dynamic Island
+    /// capsule (requested 6.5 pt below the screen top) landed at y 45, below
+    /// the menu bar (measured on Mac17,13, macOS 27.2). Every frame this
+    /// panel gets is already clamped to the screen by the pure geometry.
+    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
+        frameRect
     }
 
     override func cancelOperation(_ sender: Any?) {

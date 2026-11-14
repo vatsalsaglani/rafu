@@ -41,7 +41,11 @@ struct NotchCompanionView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            CompanionWingsView(model: model)
+            if model.surface == .island {
+                CompanionIslandWingsView(model: model)
+            } else {
+                CompanionWingsView(model: model)
+            }
             if model.isPanelOpen {
                 CompanionPanelView(model: model)
                     .transition(panelTransition)
@@ -50,15 +54,31 @@ struct NotchCompanionView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(surfaceColor)
         .overlay(alignment: .bottom) {
-            if contrast == .increased {
+            if contrast == .increased, model.surface != .island {
                 Rectangle()
                     .fill(theme.palette.borderStrong)
                     .frame(height: RafuMetrics.hairline)
             }
         }
+        // The island capsule floats free of the screen edge, so Increase
+        // Contrast outlines all of it instead of drawing a bottom rule.
+        .overlay {
+            if contrast == .increased, model.surface == .island {
+                shellShape.strokeBorder(
+                    theme.palette.borderStrong, lineWidth: RafuMetrics.hairline)
+            }
+        }
         .clipShape(shellShape)
-        .onHover { hovering in
-            if hovering { model.hoverEntered() } else { model.hoverExited() }
+        // Continuous, not `.onHover`: on macOS 27 a collapsed strip sits
+        // below the menu bar and its leading wing must not start hover
+        // (`CompanionPanelLayering`), so the model needs the pointer's x.
+        .onContinuousHover { phase in
+            switch phase {
+            case .active(let location):
+                model.hoverMoved(inLeadingWing: location.x < model.leadingWingWidth)
+            case .ended:
+                model.hoverExited()
+            }
         }
         .onKeyPress(.escape) {
             model.escapePressed()
@@ -81,9 +101,21 @@ struct NotchCompanionView: View {
 
     /// Bottom-rounded, flush with the screen's top edge — the strip reads
     /// as hanging from the physical housing, matching `NotchHUDView`'s
-    /// `hudShape` technique.
+    /// `hudShape` technique. On an island every corner is round: a capsule
+    /// at rest (radius half the height), a rounded card when open — the
+    /// same language as the system Dynamic Island it sits behind.
     private var shellShape: UnevenRoundedRectangle {
-        UnevenRoundedRectangle(
+        if model.surface == .island {
+            let radius = model.isPanelOpen ? model.islandOpenCornerRadius : model.stripHeight / 2
+            return UnevenRoundedRectangle(
+                topLeadingRadius: radius,
+                bottomLeadingRadius: radius,
+                bottomTrailingRadius: radius,
+                topTrailingRadius: radius,
+                style: .continuous
+            )
+        }
+        return UnevenRoundedRectangle(
             topLeadingRadius: 0,
             bottomLeadingRadius: RafuMetrics.radiusPanel,
             bottomTrailingRadius: RafuMetrics.radiusPanel,
@@ -111,9 +143,6 @@ struct NotchCompanionView: View {
 struct CompanionWingsView: View {
     let model: NotchCompanionModel
     @Environment(\.rafuTheme) private var theme
-    private var voice = VoiceSession.shared
-
-    init(model: NotchCompanionModel) { self.model = model }
 
     private var ink: NotchInk { NotchInk(theme: theme) }
 
@@ -138,18 +167,7 @@ struct CompanionWingsView: View {
     /// strip is wide enough that the indicator is not behind the housing.
     private var leftWing: some View {
         HStack(spacing: RafuMetrics.space1) {
-            // An open voice session takes the mascot's place, so the strip
-            // keeps its width (voice-control.md).
-            if voice.blobState != .idle {
-                VoiceNotchOrb(session: voice)
-            } else if model.isMascotEnabled {
-                RafuMascotView(
-                    state: model.mascotState, engaged: model.isStripExpanded, size: 20,
-                    claimBounce: model.claimMascotBounce)
-            } else {
-                RafuBrandMarkView()
-                    .frame(width: 14, height: 14)
-            }
+            CompanionLeadingMarkView(model: model)
             if showsPlaybackIndicator {
                 NotchPlaybackIndicator()
             }
@@ -221,15 +239,120 @@ struct CompanionWingsView: View {
     }
 }
 
+/// The strip's leading item, shared by the notch wings and the island
+/// capsule: the voice orb while a voice session is open, else the mascot,
+/// else the plain Rafu mark.
+struct CompanionLeadingMarkView: View {
+    let model: NotchCompanionModel
+    private var voice = VoiceSession.shared
+
+    init(model: NotchCompanionModel) { self.model = model }
+
+    var body: some View {
+        // An open voice session takes the mascot's place, so the strip
+        // keeps its width (voice-control.md).
+        if voice.blobState != .idle {
+            VoiceNotchOrb(session: voice)
+        } else if model.isMascotEnabled {
+            RafuMascotView(
+                state: model.mascotState, engaged: model.isStripExpanded, size: 20,
+                claimBounce: model.claimMascotBounce)
+        } else {
+            RafuBrandMarkView()
+                .frame(width: 14, height: 14)
+        }
+    }
+}
+
+/// The capsule behind a system Dynamic Island: the leading mark in the left
+/// lobe, one usage ring in the right lobe, and NOTHING in the middle, where
+/// the system island draws its own activity. The percentage joins the ring
+/// once the capsule is wide (hover) or the card is open. A click or a
+/// touch-screen tap anywhere on the capsule opens or closes the card.
+struct CompanionIslandWingsView: View {
+    let model: NotchCompanionModel
+    @Environment(\.rafuTheme) private var theme
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    /// Outer padding of each lobe's content from the capsule's ends.
+    private static let lobePadding: CGFloat = 12
+    private static let ringSize: CGFloat = 16
+
+    var body: some View {
+        let glance = model.islandUsageGlance
+        let padding = Self.lobePadding
+        HStack(spacing: 0) {
+            CompanionLeadingMarkView(model: model)
+                .padding(.leading, padding)
+            Spacer(minLength: 0)
+            usageLobe(glance)
+                .padding(.trailing, padding)
+        }
+        .frame(height: max(model.stripHeight, 1))
+        .contentShape(Rectangle())
+        .onTapGesture { model.clicked() }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Rafu, " + (glance?.spokenLabel ?? "no usage data"))
+        .accessibilityHint(
+            model.isPanelOpen
+                ? "Activates to close the usage panel" : "Activates to open the usage panel"
+        )
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction { model.clicked() }
+    }
+
+    private var ink: UsageCardInk {
+        .notch(
+            theme: theme, palette: model.usageRingPalette,
+            increasedContrast: contrast == .increased)
+    }
+
+    private func usageLobe(_ glance: NotchIslandUsageGlance?) -> some View {
+        let showsPercent = glance != nil && (model.isStripExpanded || model.isPanelOpen)
+        return HStack(spacing: RafuMetrics.space1) {
+            if showsPercent, let glance {
+                Text(glance.percentText)
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(ink.primary)
+                    .lineLimit(1)
+                    .fixedSize()
+            }
+            RafuProgressRing(
+                arcs: [
+                    RafuProgressRing.Arc(
+                        fraction: glance?.fraction,
+                        color: ink.color(for: glance?.tone ?? .primary),
+                        track: ink.trackColor)
+                ],
+                size: Self.ringSize, lineWidth: 2.5, gap: 0
+            )
+            .overlay {
+                // Critical is never colour alone: a glyph inside the ring.
+                if glance?.level == .critical {
+                    Text("!")
+                        .font(.system(size: 9, weight: .heavy, design: .rounded))
+                        .foregroundStyle(ink.warningTint(for: .critical))
+                        .accessibilityHidden(true)
+                }
+            }
+        }
+    }
+}
+
 /// The open panel: a tab row (one tab per section the person turned on, plus
 /// a pin button) over the selected section's content. Fixed height, set by
-/// the window frame; each section scrolls inside it.
+/// the window frame; each section scrolls inside it. On an island the panel
+/// offers Usage only, so it has no tab row; the Usage header carries a close
+/// button instead.
 struct CompanionPanelView: View {
     let model: NotchCompanionModel
 
     var body: some View {
         VStack(spacing: 0) {
-            CompanionTabBar(model: model)
+            if model.surface != .island {
+                CompanionTabBar(model: model)
+            }
             Group {
                 switch model.selectedSection {
                 case .ensembles: CompanionEnsemblesSectionView(model: model)

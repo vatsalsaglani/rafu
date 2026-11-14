@@ -105,6 +105,15 @@ final class NotchCompanionModel: NSObject {
     /// on a display without one: both sides are visible, so the wings can
     /// carry more.
     private(set) var hasPhysicalNotch = true
+    /// The companion's shape on its screen: the notch strip, the capsule
+    /// behind a system Dynamic Island, or the plain-display pill. Set from
+    /// the companion's screen in `activateIfEnabled()` and
+    /// `updateStripMetrics`, and drives `applySurfacePolicy()`.
+    private(set) var surface: NotchCompanionSurface = .notch
+    /// The island card's corner radius on the companion's screen
+    /// (`NotchIslandGeometry.openCornerRadius(for:)`), recorded with the
+    /// other strip metrics so a view never reads the screen.
+    private(set) var islandOpenCornerRadius: CGFloat = NotchIslandGeometry.openCornerRadius
 
     // MARK: - What the notch shows (Settings ▸ General ▸ Notch)
 
@@ -120,6 +129,10 @@ final class NotchCompanionModel: NSObject {
     private(set) var opensOnHover = true
     /// Show a floating pill on a display with no notch.
     private(set) var allowsPill = false
+    /// Where a Dynamic Island screen shows the usage glance: the pill below
+    /// the island, or a status item in the menu bar. Ignored on every other
+    /// surface (`CompanionPresence`).
+    private(set) var usageGlancePosition: UsageGlancePosition = .belowIsland
     /// Now Playing, read through public API only (`NotchNowPlaying`).
     let nowPlaying = NotchNowPlaying()
     @ObservationIgnored
@@ -193,8 +206,32 @@ final class NotchCompanionModel: NSObject {
     private var dwellTimer: Timer?
     @ObservationIgnored
     private var graceTimer: Timer?
+    /// A global left-mouse-down monitor that exists only while the island
+    /// card is open: a click the system Dynamic Island takes (inside
+    /// `NotchIslandGeometry.systemZone`) closes Rafu's card, so the two
+    /// surfaces never sit open on top of each other.
+    @ObservationIgnored
+    private var islandYieldMonitor: Any?
+    /// The running macOS major version, read once. Injectable so tests of
+    /// `panelLayering` never depend on the host OS.
+    @ObservationIgnored
+    var osMajorVersion = ProcessInfo.processInfo.operatingSystemVersion.majorVersion
+    /// The collapsed strip's leading-wing width in view coordinates
+    /// (`NotchCompanionGeometry.leadingWingWidth`), for `hoverMoved`. Read
+    /// only by the hover handler, never by a view body.
+    @ObservationIgnored
+    private(set) var leadingWingWidth: CGFloat = 0
+    /// The pointer is inside the hover region and has started (or tried to
+    /// start) the dwell — so continuous hover reports start it only once.
+    @ObservationIgnored
+    private var isPointerInside = false
     @ObservationIgnored
     var preferenceStore = NotchCompanionPreferenceStore()
+    /// The usage status item, present only while `CompanionPresence` asks
+    /// for it (`.menuBar` on a Dynamic Island screen). Created only by
+    /// `activateIfEnabled()`, so a headless test never makes one.
+    @ObservationIgnored
+    private var usageMenuBarItem: UsageMenuBarItem?
 
     // MARK: - Usage (terminal-notch-hud.md NC-D)
 
@@ -352,8 +389,32 @@ final class NotchCompanionModel: NSObject {
     /// the wings pill on attention, hover-dwell, or click). Drives
     /// `CompanionWingsView`'s content gate — no glyph/count text renders
     /// behind the physical housing at notch-only width.
+    ///
+    /// On an island, attention does not widen the capsule: the wider frame
+    /// is for hover only, and a bell takes the attention drop-down instead.
     var isStripExpanded: Bool {
-        hoverState != .resting || attentionCount > 0
+        hoverState != .resting || (attentionCount > 0 && surface != .island)
+    }
+
+    /// Whether a bell may route into the open panel's attention feed. An
+    /// island panel offers Usage only, so it has no feed to show.
+    var isAttentionFeedAvailable: Bool { surface != .island }
+
+    /// The island capsule's right-lobe figure: the most constrained
+    /// front-line usage window, or `nil` with no usage data.
+    var islandUsageGlance: NotchIslandUsageGlance? {
+        NotchIslandUsageGlance.resolve(
+            frontLine: usageFrontLine, observedAt: usageObservedAt, mode: usageDisplayMode,
+            displayName: { UsageProviderRegistry.descriptor(for: $0)?.displayName ?? $0.rawValue },
+            now: Date())
+    }
+
+    /// The companion panel's window level and hover reach for the current
+    /// state — see `CompanionPanelLayering`.
+    var panelLayering: CompanionPanelLayering {
+        CompanionPanelLayering.resolve(
+            osMajorVersion: osMajorVersion, surface: surface, hoverState: hoverState,
+            isPanelOpen: isPanelOpen, isHoverPending: dwellTimer != nil)
     }
 
     /// Whether the panel (tabs and content) is showing: pinned, or peeking
@@ -361,6 +422,21 @@ final class NotchCompanionModel: NSObject {
     /// wings strip and a click opens the panel.
     var isPanelOpen: Bool {
         hoverState == .pinned || (hoverState == .peeking && opensOnHover)
+    }
+
+    /// Which companion surfaces should exist for the current surface, usage
+    /// glance position, and "Show notch companion" setting. A plain screen
+    /// with the pill off has no companion.
+    var presence: CompanionPresence {
+        CompanionPresence.resolve(
+            surface: surface == .pill && !allowsPill ? nil : surface,
+            position: usageGlancePosition, isEnabled: preferenceStore.isEnabled())
+    }
+
+    /// The usage glance is a status item, so the island pill and its card
+    /// do not exist.
+    private var showsUsageInMenuBar: Bool {
+        surface == .island && usageGlancePosition == .menuBar
     }
 
     // MARK: - Agents (collapsed status, mascot, Ensembles, Up next)
@@ -509,13 +585,40 @@ final class NotchCompanionModel: NSObject {
     /// never reads defaults itself.
     func reloadDisplayPreferences() {
         let store = displayPreferences
-        visibleSections = store.visibleSections()
+        isMascotEnabled = store.isMascotEnabled()
+        allowsPill = store.showsPillOnPlainDisplays()
+        let position = store.usageGlancePosition()
+        if usageGlancePosition != position { usageGlancePosition = position }
+        applySurfacePolicy()
+    }
+
+    /// The preferences the current `surface` filters: on an island the panel
+    /// offers Usage only and hover never opens it. Reads the stored
+    /// preferences but never writes them — the remembered tab and the
+    /// section flags survive for the next notched screen.
+    private func applySurfacePolicy() {
+        let store = displayPreferences
+        visibleSections = NotchSection.offered(store.visibleSections(), on: surface)
         selectedSection = NotchSection.selection(
             remembered: store.selectedSection(), visible: visibleSections)
-        isMascotEnabled = store.isMascotEnabled()
-        opensOnHover = store.opensOnHover()
-        allowsPill = store.showsPillOnPlainDisplays()
+        opensOnHover = CompanionHoverPolicy.effectiveOpensOnHover(
+            preference: store.opensOnHover(), surface: surface)
         if panel != nil { syncNowPlaying() }
+    }
+
+    /// Sets `surface` without a screen, then applies its policy. Headless
+    /// tests only — production derives `surface` from the companion's
+    /// screen.
+    func setSurfaceForTesting(_ surface: NotchCompanionSurface) {
+        self.surface = surface
+        applySurfacePolicy()
+    }
+
+    /// The surface for `metrics`. With the pill off on a plain screen there
+    /// is no companion at all; `.pill` still names that screen's kind so
+    /// the policy stays the plain-display one.
+    private static func surfaceKind(for metrics: NotchScreenMetrics) -> NotchCompanionSurface {
+        NotchCompanionGeometry.surface(for: metrics, allowsPill: true) ?? .pill
     }
 
     /// Now Playing listens (observers only, no Apple events) while the strip
@@ -724,18 +827,44 @@ final class NotchCompanionModel: NSObject {
     /// the correct end state, so this never no-ops into a half-torn-down
     /// window.
     func activateIfEnabled() {
+        let screen = NotchScreenAdapter.companionMetrics()
+        if let screen {
+            let kind = Self.surfaceKind(for: screen)
+            if surface != kind { surface = kind }
+        }
         reloadDisplayPreferences()
-        guard preferenceStore.isEnabled(),
-            let metrics = NotchScreenAdapter.companionMetrics(),
+        let wanted =
+            screen.map {
+                CompanionPresence.resolve(
+                    surface: NotchCompanionGeometry.surface(for: $0, allowsPill: allowsPill),
+                    position: usageGlancePosition, isEnabled: preferenceStore.isEnabled())
+            } ?? .none
+        syncUsageMenuBarItem(installed: wanted.showsMenuBarItem)
+        guard wanted.showsPanel,
+            let metrics = screen,
             NotchCompanionGeometry.restingFrame(for: metrics, allowsPill: allowsPill) != nil
         else {
-            teardown()
+            // The status item reads usage too, so its refresh survives.
+            teardown(keepingUsageRefresh: wanted.showsMenuBarItem)
             return
         }
         if panel == nil {
             presentPanel(metrics: metrics)
         } else {
             reposition()
+        }
+    }
+
+    /// Adds or removes the usage status item. Installing reads usage once
+    /// (TTL-gated); the item then redraws when the model's usage changes.
+    private func syncUsageMenuBarItem(installed: Bool) {
+        if installed {
+            guard usageMenuBarItem == nil else { return }
+            usageMenuBarItem = UsageMenuBarItem(model: self)
+            refreshUsage()
+        } else {
+            usageMenuBarItem?.remove()
+            usageMenuBarItem = nil
         }
     }
 
@@ -797,6 +926,9 @@ final class NotchCompanionModel: NSObject {
         panel.orderFrontRegardless()
         syncNowPlaying()
         refreshEditorRows()
+        // The island capsule shows a usage ring at rest, so read usage once
+        // (TTL-gated) when it appears. No periodic timer at rest.
+        if surface == .island { refreshUsage() }
     }
 
     /// Records the strip's band, height and notch-ness from the screen the
@@ -808,6 +940,13 @@ final class NotchCompanionModel: NSObject {
         let notched = NotchHUDGeometry.notchRect(for: metrics) != nil
         if hasPhysicalNotch != notched { hasPhysicalNotch = notched }
         if stripHeight != restingFrame.height { stripHeight = restingFrame.height }
+        let radius = NotchIslandGeometry.openCornerRadius(for: metrics)
+        if islandOpenCornerRadius != radius { islandOpenCornerRadius = radius }
+        let kind = Self.surfaceKind(for: metrics)
+        if surface != kind {
+            surface = kind
+            applySurfacePolicy()
+        }
     }
 
     @objc
@@ -918,12 +1057,17 @@ final class NotchCompanionModel: NSObject {
         usageRefreshTimer = nil
     }
 
-    private func teardown() {
+    /// Removes the panel and its timers. `keepingUsageRefresh` leaves an
+    /// in-flight usage read running for the usage status item, which stays.
+    private func teardown(keepingUsageRefresh: Bool = false) {
         nowPlaying.stop()
         cancelTimers()
+        removeIslandYieldMonitor()
         stopUsageTimer()
-        usageRefreshTask?.cancel()
-        isUsageRefreshing = false
+        if !keepingUsageRefresh {
+            usageRefreshTask?.cancel()
+            isUsageRefreshing = false
+        }
         clearKeyEngagement()
         searchQuery = ""
         if let panel {
@@ -970,10 +1114,17 @@ final class NotchCompanionModel: NSObject {
             panel.setFrame(frame, display: true, animate: shouldAnimate)
             panel.clickThroughRegions = []
             panel.hasShadow = true
+            if surface == .island {
+                installIslandYieldMonitor()
+            } else {
+                removeIslandYieldMonitor()
+            }
+            applyPanelLayering()
             return
         }
+        removeIslandYieldMonitor()
         let strip =
-            hoverState == .peeking || attentionCount > 0
+            isStripExpanded
             ? NotchCompanionGeometry.expandedFrame(for: metrics, allowsPill: allowsPill)
             : NotchCompanionGeometry.restingFrame(for: metrics, allowsPill: allowsPill)
         guard let frame = strip else {
@@ -983,6 +1134,62 @@ final class NotchCompanionModel: NSObject {
         panel.setFrame(frame, display: true, animate: shouldAnimate)
         panel.clickThroughRegions = []
         panel.hasShadow = false
+        leadingWingWidth =
+            NotchCompanionGeometry.leadingWingWidth(for: metrics, stripFrame: frame) ?? 0
+        applyPanelLayering()
+    }
+
+    /// Orders the panel at `panelLayering`'s level. Raising also brings it to
+    /// the front of `.statusBar`, so the expanded strip is above the status
+    /// items it now covers. Only this companion panel changes level;
+    /// `NotchHUDPanel`'s default and the attention drop-down stay
+    /// `.statusBar`.
+    private func applyPanelLayering() {
+        guard let panel else { return }
+        let level = Self.windowLevel(for: panelLayering.level)
+        guard panel.level != level else { return }
+        panel.level = level
+        if level == .statusBar { panel.orderFrontRegardless() }
+    }
+
+    /// `.statusBar` is 25; `.belowMenuBar` is `mainMenu - 1` = 23.
+    private static func windowLevel(for level: CompanionPanelLayering.Level) -> NSWindow.Level {
+        switch level {
+        case .statusBar: .statusBar
+        case .belowMenuBar: NSWindow.Level(rawValue: NSWindow.Level.mainMenu.rawValue - 1)
+        }
+    }
+
+    // MARK: - Island yield (Dynamic Island screens only)
+
+    /// Installs the global monitor that closes the island card when the
+    /// person clicks or taps the system island. Global monitors see only
+    /// events that go to OTHER apps (here: MenuBarAgent, which owns the
+    /// system island), never clicks on Rafu's own card. Mouse-down global
+    /// monitoring needs no Accessibility permission. The handler reads only
+    /// the pointer location and never logs it.
+    private func installIslandYieldMonitor() {
+        guard islandYieldMonitor == nil else { return }
+        islandYieldMonitor = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseDown) {
+            [weak self] _ in
+            // Global monitor handlers run on the main thread.
+            MainActor.assumeIsolated { self?.islandYieldCheck() }
+        }
+    }
+
+    private func removeIslandYieldMonitor() {
+        guard let monitor = islandYieldMonitor else { return }
+        NSEvent.removeMonitor(monitor)
+        islandYieldMonitor = nil
+    }
+
+    private func islandYieldCheck() {
+        guard surface == .island, isPanelOpen,
+            let metrics = NotchScreenAdapter.companionMetrics(),
+            let zone = NotchIslandGeometry.systemZone(for: metrics),
+            zone.contains(NSEvent.mouseLocation)
+        else { return }
+        escapePressed()
     }
 
     /// The open panel's total height: the strip row plus the fixed body.
@@ -1012,11 +1219,29 @@ final class NotchCompanionModel: NSObject {
             // `WorkspaceTerminalController`'s quiescence timer.
             MainActor.assumeIsolated { self?.dwellTimerFired() }
         }
+        // Rise above the menu bar's status items BEFORE the expand, so the
+        // wider strip and its controls are on top when the dwell fires.
+        applyPanelLayering()
+    }
+
+    /// The view's continuous hover report. `inLeadingWing` is true while the
+    /// pointer is over the leading wing (x below `leadingWingWidth`). While
+    /// `panelLayering` keeps that wing from starting hover, the pointer
+    /// there is ignored — it is reaching for a menu-bar overflow item — and
+    /// the dwell starts only once it reaches the housing or trailing wing.
+    func hoverMoved(inLeadingWing: Bool) {
+        if inLeadingWing, !panelLayering.leadingWingStartsHover { return }
+        guard !isPointerInside else { return }
+        isPointerInside = true
+        hoverEntered()
     }
 
     func hoverExited() {
+        isPointerInside = false
         dwellTimer?.invalidate()
         dwellTimer = nil
+        // A cancelled dwell drops a resting strip back below the menu bar.
+        applyPanelLayering()
         guard hoverState == .peeking, graceTimer == nil else { return }
         graceTimer = Timer.scheduledTimer(
             withTimeInterval: CompanionHoverPolicy.graceSeconds, repeats: false
@@ -1033,8 +1258,9 @@ final class NotchCompanionModel: NSObject {
         refreshTheme()
         // Usage is only worth reading once the panel shows it: a hover that
         // opens the panel refreshes (TTL-gated); a hover that only widens the
-        // strip does not.
-        if isPanelOpen { refreshUsage() }
+        // strip does not — except on an island, where the wider capsule
+        // shows the usage percentage.
+        if isPanelOpen || surface == .island { refreshUsage() }
         refreshEditorRows(animated: true)
     }
 
@@ -1061,9 +1287,22 @@ final class NotchCompanionModel: NSObject {
     /// still-open peek) — `CompanionHoverPolicy.onClick` never returns
     /// `.resting`, so this always ends with the panel open and its rows
     /// fresh.
+    ///
+    /// On an island a click (or a touch-screen tap, which macOS delivers as
+    /// a click) is a plain toggle (`CompanionHoverPolicy.onIslandTap`): an
+    /// open card closes through the same path as Escape.
     func clicked() {
+        // The usage glance lives in the menu bar: there is no island card.
+        if showsUsageInMenuBar { return }
+        if surface == .island, hoverState == .pinned {
+            escapePressed()
+            return
+        }
         cancelTimers()
-        hoverState = CompanionHoverPolicy.onClick(hoverState)
+        hoverState =
+            surface == .island
+            ? CompanionHoverPolicy.onIslandTap(hoverState)
+            : CompanionHoverPolicy.onClick(hoverState)
         refreshTheme()
         refreshEditorRows(animated: true)
         if hoverState == .pinned {
@@ -1101,5 +1340,6 @@ final class NotchCompanionModel: NSObject {
         dwellTimer = nil
         graceTimer?.invalidate()
         graceTimer = nil
+        applyPanelLayering()
     }
 }

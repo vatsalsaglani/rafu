@@ -278,6 +278,26 @@ Lightning state.
   [`test-source-policy-and-bookmark-isolation.md`](test-source-policy-and-bookmark-isolation.md)
   for test isolation, source-check limits, and the separate fixture warning.
 
+## Command Line Tools selected instead of Xcode (2026-11-15)
+
+- **Applies to:** a new Mac where `xcode-select` points at the Command Line
+  Tools (CLT) and Xcode is installed in `/Applications`.
+- **Last verified environment:** macOS 27.2 (26B8119), Mac17,13, SDK 27.2,
+  2026-11-15. The Swift version string of the failing CLT toolchain was not
+  recorded.
+- **Observed failures:** the CLT toolchain has no SwiftUI macro plugins, so
+  `@State` and `@Entry` fail to compile. It also has no Metal toolchain, so
+  SwiftTerm's `Shaders.metal` fails. Both look like source bugs; they are not.
+- **Fix:** `sudo xcode-select -s /Applications/Xcode.app/Contents/Developer`,
+  then `xcodebuild -runFirstLaunch`, then `xcodebuild -downloadComponent
+  MetalToolchain` (installed Metal Toolchain 27B47).
+- **Interim workaround before the fix:** `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+  swift build --build-system native` copies the `.metal` file instead of
+  compiling it. Use it only to get a build; it does not replace the fix.
+- **Verification commands:** `xcode-select -p`, `xcodebuild -showComponent
+  MetalToolchain -json`, `./script/build.sh`.
+- **Related:** the Metal section above, and
+  [`dynamic-island-macs.md`](dynamic-island-macs.md) (the work that hit this).
 
 ## Helper resources and signing (2026-10-18)
 

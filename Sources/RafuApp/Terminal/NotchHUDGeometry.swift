@@ -24,6 +24,27 @@ nonisolated struct NotchScreenMetrics: Equatable, Sendable {
     /// `var` with a default so the memberwise initializer keeps it optional:
     /// every existing call site that builds metrics without it stays valid.
     var isBuiltin: Bool = false
+    /// `NSScreen.backingScaleFactor` — device pixels per point. Used only to
+    /// snap the Dynamic Island capsule's fractional edges to whole pixels
+    /// (`NotchHUDGeometry.pixelAligned(_:scale:)`). `var` with a default for
+    /// the same reason as `isBuiltin`.
+    var backingScaleFactor: CGFloat = 2
+}
+
+/// What sits at the top centre of a screen, derived from geometry only
+/// (`NotchHUDGeometry.cutout(for:)`):
+///
+/// - `.none`: no top safe-area inset, or the auxiliary areas cannot bound a
+///   housing. The menu bar runs edge to edge.
+/// - `.notch`: a wide camera housing that the menu bar flows around
+///   (185 x 33 pt on a 14-inch MacBook Pro).
+/// - `.islandCamera`: a small hole-punch camera with a system Dynamic Island
+///   drawn around it (59 x 40 pt on Mac17,13). macOS draws its own black
+///   capsule there, so Rafu must not paint a band from the screen top.
+nonisolated enum NotchCutout: Equatable, Sendable {
+    case none
+    case notch
+    case islandCamera
 }
 
 /// The HUD's two presentations (terminal-notch-hud.md N-4): a compact pill
@@ -34,15 +55,23 @@ nonisolated enum NotchHUDState: Equatable, Sendable {
 }
 
 /// Pure notch/HUD geometry. The platform exposes NO notch API — only
-/// geometry: the notch rect is DERIVED from the two auxiliary top areas and
-/// the top safe-area inset (verified on this machine: 1710×1107 screen,
-/// inset 33, aux areas (0,1074,763,33) and (948,1074,762,33) → notch
-/// (763,1074,185,33)).
+/// geometry: the camera housing rect is DERIVED from the two auxiliary top
+/// areas and the top safe-area inset (verified on a 14-inch MacBook Pro:
+/// 1710×1107 screen, inset 33, aux areas (0,1074,763,33) and
+/// (948,1074,762,33) → notch (763,1074,185,33); verified on Mac17,13 with a
+/// Dynamic Island: 1512×993 screen, inset 40, aux areas (0,953,726.5,40) and
+/// (785.5,953,726.5,40) → island camera (726.5,953,59,40)).
 nonisolated enum NotchHUDGeometry {
-    /// The notch rect in screen coordinates, or `nil` when the screen has
-    /// none (inset is 0, either auxiliary area is missing, or the derived
-    /// width is non-positive).
-    static func notchRect(for metrics: NotchScreenMetrics) -> CGRect? {
+    /// A housing narrower than this many top insets is a hole-punch camera
+    /// with a system Dynamic Island, not a notch: the island camera is
+    /// 59 pt wide beside a 40 pt inset (ratio 1.5), a notch is 185 pt wide
+    /// beside a 33 pt inset (ratio 5.6). 3 sits well clear of both.
+    static let islandWidthToInsetRatio: CGFloat = 3
+
+    /// The camera housing rect in screen coordinates, whatever its kind, or
+    /// `nil` when the screen has none (inset is 0, either auxiliary area is
+    /// missing, or the derived width is non-positive).
+    static func housingRect(for metrics: NotchScreenMetrics) -> CGRect? {
         guard metrics.safeAreaTopInset > 0,
             let left = metrics.auxiliaryTopLeft,
             let right = metrics.auxiliaryTopRight
@@ -55,6 +84,30 @@ nonisolated enum NotchHUDGeometry {
             width: width,
             height: metrics.safeAreaTopInset
         )
+    }
+
+    /// Classifies the top of the screen. See `NotchCutout`.
+    static func cutout(for metrics: NotchScreenMetrics) -> NotchCutout {
+        guard let housing = housingRect(for: metrics) else { return .none }
+        return housing.width < islandWidthToInsetRatio * metrics.safeAreaTopInset
+            ? .islandCamera : .notch
+    }
+
+    /// The notch rect in screen coordinates, or `nil` when the screen has
+    /// no NOTCH — including a screen with an island camera. Every consumer
+    /// of this rect paints a black band from the screen top to merge with
+    /// the housing; beside a Dynamic Island that band would collide with
+    /// the system capsule, so an island screen takes the no-notch layout
+    /// here and its own geometry in `NotchIslandGeometry`.
+    static func notchRect(for metrics: NotchScreenMetrics) -> CGRect? {
+        cutout(for: metrics) == .notch ? housingRect(for: metrics) : nil
+    }
+
+    /// `value` rounded to the nearest device pixel. `scale` below 1 counts
+    /// as 1, so a bad scale factor can never divide by zero.
+    static func pixelAligned(_ value: CGFloat, scale: CGFloat) -> CGFloat {
+        let scale = max(scale, 1)
+        return (value * scale).rounded() / scale
     }
 
     /// Where the HUD window goes. With a notch: hanging just below it
@@ -128,17 +181,18 @@ nonisolated enum NotchScreenSelection {
         candidates.first { NotchHUDGeometry.notchRect(for: $0) != nil } ?? candidates.first
     }
 
-    /// The companion's screen. Same as `preferred(from:)`, except that with no
-    /// notched screen attached the built-in display wins before the active
+    /// The companion's screen. Like `preferred(from:)`, except that a screen
+    /// with ANY camera cutout (a notch or an island camera) wins first, and
+    /// with none attached the built-in display wins before the active
     /// window's screen (Cider's `BuiltinDisplay` rule): a floating pill on a
     /// Mac without a notch belongs on the laptop's own screen, not on
     /// whichever external monitor currently holds the key window. The
     /// attention drop-down keeps following the key window; only the
-    /// always-on companion is anchored to the built-in display.
+    /// always-on companion is anchored to the cutout or built-in display.
     static func preferredForCompanion(from candidates: [NotchScreenMetrics])
         -> NotchScreenMetrics?
     {
-        candidates.first { NotchHUDGeometry.notchRect(for: $0) != nil }
+        candidates.first { NotchHUDGeometry.cutout(for: $0) != .none }
             ?? candidates.first { $0.isBuiltin }
             ?? candidates.first
     }

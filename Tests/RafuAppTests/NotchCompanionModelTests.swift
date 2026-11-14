@@ -526,3 +526,207 @@ func allAgentRowsListsOnlyAgents() {
     #expect(model.agentSummary.live == 0)
     #expect(model.mascotState.mood == .idle)
 }
+
+// MARK: - Dynamic Island surface
+
+@MainActor
+@Test("island surface: Usage only, hover never opens, and no stored preference is written")
+func islandSurfacePolicyOffersUsageOnly() {
+    let suite = TestDefaultsSuite.name("dev.rafu.tests.notch-island-policy")
+    defer { TestDefaultsSuite.remove(suite) }
+    let model = NotchCompanionModel()
+    model.displayPreferences = NotchDisplayPreferenceStore(suiteName: suite)
+
+    model.setSurfaceForTesting(.island)
+    #expect(model.visibleSections == [.usage])
+    #expect(model.selectedSection == .usage)
+    #expect(model.opensOnHover == false)
+    model.select(.ensembles)
+    #expect(model.selectedSection == .usage)
+    #expect(model.displayPreferences.selectedSection() == nil)
+    #expect(model.displayPreferences.visibleSections() == NotchSection.allCases)
+    #expect(model.displayPreferences.opensOnHover())
+
+    model.setSurfaceForTesting(.notch)
+    #expect(model.visibleSections == NotchSection.allCases)
+    #expect(model.selectedSection == .ensembles)
+    #expect(model.opensOnHover == true)
+}
+
+@MainActor
+@Test("island clicked: a tap opens, a second tap closes; the notch keeps its pin toggle")
+func islandClickedTogglesOpenAndClosed() {
+    let island = NotchCompanionModel()
+    island.usageReader = fixtureReader(descriptors: [])  // see escapePressedClearsSearchQuery
+    island.setSurfaceForTesting(.island)
+    island.clicked()
+    #expect(island.hoverState == .pinned)
+    #expect(island.isPanelOpen)
+    island.clicked()
+    #expect(island.hoverState == .resting)
+    #expect(!island.isPanelOpen)
+
+    let notch = NotchCompanionModel()
+    notch.usageReader = fixtureReader(descriptors: [])
+    notch.clicked()
+    notch.clicked()
+    #expect(notch.hoverState == .peeking)
+    notch.escapePressed()
+}
+
+@MainActor
+@Test("island attention: does not widen the capsule and has no feed; the notch still widens")
+func islandAttentionDoesNotWidenCapsule() {
+    let model = NotchCompanionModel()
+    let noisy = session(named: "noisy", path: "/tmp/notch-companion-island-attention")
+    noisy.newTerminalTab()
+    noisy.terminal.sessions[0].markRunningForTesting()
+    noisy.terminal.sessions[0].noteBell()
+    model.register(noisy)
+    #expect(model.attentionCount == 1)
+
+    #expect(model.isStripExpanded)
+    #expect(model.isAttentionFeedAvailable)
+
+    model.setSurfaceForTesting(.island)
+    #expect(!model.isStripExpanded)
+    #expect(!model.isAttentionFeedAvailable)
+    let arbitration = CompanionHoverPolicy.companionArbitration(
+        hoverState: .pinned, peekShowsPanel: model.opensOnHover,
+        feedAvailable: model.isAttentionFeedAvailable)
+    #expect(!arbitration.routeToFeed && arbitration.showDropDown)
+}
+
+@MainActor
+@Test("islandUsageGlance: nil before usage loads; the most constrained window after")
+func islandUsageGlanceFromInjectedReader() async throws {
+    let model = NotchCompanionModel()
+    model.usageReader = fixtureReader(descriptors: [
+        fixtureDescriptor(
+            id: .codex,
+            snapshot: UsageSnapshot(
+                providerID: .codex,
+                windows: [
+                    UsageWindow(label: "5h", percent: 12, tokens: nil, resetsAt: nil),
+                    UsageWindow(label: "7d", percent: 30, tokens: nil, resetsAt: nil),
+                ],
+                costLine: nil, identity: nil))
+    ])
+    #expect(model.islandUsageGlance == nil)
+
+    await model.refreshUsage()?.value
+
+    let glance = try #require(model.islandUsageGlance)
+    #expect(glance.level == .normal)
+    #expect(glance.spokenLabel.hasPrefix("Usage: "))
+    #expect(glance.spokenLabel.hasSuffix("Weekly \(glance.percentText)"))
+}
+
+// MARK: - Panel layering (menu-bar overflow on macOS 27)
+
+@MainActor
+@Test("panelLayering on macOS 27: resting lowers; hover dwell and open panel raise")
+func panelLayeringFollowsHoverOnMacOS27() {
+    let model = NotchCompanionModel()
+    model.usageReader = fixtureReader(descriptors: [])  // see escapePressedClearsSearchQuery
+    model.osMajorVersion = 27
+    model.setSurfaceForTesting(.notch)
+
+    #expect(model.panelLayering.level == .belowMenuBar)
+    #expect(!model.panelLayering.leadingWingStartsHover)
+
+    // The leading wing does not start the dwell while lowered.
+    model.hoverMoved(inLeadingWing: true)
+    #expect(model.panelLayering.level == .belowMenuBar)
+
+    // The housing or trailing wing does, and the panel rises at once.
+    model.hoverMoved(inLeadingWing: false)
+    #expect(model.panelLayering == .standard)
+    model.hoverExited()
+    #expect(model.panelLayering.level == .belowMenuBar)
+
+    model.clicked()
+    #expect(model.panelLayering == .standard)
+    model.escapePressed()
+    #expect(model.panelLayering.level == .belowMenuBar)
+
+    // The island pill hangs below the menu bar, so it is never lowered.
+    model.setSurfaceForTesting(.island)
+    #expect(model.panelLayering == .standard)
+    model.setSurfaceForTesting(.pill)
+    #expect(model.panelLayering == .standard)
+}
+
+@MainActor
+@Test("panelLayering on macOS 26: always the status-bar level and the full hover area")
+func panelLayeringUnchangedOnMacOS26() {
+    let model = NotchCompanionModel()
+    model.usageReader = fixtureReader(descriptors: [])
+    model.osMajorVersion = 26
+    for surface in [NotchCompanionSurface.notch, .island, .pill] {
+        model.setSurfaceForTesting(surface)
+        #expect(model.panelLayering == .standard)
+        model.clicked()
+        #expect(model.panelLayering == .standard)
+        model.escapePressed()
+    }
+}
+
+// MARK: - Usage glance in the menu bar (Dynamic Island Macs)
+
+@MainActor
+@Test("menu bar usage glance: an island shows no pill panel and a click opens no card")
+func islandMenuBarPositionHasNoPillPanel() {
+    let displaySuite = TestDefaultsSuite.name("dev.rafu.tests.usage-glance-model-display")
+    let enabledSuite = TestDefaultsSuite.name("dev.rafu.tests.usage-glance-model-enabled")
+    defer {
+        TestDefaultsSuite.remove(displaySuite)
+        TestDefaultsSuite.remove(enabledSuite)
+    }
+    let model = NotchCompanionModel()
+    model.usageReader = fixtureReader(descriptors: [])  // see escapePressedClearsSearchQuery
+    model.preferenceStore = NotchCompanionPreferenceStore(suiteName: enabledSuite)
+    model.displayPreferences = NotchDisplayPreferenceStore(suiteName: displaySuite)
+    model.displayPreferences.setUsageGlancePosition(.menuBar)
+    model.reloadDisplayPreferences()
+    model.setSurfaceForTesting(.island)
+
+    #expect(model.usageGlancePosition == .menuBar)
+    #expect(model.presence == CompanionPresence(showsPanel: false, showsMenuBarItem: true))
+    model.clicked()
+    #expect(model.hoverState == .resting)
+    #expect(!model.isPanelOpen)
+
+    // A notched screen ignores the position.
+    model.setSurfaceForTesting(.notch)
+    #expect(model.presence == CompanionPresence(showsPanel: true, showsMenuBarItem: false))
+
+    // Turning the companion off removes both.
+    model.preferenceStore.setEnabled(false)
+    model.setSurfaceForTesting(.island)
+    #expect(model.presence == .none)
+}
+
+@MainActor
+@Test("below-island usage glance: the island keeps its pill and its tap-to-open card")
+func islandBelowIslandPositionKeepsPill() {
+    let displaySuite = TestDefaultsSuite.name("dev.rafu.tests.usage-glance-below-display")
+    let enabledSuite = TestDefaultsSuite.name("dev.rafu.tests.usage-glance-below-enabled")
+    defer {
+        TestDefaultsSuite.remove(displaySuite)
+        TestDefaultsSuite.remove(enabledSuite)
+    }
+    let model = NotchCompanionModel()
+    model.usageReader = fixtureReader(descriptors: [])
+    model.preferenceStore = NotchCompanionPreferenceStore(suiteName: enabledSuite)
+    model.displayPreferences = NotchDisplayPreferenceStore(suiteName: displaySuite)
+    model.reloadDisplayPreferences()
+    model.setSurfaceForTesting(.island)
+
+    #expect(model.usageGlancePosition == .belowIsland)
+    #expect(model.presence == CompanionPresence(showsPanel: true, showsMenuBarItem: false))
+    model.clicked()
+    #expect(model.hoverState == .pinned)
+    model.clicked()
+    #expect(model.hoverState == .resting)
+}

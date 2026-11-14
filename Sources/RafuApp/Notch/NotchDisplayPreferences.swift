@@ -50,11 +50,47 @@ nonisolated enum NotchSection: String, CaseIterable, Identifiable, Sendable {
         return shown.isEmpty ? [.ensembles] : shown
     }
 
+    /// The sections the open panel offers on `surface`: Usage only on a
+    /// Dynamic Island screen, whatever the person turned on; `visible`
+    /// unchanged everywhere else. Pure — the stored per-section flags are
+    /// never rewritten, so the notch keeps its sections on another screen.
+    static func offered(_ visible: [NotchSection], on surface: NotchCompanionSurface?)
+        -> [NotchSection]
+    {
+        surface == .island ? [.usage] : visible
+    }
+
     /// The tab to show: the remembered one when it is still offered,
     /// otherwise the first offered section.
     static func selection(remembered: NotchSection?, visible: [NotchSection]) -> NotchSection {
         if let remembered, visible.contains(remembered) { return remembered }
         return visible.first ?? .ensembles
+    }
+}
+
+/// Where a Dynamic Island Mac shows the usage glance (Settings ▸ General ▸
+/// Notch, "Usage glance"). Read only on a Dynamic Island screen; a notched
+/// or plain Mac ignores it (`CompanionPresence`).
+///
+/// - `belowIsland`: the black pill under the menu bar, centred under the
+///   system island (the default).
+/// - `menuBar`: one status item among the menu bar's right-side items.
+nonisolated enum UsageGlancePosition: String, CaseIterable, Identifiable, Sendable {
+    case belowIsland
+    case menuBar
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .belowIsland: "Below the Dynamic Island"
+        case .menuBar: "In the menu bar"
+        }
+    }
+
+    /// An unknown or missing stored value falls back to the default.
+    static func resolve(stored: String?) -> UsageGlancePosition {
+        stored.flatMap(UsageGlancePosition.init(rawValue:)) ?? .belowIsland
     }
 }
 
@@ -68,6 +104,7 @@ nonisolated struct NotchDisplayPreferenceStore: Sendable {
     static let selectedSectionKey = "notchSelectedSection"
     static let musicConnectedKey = "notchNowPlayingConnected"
     static let systemNowPlayingKey = "notchNowPlayingSystemMedia"
+    static let usageGlancePositionKey = "notchUsageGlancePosition"
 
     private let suiteName: String?
 
@@ -112,6 +149,15 @@ nonisolated struct NotchDisplayPreferenceStore: Sendable {
     func showsPillOnPlainDisplays() -> Bool { flag(Self.plainDisplayPillKey, default: false) }
     func setShowsPillOnPlainDisplays(_ value: Bool) {
         defaults.set(value, forKey: Self.plainDisplayPillKey)
+    }
+
+    /// Where a Dynamic Island Mac shows the usage glance.
+    func usageGlancePosition() -> UsageGlancePosition {
+        UsageGlancePosition.resolve(stored: defaults.string(forKey: Self.usageGlancePositionKey))
+    }
+
+    func setUsageGlancePosition(_ position: UsageGlancePosition) {
+        defaults.set(position.rawValue, forKey: Self.usageGlancePositionKey)
     }
 
     func selectedSection() -> NotchSection? {

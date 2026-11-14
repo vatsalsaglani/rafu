@@ -1,5 +1,18 @@
 import CoreGraphics
 
+/// Which shape the companion takes on its screen
+/// (`NotchCompanionGeometry.surface(for:allowsPill:)`):
+///
+/// - `.notch`: the strip hugs a notch from the screen top.
+/// - `.island`: one capsule behind the system Dynamic Island
+///   (`NotchIslandGeometry`), Usage only.
+/// - `.pill`: the opt-in floating pill under the menu bar on a plain screen.
+nonisolated enum NotchCompanionSurface: Equatable, Sendable {
+    case notch
+    case island
+    case pill
+}
+
 /// Pure rect math for the notch companion's resting strip and peek panel
 /// (terminal-notch-hud.md NC-A). Built entirely on the EXISTING
 /// `NotchScreenMetrics` and `NotchHUDGeometry.notchRect(for:)` — this file
@@ -33,6 +46,20 @@ nonisolated enum NotchCompanionGeometry {
     /// Without the cap, dozens of editor windows/feed cards marched the
     /// panel off the bottom of the screen (observed at 29 windows).
     static let maxPeekHeightFraction: CGFloat = 0.6
+
+    /// THE one place a screen's cutout picks the companion's surface. Every
+    /// frame below dispatches on this, so sending an island screen down the
+    /// plain-display pill path instead is a one-line change to the
+    /// `.islandCamera` case. `nil` means no companion on this screen.
+    static func surface(for metrics: NotchScreenMetrics, allowsPill: Bool)
+        -> NotchCompanionSurface?
+    {
+        switch NotchHUDGeometry.cutout(for: metrics) {
+        case .notch: .notch
+        case .islandCamera: .island
+        case .none: allowsPill ? .pill : nil
+        }
+    }
 
     /// The tallest frame `peekPanelFrame` will produce for `metrics`.
     static func maxPeekHeight(for metrics: NotchScreenMetrics) -> CGFloat {
@@ -90,9 +117,18 @@ nonisolated enum NotchCompanionGeometry {
     /// The floating pill used on a display with no notch, when the person
     /// asked for it: top-centre, hanging from the bottom edge of the menu bar
     /// (`visibleFrame.maxY`) so it never covers menu bar items. `nil` on a
-    /// notched screen — the strip hugs the notch there instead.
+    /// screen with any camera cutout — the strip hugs a notch, and an island
+    /// screen uses `NotchIslandGeometry`.
     static func pillFrame(for metrics: NotchScreenMetrics, expanded: Bool = false) -> CGRect? {
-        guard NotchHUDGeometry.notchRect(for: metrics) == nil else { return nil }
+        guard NotchHUDGeometry.cutout(for: metrics) == .none else { return nil }
+        return floatingPillFrame(for: metrics, expanded: expanded)
+    }
+
+    /// The pill's rect with no cutout check — reached only through
+    /// `surface(for:allowsPill:)` returning `.pill`.
+    private static func floatingPillFrame(for metrics: NotchScreenMetrics, expanded: Bool)
+        -> CGRect
+    {
         let menuBarHeight = metrics.frame.maxY - metrics.visibleFrame.maxY
         let height = max(pillMinimumHeight, menuBarHeight)
         let width = min(expanded ? pillExpandedWidth : pillWidth, metrics.frame.width)
@@ -103,17 +139,49 @@ nonisolated enum NotchCompanionGeometry {
         return CGRect(x: x, y: y, width: width, height: height)
     }
 
-    /// The resting frame: the notch strip on a notched screen, else the pill
-    /// when `allowsPill`, else `nil` (no companion on this display).
+    /// The resting frame: the notch strip on a notched screen, the island
+    /// capsule on an island screen, else the pill when `allowsPill`, else
+    /// `nil` (no companion on this display).
     static func restingFrame(for metrics: NotchScreenMetrics, allowsPill: Bool) -> CGRect? {
-        restingStripFrame(for: metrics) ?? (allowsPill ? pillFrame(for: metrics) : nil)
+        switch surface(for: metrics, allowsPill: allowsPill) {
+        case .notch: restingStripFrame(for: metrics)
+        case .island: NotchIslandGeometry.restingFrame(for: metrics)
+        case .pill: floatingPillFrame(for: metrics, expanded: false)
+        case nil: nil
+        }
     }
 
     /// The wider "peek" frame shown while attention is active or the pointer
-    /// rests on the strip with hover-to-open off.
+    /// rests on the strip with hover-to-open off (on an island: hover only).
     static func expandedFrame(for metrics: NotchScreenMetrics, allowsPill: Bool) -> CGRect? {
-        expandedStripFrame(for: metrics)
-            ?? (allowsPill ? pillFrame(for: metrics, expanded: true) : nil)
+        switch surface(for: metrics, allowsPill: allowsPill) {
+        case .notch: expandedStripFrame(for: metrics)
+        case .island: NotchIslandGeometry.wideFrame(for: metrics)
+        case .pill: floatingPillFrame(for: metrics, expanded: true)
+        case nil: nil
+        }
+    }
+
+    /// The leading (left) wing's width inside `stripFrame`: from the strip's
+    /// left edge to the notch's left edge, or to the left edge of the system
+    /// island's reserve. `nil` on a screen with no cutout (the pill has no
+    /// wing beside a housing). Used by `CompanionPanelLayering`: while the
+    /// strip sits below the menu bar, this part does not start hover.
+    static func leadingWingWidth(for metrics: NotchScreenMetrics, stripFrame: CGRect) -> CGFloat? {
+        let innerEdge: CGFloat
+        switch surface(for: metrics, allowsPill: false) {
+        case .notch:
+            guard let notch = NotchHUDGeometry.notchRect(for: metrics) else { return nil }
+            innerEdge = notch.minX
+        case .island:
+            // The resting capsule's lobes sit right beside the camera
+            // housing (NotchIslandGeometry.restingLobeWidth).
+            guard let housing = NotchHUDGeometry.housingRect(for: metrics) else { return nil }
+            innerEdge = housing.minX
+        case .pill, nil:
+            return nil
+        }
+        return max(0, innerEdge - stripFrame.minX)
     }
 
     /// The left wing's hit-test rect in screen coordinates, flush against
@@ -141,7 +209,16 @@ nonisolated enum NotchCompanionGeometry {
     /// non-notch fallback branch). Horizontally centered on the notch (or
     /// the screen without one) at `panelWidth`, clamped to `metrics.frame`
     /// on every edge.
+    ///
+    /// On an island screen the open card keeps the capsule's top edge
+    /// instead (`NotchIslandGeometry.openFrame`), so it grows out of the
+    /// capsule rather than from the screen top.
     static func peekPanelFrame(for metrics: NotchScreenMetrics, contentHeight: CGFloat) -> CGRect {
+        if surface(for: metrics, allowsPill: false) == .island,
+            let open = NotchIslandGeometry.openFrame(for: metrics, contentHeight: contentHeight)
+        {
+            return open
+        }
         let centerX: CGFloat
         let topY: CGFloat
         if let notch = NotchHUDGeometry.notchRect(for: metrics) {

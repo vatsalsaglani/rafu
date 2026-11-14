@@ -15,7 +15,14 @@ and the horizontal gap between `NSScreen.auxiliaryTopLeftArea` and
 `auxiliaryTopRightArea` (the notch width sits between them). If either
 auxiliary area is `nil`, there is no notch, and the companion turns
 itself off entirely (`Show notch companion` has no visible effect on
-non-notch displays — no second preference, no manual override). Probed on
+non-notch displays — no second preference, no manual override). Update
+2026-11-15: a Mac with a hole-punch camera and system Dynamic Island returns a
+59 x 40 housing from the same derivation, so `NotchHUDGeometry.cutout(for:)`
+now classifies `none`/`notch`/`islandCamera` and `notchRect` returns a rect only
+for a real notch. On an island Mac the companion is a Usage-only pill below the
+menu bar or a menu-bar status item, never a surface in the menu-bar band around
+the island; see [`dynamic-island-macs.md`](dynamic-island-macs.md) and
+ADR 0037. Probed on
 this machine: screen 1710×1107, `safeAreaInsets.top` = 33, aux-left
 `(0, 1074, 763, 33)`, aux-right `(948, 1074, 762, 33)`, giving a notch
 `x ∈ [763, 948]`, width 185.
@@ -177,6 +184,23 @@ Mac, external-only) — preserving the follow-the-active-window behavior for
 the non-notch fallback layout. General rule: a surface that exists to
 occupy fixed physical hardware must be anchored to the display owning that
 hardware, never to whichever display currently has focus.
+
+**12. On macOS 27 a collapsed strip must not sit at `.statusBar` (2026-11-15).**
+MenuBarAgent draws status items, including the "»" overflow items, in a window
+at layer 25 (`.statusBar`), above the layer-24 menu bar. A resting companion at
+`.statusBar` covers the overflow items that expand beside the notch.
+`CompanionPanelLayering.resolve` therefore orders the panel at `mainMenu - 1`
+(23) on macOS 27 or later while the companion is collapsed on a NOTCH surface,
+and the leading wing does not start hover (the view uses `.onContinuousHover` to
+find the pointer x). The panel rises to `.statusBar` with `orderFrontRegardless()`
+when the hover dwell starts and is lowered again when the dwell is cancelled. The
+island pill, the plain-display pill, the attention HUD and macOS 26 or earlier
+are unchanged. Detecting the open overflow was rejected (no window-list change;
+status items need Accessibility). `NotchHUDPanel.constrainFrameRect(_:to:)`
+returns the frame unchanged: AppKit otherwise moves a window below level 24 out
+of the menu-bar band. This notched-Mac path is NOT device-verified (the user has
+no notched Mac now). Measured layers and the owed device checks:
+[`dynamic-island-macs.md`](dynamic-island-macs.md); decision: ADR 0037.
 
 ## Cider-style rebuild (2026-10-18; updates stale text above)
 

@@ -13,6 +13,20 @@ struct NotchSettingsSection: View {
         false
     @AppStorage(NotchDisplayPreferenceStore.systemNowPlayingKey) private var systemNowPlaying =
         true
+    @AppStorage(NotchDisplayPreferenceStore.usageGlancePositionKey)
+    private var usageGlancePosition: UsageGlancePosition = .belowIsland
+
+    /// This Mac has a system Dynamic Island: the companion shows Usage only,
+    /// below the island or in the menu bar, and hover never opens it.
+    private var isIsland: Bool { NotchCompanionModel.shared.surface == .island }
+
+    private var footerText: String {
+        let base =
+            "Choose the sections the notch panel offers. Ensembles stays on if you turn every section off. Now Playing reads system media through the bundled adapter; with that off, it reads Music and Spotify only and asks macOS for permission the first time you connect it."
+        guard isIsland else { return base }
+        return base
+            + " On a Mac with a Dynamic Island, the companion shows Usage only: as a small pill below the island, or as an item in the menu bar. A click or a tap on either opens the usage details."
+    }
 
     var body: some View {
         Section {
@@ -29,12 +43,23 @@ struct NotchSettingsSection: View {
                 .help(
                     "Off: resting the pointer on the notch only widens the strip, and a click opens the panel."
                 )
-                .disabled(!companionEnabled)
+                .disabled(!companionEnabled || isIsland)
             Toggle("Show a floating pill on displays without a notch", isOn: $pillOnPlainDisplays)
                 .help(
                     "Adds a small pill at the top centre, under the menu bar, on the built-in display of a Mac that has no notch."
                 )
                 .disabled(!companionEnabled)
+            if isIsland {
+                Picker("Usage glance", selection: $usageGlancePosition) {
+                    ForEach(UsageGlancePosition.allCases) { position in
+                        Text(position.title).tag(position)
+                    }
+                }
+                .help(
+                    "Where this Mac shows your agent usage: a small pill below the Dynamic Island, or an item with the other icons on the right of the menu bar."
+                )
+                .disabled(!companionEnabled)
+            }
             ForEach(NotchSection.allCases) { section in
                 NotchSectionToggle(section: section)
                     .disabled(!companionEnabled)
@@ -47,9 +72,7 @@ struct NotchSettingsSection: View {
         } header: {
             Text("Notch")
         } footer: {
-            Text(
-                "Choose the sections the notch panel offers. Ensembles stays on if you turn every section off. Now Playing reads system media through the bundled adapter; with that off, it reads Music and Spotify only and asks macOS for permission the first time you connect it."
-            )
+            Text(footerText)
         }
         .onChange(of: systemNowPlaying) { _, _ in
             NotchCompanionModel.shared.nowPlaying.sourcePreferenceDidChange()
@@ -64,6 +87,9 @@ struct NotchSettingsSection: View {
             NotchCompanionModel.shared.displayPreferencesDidChange()
         }
         .onChange(of: pillOnPlainDisplays) { _, _ in
+            NotchCompanionModel.shared.displayPreferencesDidChange()
+        }
+        .onChange(of: usageGlancePosition) { _, _ in
             NotchCompanionModel.shared.displayPreferencesDidChange()
         }
     }
