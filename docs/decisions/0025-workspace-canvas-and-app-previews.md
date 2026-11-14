@@ -178,6 +178,79 @@ and inert restore), and embedding images in the board document (bounded by
 `docs/references/canvas-interaction.md`, "Drop preview ownership, board
 notices, and outside images".
 
+## Amendment 5 (2026-11-15): a user add starts the shell, the lease follows the card, wheel scroll reaches card content
+
+The user reported three defects: a terminal added to a board still needed a
+click on "Start Shell"; a running terminal showed a "not attached" placeholder
+after a zoom-out, a move between terminals, or a resize; and the mouse wheel
+and trackpad did not scroll inside Markdown/MDX cards (only the scrollbar
+worked). Three durable decisions follow.
+
+**1. An explicit user add of a terminal card is the explicit start.** Add menu,
+Add popover, `T`, the empty-board seed, ⌃⌥1–9, the command palette, a chosen
+shell, "Connect to new terminal", Duplicate, and "Start Terminal Here" start
+the card's shell. This is the explicit user action that ADR 0004 and ADR 0023
+require; it is not an automatic start.
+
+- The card, with its one-pane group, still exists first (`addCanvasStoppedTerminal`
+  keeps its behaviour); `startCanvasTerminalCard` then starts the pane. Duplicate
+  and Connect start after the card has its final rect and edge.
+- **Foreground** when the board is shown, zoom is at least 50 %, and the board is
+  the selected tab of the focused editor group: the card claims the lease,
+  takes focus, and the keyboard goes to the shell. **Background** otherwise: the
+  card is selected, the shell starts without a view, the view and the editor
+  tabs do not move. The card shows the terminal when it is next in view.
+- Unchanged: saved boards restore inert (stopped panes, no process); undo and
+  redo restore references and geometry, never a process; no command text is sent
+  or run; agent start paths (`terminalStartRequest`, Agent History resume,
+  hand-off, ADR 0026 background start) are unchanged. "Start Shell" remains for
+  a restored card and for a start that failed.
+
+**2. The presentation lease follows the card (supersedes the release of the
+lease when a card unmounts, and the "Reveal" action of the inactive surface in
+the phase plan).** The lease governs
+which surface shows the one SwiftTerm view, not whether the process runs, and
+not memory: the controller keeps its view and buffer while a card is unmounted.
+Releasing it on every cull or zoom-out therefore had no benefit and caused the
+placeholder.
+
+- A card that scrolls out of view or zooms out keeps the lease. Releases happen
+  only on board hide, window hide, card removal, Transfer Here, group close or
+  hide, board prune (no card for the group), and undo of a move.
+- A mounted card whose terminal is running and whose lease is free claims it at
+  once, with no click. The placeholder with a "Show Here" button appears only
+  when an editor tab or another Ensemble holds the lease. A second view of the
+  same board that cannot present shows a text-only "This terminal is shown in
+  another view." with no button.
+- A terminal the user is working in (content-active) stays live down to 25 %
+  zoom; every other terminal, and every other card kind, keeps the 50 % rule.
+- Revealing a terminal (Terminals panel, `revealTerminalSession`, tab switcher)
+  goes to its card when a card on an open Ensemble shows it, and opens an editor
+  tab only otherwise. `revealTerminalGroup` itself is unchanged for move and
+  undo flows. The Terminals panel and tab switcher label such a terminal "On an
+  Ensemble", not "Hidden".
+- There is still no mount cap and no snapshot face. "Board zoom never
+  repeatedly resizes PTYs" and "one SwiftTerm view per PTY" still hold.
+
+**3. Wheel and trackpad scroll goes to the card content under the pointer.**
+This replaces "Scroll over an active terminal or web card belongs to that
+content" and the earlier "board keeps every wheel event unless the card is
+content-active" rule. A scroll view under the pointer that can still scroll in
+the gesture's direction takes the gesture without a click; otherwise the board
+pans, and ⌘/⌃ zoom. Rules, thresholds, and phase mapping:
+`docs/references/canvas-interaction.md`, "Scroll routing".
+
+Alternatives rejected: setting `terminalStartRequest` only (a request is not
+consumed while the card is unmounted and it blocks other cards);
+`CanvasTerminalStarter.start` (it moves the view); keeping the release on
+disappear and reclaiming on every change; a snapshot face for a zoomed-out
+terminal; a mount cap; scrolling content only for the selected or active card
+(that is the complaint); per-card scroll geometry reports.
+
+Detail and manual checks: `docs/references/ensemble-agent-terminal-tools.md`
+section 9, `docs/references/canvas-interaction.md`, and
+`docs/plans/phases/ensemble-canvas.md` (status 2026-11-15).
+
 ## Cross-reference (2026-11-12): agent starts without a card view
 
 [ADR 0026](0026-canvas-live-session-links.md), amendment of 2026-11-12: when no

@@ -107,7 +107,7 @@ other product's ownership, app embedding, persistence, or security behavior.
 
 | Card | First-release behavior | Explicit action that starts work |
 |---|---|---|
-| Terminal | One native SwiftTerm terminal inside a resizable card; reuse existing runtime and close rules | Start the stopped terminal |
+| Terminal | One native SwiftTerm terminal inside a resizable card; reuse existing runtime and close rules | Start the stopped terminal. **Superseded 2026-11-15 (ADR 0025 Amendment 5):** the user's add of a terminal card starts its shell; Start Shell remains for restored cards and failed starts |
 | File | Title, path, type, dirty state, and a bounded preview; Open uses the existing document/editor | Open the file in its normal editor tab |
 | Note | Small plain-text or Markdown note with native editing and native preview | Edit the note |
 | Image | Bounded thumbnail from an explicitly selected workspace file | Open in the existing media viewer |
@@ -151,13 +151,17 @@ card still works. This plan does not request screen permission now.
 - New Canvas, Add Card, Fit All, Actual Size, Zoom In/Out, and Arrange have
   visible, menu, and command-palette paths. Canvas receives one Control-Tab entry.
 - Scroll/pinch over board background pans/zooms. Scroll over an active terminal
-  or web card belongs to that content. Space-drag pans only in board mode,
+  or web card belongs to that content (**extended 2026-11-15, ADR 0025
+  Amendment 5:** a scrollable view under the pointer in any card scrolls first;
+  see `canvas-interaction.md`, "Scroll routing"). Space-drag pans only in board mode,
   never while entering terminal, web, or note text.
 - A single click focuses content inside the card. The board stays visible.
   A header drag moves the card; a summary drag moves an inactive note/file/image.
   The bottom-right handle resizes the card. Command/Shift-click
   selects cards for board commands. Focus does not start a process, web load,
-  capture, or another app. Stopped terminals still require Start, and web
+  capture, or another app. Stopped terminals still require Start (**superseded
+  2026-11-15, ADR 0025 Amendment 5:** a terminal the user adds starts its shell;
+  a restored stopped card still shows Start Shell), and web
   previews still require Connect. Escape returns focus to the
   card shell when not consumed by that content; a visible Leave Content button
   and a dedicated menu action always provide an exit path.
@@ -205,7 +209,9 @@ Suggested contracts:
   viewport boundary if scroll, magnification, or hosted native input requires it.
 - `CanvasSurfaceLease`: one visual owner for an existing terminal group. The
   canvas and its normal tab never mount the same NSView twice. Selecting the
-  other surface transfers the lease; the inactive surface shows a Reveal action.
+  other surface transfers the lease; the inactive surface shows a Reveal action
+  (**2026-11-15:** a free lease is claimed at once; the action is "Show Here" and
+  appears only when an editor tab or another Ensemble holds the lease).
   It does not clone a controller, session, PTY, or undo history.
 - `CanvasWebPreviewController`: lazy, bounded WebKit boundary for local apps.
 - `CanvasNativeAppController`: app activation and separate cancellable capture

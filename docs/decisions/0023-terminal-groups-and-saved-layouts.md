@@ -234,3 +234,9 @@ Ensemble terminal cards have no count limit. They are exempt from the 20-group,
 200-retained-pane and 200-live-session bounds, and the four-lease presentation
 cap is gone. Terminal Group editor tabs keep every bound in this ADR and ADR
 0024. See ADR 0024 Amendment 1.
+
+## Cross-reference (2026-11-15): a user add of an Ensemble terminal starts it
+
+[ADR 0025](0025-workspace-canvas-and-app-previews.md), Amendment 5: adding an
+Ensemble terminal card is the explicit user start, so its shell starts without a
+second click. Saved boards still restore inert and no process is restored.

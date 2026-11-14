@@ -614,7 +614,12 @@ follow the same skip.
 
 - Zoom never resizes a PTY. Only an explicit card resize does.
 - Terminal and web cards **unmount** below 50% zoom and show a face instead.
-  Web cards carry an explicit Load control.
+  Web cards carry an explicit Load control. Exception (2026-11-15): a terminal
+  that is content-active stays live down to 25 % (`CanvasTerminalLiveRule`:
+  live when scale >= 0.5, or when content-active and scale >= 0.25). A terminal
+  card that unmounts keeps its presentation lease; see
+  [`ensemble-agent-terminal-tools.md`](ensemble-agent-terminal-tools.md)
+  section 9.
 - Notes also use zoom faces.
 
 ### Edge layering and geometry
@@ -983,11 +988,11 @@ Build and unit tests only; the card was not driven with a real pointer.
 - **Refresh.** No file watcher. The load task is keyed by path and the matching
   open document's `revision`, which changes on save and on an external reload.
   Typing in an open editor does not refresh the card until it is saved.
-- **Scroll ownership.** The scroll view is `.scrollDisabled` unless the card is
-  content-active. Wheel events were already safe: the board's scroll monitor
-  keeps them (pans and zooms) unless the pointer is inside the focused,
-  content-active card's body (`capturesScroll`). A single click on the body
-  makes the card content-active (`activateCard` -> `board.focus`).
+- **Scroll ownership.** Superseded 2026-11-15: the card's scroll view is no
+  longer `.scrollDisabled` and `capturesScroll` is gone. A wheel or trackpad
+  scroll over the card scrolls its content with no click; see "Scroll routing"
+  below. A single click on the body still makes the card content-active
+  (`activateCard` -> `board.focus`).
 - **Source mode no longer colours prose as code.** The regex
   `SyntaxHighlighter` appended its Markdown rules after the generic operator,
   number and keyword rules, then the trailing string and `#` comment rules
@@ -1006,10 +1011,93 @@ Build and unit tests only; the card was not driven with a real pointer.
   ("Markdown source is never coloured as code"), `CanvasRepositoryCardTests`
   (limit clamp), `CanvasCardBoundsTests` (the preview keeps its size).
 - **Manual check still required:** a `.md` card renders by default; it scrolls
-  inside once clicked and the board pans and zooms when it is not active;
+  inside with the wheel with no click (changed 2026-11-15; see "Scroll
+  routing") and the board pans and zooms at its end or off the card;
   Show Source colours Markdown only; resize and zoom faces keep the borders;
   a save in the editor refreshes the card; Reduce Motion and VoiceOver; reopen
   the board and see Preview again with no new keys in the `.rafuensemble` file.
+
+## 2026-11-15: Scroll routing
+
+Applies to `CanvasScrollRouter`, `CanvasScrollRoute`, `CanvasScrollExtent`
+(`Canvas/Domain/CanvasScrollRouting.swift`) and `CanvasScrollBridge.Host`
+(`Canvas/Adapters/`). Last verified: Apple Swift 6.2 language mode, macOS 27.2
+(Darwin 27.2.0). Router unit tests (19) and a headless probe only; the live app
+was not driven with a real wheel or trackpad (see Unverified).
+
+**Why.** The board's scroll monitor used to keep every wheel event unless the
+pointer was on the body of the focused, content-active card. A Markdown/MDX
+file card (and a generated view, which never calls `board.focus`) could only be
+scrolled by its scrollbar.
+
+**Rules, in order, decided once per gesture.**
+
+1. Space held or the Hand tool (`panOverridesCards`): the board pans.
+2. Pointer on the body of the content-active card: content gets the event, with
+   any modifier (terminal and web cards rely on it).
+3. ⌘ or ⌃ held: the board zooms. Zoom ignores an event whose
+   `scrollingDeltaY` is 0.
+4. An `NSScrollView` under the pointer can scroll on the dominant axis in the
+   delta's direction: content scrolls. Any of up to four enclosing scroll
+   views may qualify, so a horizontal scroller inside a vertical one works.
+5. Otherwise the board pans.
+
+**Numbers.**
+
+| Name | Value | Meaning |
+|---|---|---|
+| `CanvasScrollRouter.legacyLatch` | 0.25 s | A wheel without phases keeps its last route while ticks are less than this apart |
+| `CanvasScrollRouter.panStreak` | 0.3 s | A gesture that starts less than this after a board pan stays with the board. Applies to rule 4 only, so a card that slides under the pointer does not catch a run of pans |
+| `CanvasScrollExtent.endTolerance` | 0.5 pt | A scroll view counts as at its end within this distance |
+| Walk depth | 4 | Scroll views collected from the hit view outward |
+
+The dominant axis is vertical when `abs(deltaY) >= abs(deltaX)`. A zero delta
+at `.began` asks whether the view overflows on any axis.
+
+**Latch.** The route is decided at `.began` and kept through `.changed`,
+`.ended` and momentum, so a card that reaches its end mid-gesture does not hand
+the rest of that gesture to the board; the next gesture then goes to the board.
+`.mayBegin` clears the latch and passes through; `.cancelled` clears it. While
+the board owns a gesture, ⌘/⌃ and Space are read again on each event (pressing
+⌘ mid-pan zooms). A gesture that content owns ignores modifiers. The hit test
+runs only at decision points (`needsDecision`), not on every `.changed`.
+
+**Phase mapping (`CanvasScrollBridge.routerPhase`).** `mayBegin`, `began`,
+`cancelled`, `ended` map from `event.phase` in that order; `changed` or
+`stationary` map to `.changed`. When `phase` is empty and `momentumPhase` is
+not, the event is `.momentum`. When both are empty it is `.legacy`.
+
+**Probe facts (macOS 27.2).**
+
+- `scrollingDeltaX/Y` already include natural scrolling. A positive Y moves
+  toward the top of the document and a positive X toward the leading edge.
+  `canScroll` uses this convention; do not use `deltaY`.
+- `NSHostingView.hitTest` returns a view inside SwiftUI's `HostingScrollView`,
+  so `enclosingScrollView` gives the document and clip sizes. A point outside a
+  short scroll view's document hits no scroll view. The hit test honours
+  `scaleEffect`.
+- `NSClipView.isFlipped` follows its document. Measure the offset on
+  `clip.bounds` and add `contentInsets`, with the top as offset zero whether or
+  not the document is flipped (`CanvasScrollBridge.Host.extent(of:)`).
+- The walk stops at a scroll view that contains the board itself; that view is
+  not card content.
+- A SwiftTerm view is not an `NSScrollView`, so an inactive terminal still lets
+  the board pan.
+- When SwiftUI changes its scroll view class, rule 4 never matches and the board
+  pans as before: the safe fallback.
+
+**Expected side effect (not observed).** A wheel over any scrollable overlay
+under the board's monitor (for example the Find panel list) should now scroll
+that list, because rule 4 matches any `NSScrollView`.
+
+**Unverified.** The hit test into a SwiftUI `ScrollView` on the scaled board in
+the live app; content insets; hidden editor views under the board; momentum
+delivery; wheel pan speed. ⌘-scroll over a non-active card always zooms.
+
+**Verification.** `swift test --filter CanvasScrollRouterTests`. Manual: wheel
+and trackpad over a Markdown/MDX card without a click; at the card's end the
+next gesture pans the board; ⌘-scroll zooms; Space or Hand tool pans over a
+card; a terminal that is not active still lets the board pan.
 
 ## 2026-11-07: UX Round A — arrival, zoom floor, overview, drop grammar, landing, seeds
 

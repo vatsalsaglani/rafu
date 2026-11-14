@@ -97,3 +97,10 @@ no-automatic-command-execution, per-window ownership, and teardown rules:
 
 Saved layouts and restoration are governed only by ADR 0023. They are inert
 metadata and never restore a process.
+
+## Cross-reference (2026-11-15): explicit start on an Ensemble add
+
+[ADR 0025](0025-workspace-canvas-and-app-previews.md), Amendment 5: the user's
+add of a terminal card on an Ensemble board counts as the explicit start. The
+rule "explicit user start, no automatic command execution" is unchanged; no
+command is sent and no process is restored.

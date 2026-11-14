@@ -379,7 +379,10 @@ removed on detach. No synthetic input or cross-process event forwarding is used.
 SwiftUI board key handlers must return ignored while card content is active.
 Without this guard, the focusable ancestor consumes Space, Return, Delete, and
 arrow keys before the native terminal can use them. Background wheel handling
-also excludes the active card body. Header dragging and the corner resize handle
+also excludes the active card body. (Amended 2026-11-15: the wheel rule is now
+`CanvasScrollRouter`. The active card body is rule 2, and any scrollable view
+under the pointer in any card also scrolls its own content; see
+`canvas-interaction.md`, "Scroll routing".) Header dragging and the corner resize handle
 keep separate layout gestures.
 
 The native pass on macOS 27 / Swift 6.4 verified:
@@ -390,7 +393,8 @@ The native pass on macOS 27 / Swift 6.4 verified:
   Its input accepted "Inline app input works"; its button showed
   "Local interaction passed".
 - Add Card offers Terminal directly, and a second stopped terminal card can
-  be started without adding group chrome or replacing the board.
+  be started without adding group chrome or replacing the board. (Amended
+  2026-11-15: a user add now starts the shell itself; see ADR 0025 Amendment 5.)
 
 These are functional checks, not frame-time or sustained-input measurements.
 The full accessibility/performance and native capture matrix above remains open.

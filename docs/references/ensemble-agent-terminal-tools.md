@@ -7,7 +7,8 @@
   `Sources/RafuApp/Terminal/TerminalReplyWriter.swift`,
   `WorkspaceTerminalController.sendReply`
 - **Last verified:** Swift 6.2 language mode, macOS Darwin 27.0.0, on 2026-11-09;
-  section 2 amended 2026-11-12 (Apple Swift 6.4, unit tests only)
+  section 2 amended 2026-11-12 (Apple Swift 6.4, unit tests only); section 9
+  amended 2026-11-15 (Swift 6.2 language mode, macOS 27.2, unit tests only)
 
 ## Rule or observed behavior
 
@@ -165,6 +166,94 @@ and would see each other's writes.
 
 **Superseded 2026-11-12 (section 11):** the four-lease cap no longer exists.
 The text below records why stopped cards do not take a lease; that still holds.
+
+**Amended 2026-11-15 (ADR 0025 Amendment 5): the lease follows the card.**
+Verified on Apple Swift 6.2 language mode, macOS 27.2; unit tests and headless
+checks only, no device pass yet. Applies to `CanvasTerminalCard.swift`
+(`CanvasTerminalCardBlock`, `CanvasTerminalLeaseHolder`,
+`CanvasTerminalLiveRule`, `CanvasTerminalAddStart`, `startCanvasTerminalCard`,
+`revealTerminalGroupWhereItLives`), `CanvasBoardResources.swift` and
+`CanvasCardViews.swift`. Where the list below says a mounted card takes a lease
+only on certain events, or that `onDisappear` releases it, this block governs.
+
+Cause of the defect. The lease decides only which surface shows the one
+SwiftTerm view. `WorkspaceTerminalController.makeOrReuseView` keeps that view
+and its buffer while no card is mounted, so releasing the lease saved no memory.
+Six defects made a running terminal read "not attached":
+
+- D1: `onDisappear` released the lease on each cull or zoom-out, and the claim
+  ran only when can-present, active, or `sessionID` changed. A lease lost while
+  mounted was never reclaimed.
+- D2: ⌃`, Terminals panel Hide, and the palette hide of a card terminal called
+  `hideTerminalGroup`, which clears the owner while the card stays mounted.
+- D3: reveal ignored boards and opened an editor tab, and `isCanvasOwned` read
+  the lease, so a culled card read "Hidden".
+- D4: `sizedBody` in `CanvasCardViews.swift` has the card body in two `if`
+  branches. On a branch swap SwiftUI calls the new branch's `onAppear` before
+  the old branch's `onDisappear` (probe-verified, macOS 27), so the old
+  instance cleared the lease the new one had just taken.
+- D5: a focused terminal unmounted below 50 % zoom.
+- D6 (not confirmed): after a board reload `installCanvasResources` makes new
+  resources with no owner, and `WorkspaceCanvasView` keeps its identity, so
+  `present(owner:)` may not run again. Fix: the `.onChange(of: ObjectIdentifier(board))`
+  block also calls `canvasResources[board.id]?.present(owner:)`. Whether the
+  defect occurred in the app is unconfirmed.
+
+Rules now.
+
+- **No release on unmount.** The lease is released only on board hide or window
+  hide (`stopAll`), card removal, Transfer Here, group close, `hideTerminalGroup`,
+  `CanvasBoardResources.prune()` (`releaseCanvasTerminalLeasesWithoutCards`: the
+  board's owner entries whose group has no card), and undo of a move.
+- **Level-triggered claim.** `CanvasTerminalCardBlock.decide(isRunning:holder:boardCanPresent:)`
+  returns `.live`, `.claim`, `.heldElsewhere(holder)` or `.notRunning`. A running
+  terminal with a free lease is `.claim`: the card claims it in
+  `.onChange(of: block, initial: true)` and draws an empty terminal background
+  for that frame, with no button. This heals D2 and D4.
+- **Holders.** `CanvasTerminalLeaseHolder` is `none`, `thisBoard`, `otherBoard`
+  or `editorTab`. `editorTab` is reported only when no board owns the group and
+  its `.terminalGroup` tab is the selected tab of an editor group (Transfer Here
+  with the board visible in a second editor group must not take the lease back).
+- **Placeholder only when held elsewhere.** "Show Here" and the text "This
+  terminal is shown in an editor tab." or "This terminal is shown on another
+  Ensemble." appear only for `.editorTab` or `.otherBoard`. A board view that
+  cannot present shows "This terminal is shown in another view." with no
+  button.
+- **Focused terminal stays live.** `CanvasTerminalLiveRule.isLive`: scale >= 0.5,
+  or content-active and scale >= 0.25 (`CanvasCardShell.faceContent` and
+  `resizeOverlay`). Other card kinds keep 50 %.
+- **Reveal goes to the card.** `revealTerminalGroupWhereItLives` selects the
+  board that shows the group and focuses the card; if the group has its own
+  editor tab and no board holds the lease, it selects that tab; otherwise it
+  calls `revealTerminalGroup`, which move and undo flows still use. Callers:
+  Terminals panel, `revealTerminalSession`, the tab switcher. The Terminals
+  panel and the tab switcher label a group with a card on a presented board "On
+  an Ensemble" (`canvasCardTerminalGroupIDs`).
+- **A user add starts the shell.** `addCanvasTerminal` is add plus
+  `startCanvasTerminalCard`. Mode by `CanvasTerminalAddStart.mode`: foreground
+  when the board permits live content, the zoom face is live, and the board holds
+  the lease: the card takes focus and the pane starts with `startTerminalPane`.
+  Otherwise background: `board.select([cardID])` and
+  `startTerminalPane(_, background: true)`, with no view move. Nuance:
+  `startTerminalPane` without `background` reveals the group as an editor tab
+  unless `selectedTerminalGroupID == groupID`, so the foreground path checks
+  that first and falls back to background. Not used: `terminalStartRequest` (it is
+  not consumed while the card is unmounted and it blocks other cards) and
+  `CanvasTerminalStarter.start` (it moves the view).
+- **Test nuance.** A test that uses any user terminal add path must set
+  `spawnsHeadlessCanvasTerminals = false`. Tests that set `canvasTerminalOwners`
+  directly (`CanvasNodeInteractionTests`, `CanvasIntegrationTests`) still pass
+  unchanged.
+
+Unverified: keyboard focus at mount; readability of a focused terminal at
+25–50 %; ⌃` on a focused card terminal now seems to do nothing because the card
+reclaims the lease; ⌃` with nothing selected can still reveal a parked group as
+an editor tab; the Terminals panel may update late because `canvasResources` is
+not observed; undo of an add leaves a parked running shell; two cards for one
+group are both live (pre-existing).
+
+Tests: `CanvasTerminalAddStartTests`, `CanvasTerminalLeaseTests`. Run
+`swift test --filter "CanvasTerminalAddStartTests|CanvasTerminalLeaseTests"`.
 
 The ADR 0025 lease cap was four Ensemble terminals per window (ADR 0023). A
 mounted card used to take a lease whenever its board could present, also when

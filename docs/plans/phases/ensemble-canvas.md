@@ -718,3 +718,49 @@ sections 9 and 11; ADR 0024 Amendment 1; ADR 0023 and ADR 0025 notes.
 - **Open checks (manual, in Rafu Lightning):** an agent closes a running Claude
   terminal in Allow and in Ask; five or more live Ensemble terminals at once;
   relaunch with more than 20 terminal cards; Edit > Undo after an agent close.
+
+## Status (2026-11-15, a user add starts the shell; the lease follows the card; wheel scroll in cards)
+
+Three user-reported defects, fixed in commits `7a22232` (terminals) and `7ffab02`
+(scroll), merged by `d0e5499` and `27805d4`. Decision: ADR 0025 Amendment 5.
+Details: `docs/references/ensemble-agent-terminal-tools.md` section 9 and
+`docs/references/canvas-interaction.md` "Scroll routing".
+
+- **A user add starts the shell.** Add menu, `T`, seed, ⌃⌥1–9, palette, chosen
+  shell, Connect to new terminal, Duplicate and Start Terminal Here call
+  `addCanvasTerminal` or `startCanvasTerminalCard`. Foreground (board shown, zoom
+  at least 50 %, board is the selected tab of the focused editor group): claim
+  the lease and focus. Otherwise a background start: select, no view move, no
+  editor tab. Duplicate and Connect start after the final rect and edge.
+- **The lease follows the card.** No release in `onDisappear`; a mounted card
+  claims a free lease at once. Placeholder "Show Here" only for an editor tab or
+  another Ensemble. A focused terminal stays live down to 25 % zoom. Reveal goes
+  to the card (`revealTerminalGroupWhereItLives`). The Terminals panel and tab
+  switcher show "On an Ensemble". A board reload re-presents its resources.
+- **Wheel and trackpad scroll reaches card content.** `CanvasScrollRouter`
+  (`Canvas/Domain/CanvasScrollRouting.swift`) replaces `capturesScroll`.
+  `.scrollDisabled` is gone from `CanvasMarkdownFileCard`.
+- **Tests.** `CanvasTerminalAddStartTests`, `CanvasTerminalLeaseTests`,
+  `CanvasScrollRouterTests`. Parallel runs in the worktrees: units 1+2, 443 + 3586
+  passed; unit 3, 3582 passed (19 router tests added). On `main`: parallel and
+  serial suites pass on main: 443 + 3605 tests in each mode.
+- **Test nuance.** A test that uses any user terminal add path
+  (`addCanvasTerminal`, Duplicate, Start Terminal Here, Connect) must set
+  `spawnsHeadlessCanvasTerminals = false`, or it starts a real shell.
+- **Open checks (manual, in Rafu Lightning; the user's device check is pending):**
+  add a terminal at 100 % and see a shell with keyboard focus and no click;
+  add at 40 % zoom and see the shell start without a view move; zoom out and in,
+  scroll a terminal off screen and back, and resize a card, with no placeholder;
+  Transfer Here shows "Show Here" and the button moves the view back; scroll a
+  Markdown or MDX card with the wheel and the trackpad without a click, and
+  see the board pan once the card reaches its end on the next gesture; ⌘-scroll
+  zooms over a card; Space or Hand tool pans over a card; wheel pan speed.
+- **Unverified (code-read or headless only):** keyboard focus at mount;
+  readability of a focused terminal at 25–50 %; ⌃` on a focused card terminal
+  seems to do nothing now (the card reclaims the lease); ⌃` with nothing selected
+  can still reveal a parked group as an editor tab; the Terminals panel may update
+  late (`canvasResources` is not observed); undo of an add leaves a parked running
+  shell; two cards for one group are both live (older behaviour); the board
+  reload re-present (D6) was not confirmed in the app; the hit test into a
+  SwiftUI `ScrollView` on the scaled board, content insets, hidden editor views
+  under the board, momentum delivery, and wheel pan speed in the live app.
