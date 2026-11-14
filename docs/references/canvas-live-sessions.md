@@ -1035,3 +1035,26 @@ typed, and the edge reaches Live without a click. Send a second message at
 once: the result says Held and the message arrives after Codex connects, the
 edge never shows Failed. Repeat Codex to Claude, Claude to Claude, and with the
 window minimized.
+
+## 2026-11-14: NUL gaps — the real reason Allow still waited
+
+Applies to: `CanvasChannelPrompt.matches`, `RafuTerminalView.recentOutputLines`.
+Verified with Claude Code 2.1.323, SwiftTerm as pinned, macOS 27.
+
+- Observation: the `ChannelPrompt` log said "watch started: agent control allow,
+  setting on", then after 60 s "window elapsed, dialog never matched", while
+  the dialog was on screen.
+- Cause: Claude Code draws the dialog with cursor moves between words
+  (`ESC[12G`), not spaces. The skipped cells are never written, and SwiftTerm's
+  `translateToString` returns `"\0"` for them (`CharData.getCharacter`). The row
+  read `❯\0 1.\0\0I\0am…`; `\0` is not whitespace, so the option row never
+  equalled `❯ 1. I am using this for local development`. Unit fixtures used real
+  spaces, so every test passed.
+- Rule: any code that compares terminal rows as text must treat NUL as a space.
+  The matcher does (`cleaned`), and `recentOutputLines` maps NUL to a space for
+  every caller (the confirmer and Voice's `ensemble_describe`).
+- Evidence: a pty capture of `claude --dangerously-load-development-channels=server:rafu`
+  at 100 columns; regression test
+  `CanvasChannelPromptTests.cursorPositionedDialogWithNulGapsMatches`.
+- Verify: `swift test --filter CanvasChannelPromptTests`; live: Allow board,
+  start Claude, the dialog answers itself and the log says "confirmed".

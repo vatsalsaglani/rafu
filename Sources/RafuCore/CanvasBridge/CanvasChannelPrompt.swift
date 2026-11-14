@@ -56,7 +56,7 @@ public nonisolated enum CanvasChannelPrompt {
     /// the option line must start their row, so output that merely quotes them
     /// does not match. Any code fence in view means the text is a quotation.
     public static func matches(_ lines: [String]) -> Bool {
-        let rows = lines.map { $0.trimmingCharacters(in: .whitespaces) }
+        let rows = lines.map(cleaned)
         guard !hasFence(rows) else { return false }
         let flat = rows.joined().filter { !$0.isWhitespace }
         guard flat.contains(title), flat.contains(flag) else { return false }
@@ -73,10 +73,19 @@ public nonisolated enum CanvasChannelPrompt {
     /// True when `lines` show Claude Code's folder-trust dialog. The watch uses
     /// this only to keep waiting while the user answers it; Rafu never answers it.
     public static func isFolderTrust(_ lines: [String]) -> Bool {
-        let rows = lines.map { $0.trimmingCharacters(in: .whitespaces) }
+        let rows = lines.map(cleaned)
         guard !hasFence(rows) else { return false }
         let flat = rows.joined().filter { !$0.isWhitespace }
         return flat.contains(trustTitle) && flat.contains(trustOption)
+    }
+
+    /// A terminal cell that was never written reads as NUL (`"\0"`), not a
+    /// space. Claude Code 2.1.323 moves the cursor between words (`ESC[nG`)
+    /// instead of printing spaces, so every gap in its dialog is NUL cells.
+    /// They count as spaces here; the row is then trimmed.
+    private static func cleaned(_ line: String) -> String {
+        String(line.map { $0 == "\u{0}" ? " " : $0 })
+            .trimmingCharacters(in: .whitespaces)
     }
 
     private static func hasFence(_ rows: [String]) -> Bool {

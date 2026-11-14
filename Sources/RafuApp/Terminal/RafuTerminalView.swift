@@ -201,9 +201,11 @@ final class RafuTerminalView: LocalProcessTerminalView {
         var lines: [String] = []
         for row in 0...topRow {
             guard let line = terminal.getLine(row: row) else { continue }
-            lines.append(
-                line.translateToString(
-                    trimRight: true, characterProvider: terminal.getCharacter(for:)))
+            // A cell that was never written reads as NUL. Programs that move the
+            // cursor between words (Claude Code's dialogs) leave only NUL gaps.
+            let text = line.translateToString(
+                trimRight: true, characterProvider: terminal.getCharacter(for:))
+            lines.append(String(text.map { $0 == "\u{0}" ? " " : $0 }))
         }
         return Array(lines.suffix(max(0, maxLines)))
     }

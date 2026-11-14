@@ -64,6 +64,49 @@ struct CanvasChannelPromptTests {
         #expect(CanvasChannelPrompt.matches(Self.dialog()))
     }
 
+    /// Claude Code 2.1.323 positions each word with `ESC[nG`, so the cells
+    /// between words are never written and the terminal reads them as NUL.
+    /// Rows rebuilt from a pty capture of the real dialog at 100 columns.
+    @Test func cursorPositionedDialogWithNulGapsMatches() {
+        func cells(_ words: [(Int, String)]) -> String {
+            var row: [Character] = []
+            for (column, word) in words {
+                while row.count < column - 1 { row.append("\u{0}") }
+                row.append(contentsOf: word)
+            }
+            return String(row)
+        }
+        let rows = [
+            String(repeating: "─", count: 100),
+            cells([(3, "WARNING:"), (12, "Loading"), (20, "development"), (32, "channels")]),
+            "",
+            cells([
+                (3, "--dangerously-load-development-channels"), (43, "is"), (46, "for"),
+                (50, "local"), (56, "channel"), (64, "development"), (76, "only."),
+            ]),
+            "",
+            cells([(3, "Channels:"), (13, "server:rafu")]),
+            "",
+            cells([
+                (3, "❯"), (5, "1."), (8, "I"), (10, "am"), (13, "using"), (19, "this"),
+                (24, "for"), (28, "local"), (34, "development"),
+            ]),
+            cells([(5, "2."), (8, "Exit")]),
+            "",
+            cells([
+                (3, "Enter"), (9, "to"), (12, "confirm"), (20, "·"), (22, "Esc"), (26, "to"),
+                (29, "cancel"),
+            ]),
+            "", "", "",
+        ]
+        #expect(rows[7].contains("\u{0}"))
+        #expect(CanvasChannelPrompt.matches(rows))
+        let otherChannel = rows.map {
+            $0.replacingOccurrences(of: "server:rafu", with: "server:evil")
+        }
+        #expect(!CanvasChannelPrompt.matches(otherChannel))
+    }
+
     @Test func spacingVariantsMatch() {
         var rows = Self.dialog().map { "  " + $0 + "   " }
         #expect(CanvasChannelPrompt.matches(rows))
