@@ -37,10 +37,6 @@ struct CanvasMarkdownFileCard: View {
         let revision: Int?
     }
 
-    private var isContentActive: Bool {
-        board.contentIsActive && board.focusedCardID == card.id
-    }
-
     private var loadKey: LoadKey {
         LoadKey(path: path, revision: session.openDocument(forCanvasPath: path)?.revision)
     }
@@ -78,9 +74,9 @@ struct CanvasMarkdownFileCard: View {
             .padding(.horizontal, 12).padding(.vertical, 10)
             .textSelection(.enabled)
         }
-        // The board already keeps wheel events while the card is not active
-        // (`capturesScroll`); this also stops drag and key scrolling.
-        .scrollDisabled(!isContentActive)
+        // Not `.scrollDisabled` until active: a hovered card scrolls with the
+        // wheel or trackpad. The board's monitor (`CanvasScrollRouter`) passes
+        // the event on only while this view can still scroll that way.
         .background(theme.palette.editorBackground)
         .environment(
             \.openURL,

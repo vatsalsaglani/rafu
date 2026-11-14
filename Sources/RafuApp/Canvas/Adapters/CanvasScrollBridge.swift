@@ -26,11 +26,15 @@ struct CanvasBoardDropTarget {
 /// SwiftUI has no desktop wheel event with scoped modifier/delta access.
 /// The view never takes a mouse event (`hitTest` is nil): clicks and drags go
 /// to the SwiftUI board, which is the only owner of pan and marquee. Scroll
-/// and zoom come from a local event monitor; file drops from the drag
-/// destination methods.
+/// and zoom come from a local event monitor, routed by `CanvasScrollRouter`;
+/// file drops from the drag destination methods.
 struct CanvasScrollBridge: NSViewRepresentable {
     let isEnabled: Bool
-    var capturesScroll: (CGPoint) -> Bool = { _ in true }
+    /// Whether a point (bridge's top-left space) is on the body of the
+    /// focused, content-active card. That card's body gets every scroll.
+    var overActiveCardBody: (CGPoint) -> Bool = { _ in false }
+    /// Space held or the Hand tool: the board pans over everything.
+    var panOverridesCards: () -> Bool = { false }
     let pan: (Double, Double) -> Void
     /// Zoom factor and the pointer position in the bridge's top-left space.
     let zoom: (Double, CGPoint) -> Void
@@ -46,7 +50,8 @@ struct CanvasScrollBridge: NSViewRepresentable {
     func updateNSView(_ view: Host, context: Context) { configure(view) }
     private func configure(_ view: Host) {
         view.isEnabled = isEnabled
-        view.capturesScroll = capturesScroll
+        view.overActiveCardBody = overActiveCardBody
+        view.panOverridesCards = panOverridesCards
         view.pan = pan
         view.zoom = zoom
         view.onHidden = hidden
@@ -57,12 +62,14 @@ struct CanvasScrollBridge: NSViewRepresentable {
 
     final class Host: NSView {
         var isEnabled = true
-        var capturesScroll: (CGPoint) -> Bool = { _ in true }
+        var overActiveCardBody: (CGPoint) -> Bool = { _ in false }
+        var panOverridesCards: () -> Bool = { false }
         var pan: ((Double, Double) -> Void)?
         var zoom: ((Double, CGPoint) -> Void)?
         var onHidden: (() -> Void)?
         var onVisible: (() -> Void)?
         private var monitor: Any?
+        private var scrollRouter = CanvasScrollRouter()
         private var visibility: NSObjectProtocol?
         private var lockObserver: NSObjectProtocol?
         private var unlockObserver: NSObjectProtocol?
@@ -241,16 +248,7 @@ struct CanvasScrollBridge: NSViewRepresentable {
                 else { return event }
                 let local = convert(event.locationInWindow, from: nil)
                 let point = CGPoint(x: local.x, y: bounds.height - local.y)
-                guard capturesScroll(point) else {
-                    return event
-                }
-                if event.modifierFlags.contains(.control) || event.modifierFlags.contains(.command)
-                {
-                    zoom?(event.scrollingDeltaY > 0 ? 1.05 : 1 / 1.05, point)
-                } else {
-                    pan?(event.scrollingDeltaX, event.scrollingDeltaY)
-                }
-                return nil
+                return handleScroll(event, at: point, in: window)
             }
             visibility = NotificationCenter.default.addObserver(
                 forName: NSWindow.didChangeOcclusionStateNotification, object: window, queue: .main
@@ -277,6 +275,96 @@ struct CanvasScrollBridge: NSViewRepresentable {
                 guard let self, let window = self.window else { return }
                 if window.occlusionState.contains(.visible) { onVisible?() } else { onHidden?() }
             }
+        }
+
+        /// Routes one scroll event. Returns the event to pass it on to the
+        /// view under the pointer, or nil when the board consumed it.
+        private func handleScroll(_ event: NSEvent, at point: CGPoint, in window: NSWindow)
+            -> NSEvent?
+        {
+            let phase = Self.routerPhase(event)
+            let decides = scrollRouter.needsDecision(phase, at: event.timestamp)
+            let input = CanvasScrollRouter.Input(
+                phase: phase, timestamp: event.timestamp,
+                deltaX: event.scrollingDeltaX, deltaY: event.scrollingDeltaY,
+                zoomModifier: event.modifierFlags.contains(.control)
+                    || event.modifierFlags.contains(.command),
+                panOverridesCards: panOverridesCards(),
+                // The hit test and card geometry are read only where the
+                // router decides (gesture start, a new wheel run).
+                overActiveCardBody: decides && overActiveCardBody(point),
+                extents: decides ? scrollExtents(under: event, in: window) : [])
+            switch scrollRouter.route(input) {
+            case .content:
+                return event
+            case .zoom:
+                if event.scrollingDeltaY != 0 {
+                    zoom?(event.scrollingDeltaY > 0 ? 1.05 : 1 / 1.05, point)
+                }
+            case .board:
+                pan?(event.scrollingDeltaX, event.scrollingDeltaY)
+            }
+            return nil
+        }
+
+        /// Maps AppKit's two phase fields to the router's one. Momentum
+        /// events carry `phase == []` and a non-empty `momentumPhase`; a
+        /// classic wheel has both empty.
+        static func routerPhase(_ event: NSEvent) -> CanvasScrollRouter.Phase {
+            routerPhase(phase: event.phase, momentumPhase: event.momentumPhase)
+        }
+
+        static func routerPhase(phase: NSEvent.Phase, momentumPhase: NSEvent.Phase)
+            -> CanvasScrollRouter.Phase
+        {
+            if phase.contains(.mayBegin) { return .mayBegin }
+            if phase.contains(.began) { return .began }
+            if phase.contains(.cancelled) { return .cancelled }
+            if phase.contains(.ended) { return .ended }
+            if phase.contains(.changed) || phase.contains(.stationary) { return .changed }
+            if !momentumPhase.isEmpty { return .momentum }
+            return .legacy
+        }
+
+        /// The scroll views under the pointer, innermost first, up to four
+        /// levels. Scroll views that contain the board itself are not card
+        /// content and stop the walk.
+        private func scrollExtents(under event: NSEvent, in window: NSWindow)
+            -> [CanvasScrollExtent]
+        {
+            guard let contentView = window.contentView else { return [] }
+            let location =
+                contentView.superview?.convert(event.locationInWindow, from: nil)
+                ?? event.locationInWindow
+            guard let hit = contentView.hitTest(location) else { return [] }
+            var extents: [CanvasScrollExtent] = []
+            var scrollView = hit as? NSScrollView ?? hit.enclosingScrollView
+            while let current = scrollView, extents.count < 4, !isDescendant(of: current) {
+                if let extent = Self.extent(of: current) { extents.append(extent) }
+                scrollView = current.enclosingScrollView
+            }
+            return extents
+        }
+
+        /// The extent of one scroll view, measured on its clip view (whose
+        /// bounds origin is the scroll position, insets included) so the top
+        /// of the document is offset zero whether or not it is flipped.
+        static func extent(of scrollView: NSScrollView) -> CanvasScrollExtent? {
+            guard let document = scrollView.documentView else { return nil }
+            let clip = scrollView.contentView
+            let insets = clip.contentInsets
+            let frame = document.frame
+            let visible = clip.bounds
+            let top =
+                clip.isFlipped
+                ? visible.minY - (frame.minY - insets.top)
+                : (frame.maxY + insets.top) - visible.maxY
+            return CanvasScrollExtent(
+                offset: CGPoint(x: visible.minX - (frame.minX - insets.left), y: top),
+                contentSize: CGSize(
+                    width: frame.width + insets.left + insets.right,
+                    height: frame.height + insets.top + insets.bottom),
+                visibleSize: visible.size)
         }
 
         func detach() {
