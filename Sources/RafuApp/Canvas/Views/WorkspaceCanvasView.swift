@@ -344,19 +344,20 @@ struct WorkspaceCanvasView: View {
             .background(
                 CanvasScrollBridge(
                     isEnabled: true,
-                    capturesScroll: { point in
+                    overActiveCardBody: { point in
                         guard board.contentIsActive, let card = board.focusedCard else {
-                            return true
+                            return false
                         }
                         // The body starts below the 32 pt header and its hairline.
                         let origin = project(CGPoint(x: card.rect.x, y: card.rect.y + 33))
-                        return !CGRect(
+                        return CGRect(
                             origin: origin,
                             size: CGSize(
                                 width: card.rect.width * board.viewport.scale,
                                 height: (card.rect.height - 33) * board.viewport.scale)
                         ).contains(point)
                     },
+                    panOverridesCards: { panOverridesCards },
                     pan: { dx, dy in
                         var viewport = board.viewport
                         viewport.x = min(100_000, max(-100_000, viewport.x - dx))
