@@ -82,7 +82,7 @@ private func onlyCard(_ presentation: WidgetRingsPresentation) throws -> WidgetP
         let data = try WidgetSnapshotStore.encode(original)
         let decoded = try #require(WidgetSnapshotStore.decodeSupported(data))
         #expect(decoded == original)
-        #expect(decoded.version == 2)
+        #expect(decoded.version == WidgetUsageSnapshot.currentVersion)
         #expect(decoded.resolvedDisplayMode == .remaining)
         #expect(decoded.resolvedPalette == .monochrome)
         #expect(decoded.inks?.dark.critical == "#FF000080")

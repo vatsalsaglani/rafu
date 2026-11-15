@@ -11,8 +11,13 @@ import Foundation
 /// Version 2 adds the ring palette's theme inks, each provider's data
 /// source, and a token summary for local estimates. Every v2 field is
 /// optional, so a v1 file still decodes (and renders with system inks).
+///
+/// Version 3 adds, on each provider's primary weekly window, the day split
+/// of the current limit window (`Window.daily`, `Window.windowStart`). The
+/// app derives it from its own sample log; the extension never reads that
+/// log. Both fields are optional, so v1 and v2 files still decode.
 public struct WidgetUsageSnapshot: Codable, Equatable, Sendable {
-    public static let currentVersion = 2
+    public static let currentVersion = 3
     /// Versions `WidgetSnapshotStore.read` accepts.
     public static let supportedVersions: ClosedRange<Int> = 1...currentVersion
 
@@ -97,12 +102,25 @@ public struct WidgetUsageSnapshot: Codable, Equatable, Sendable {
         public var usedPercent: Double
         public var resetsAt: Date?
         public var windowMinutes: Int?
+        /// v3: the start of the current limit window (`resetsAt` minus the
+        /// window length). Only on a provider's primary weekly window.
+        public var windowStart: Date?
+        /// v3: seven values, one for each 24-hour slice from `windowStart`:
+        /// the used percent of each past day, today's so far, and `nil` for
+        /// each day after the app's last observation. Only on a provider's
+        /// primary weekly window, and only when the app has a sample log.
+        public var daily: [Double?]?
 
-        public init(label: String, usedPercent: Double, resetsAt: Date?, windowMinutes: Int?) {
+        public init(
+            label: String, usedPercent: Double, resetsAt: Date?, windowMinutes: Int?,
+            windowStart: Date? = nil, daily: [Double?]? = nil
+        ) {
             self.label = label
             self.usedPercent = usedPercent
             self.resetsAt = resetsAt
             self.windowMinutes = windowMinutes
+            self.windowStart = windowStart
+            self.daily = daily
         }
     }
 
@@ -144,16 +162,23 @@ public struct WidgetUsageSnapshot: Codable, Equatable, Sendable {
     }
 
     /// Demo data for the widget gallery placeholder and for a first run.
+    /// Claude is on day 6 of 7 and Codex on day 4 of 7, each with a day
+    /// split that adds up to its weekly percent.
     public static func sample(now: Date) -> WidgetUsageSnapshot {
-        WidgetUsageSnapshot(
+        let claudeReset = now.addingTimeInterval(32 * 3600)
+        let codexReset = now.addingTimeInterval(82 * 3600)
+        let week: TimeInterval = 7 * 86_400
+        return WidgetUsageSnapshot(
             writtenAt: now, displayMode: "used", palette: "color", isSample: true,
             providers: [
                 Provider(
                     id: "claude", displayName: "Claude", observedAt: now, isStale: false,
                     windows: [
                         Window(
-                            label: "7d", usedPercent: 41,
-                            resetsAt: now.addingTimeInterval(32 * 3600), windowMinutes: 10_080),
+                            label: "7d", usedPercent: 41, resetsAt: claudeReset,
+                            windowMinutes: 10_080,
+                            windowStart: claudeReset.addingTimeInterval(-week),
+                            daily: [7, 9, 5, 8, 6, 6, nil]),
                         Window(
                             label: "Fable 7d", usedPercent: 24,
                             resetsAt: now.addingTimeInterval(32 * 3600), windowMinutes: 10_080),
@@ -165,8 +190,10 @@ public struct WidgetUsageSnapshot: Codable, Equatable, Sendable {
                     id: "codex", displayName: "Codex", observedAt: now, isStale: false,
                     windows: [
                         Window(
-                            label: "7d", usedPercent: 34,
-                            resetsAt: now.addingTimeInterval(82 * 3600), windowMinutes: 10_080),
+                            label: "7d", usedPercent: 34, resetsAt: codexReset,
+                            windowMinutes: 10_080,
+                            windowStart: codexReset.addingTimeInterval(-week),
+                            daily: [10, 9, 8, 7, nil, nil, nil]),
                         Window(
                             label: "5h", usedPercent: 8,
                             resetsAt: now.addingTimeInterval(2 * 3600), windowMinutes: 300),

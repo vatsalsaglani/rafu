@@ -9,6 +9,7 @@ import WidgetKit
 struct RafuWidgetsBundle: WidgetBundle {
     var body: some Widget {
         UsageRingsWidget()
+        UsageHundredWidget()
     }
 }
 
@@ -74,6 +75,25 @@ struct UsageRingsWidget: Widget {
         }
         .configurationDisplayName("Agent usage rings")
         .description("Weekly and session limits for your coding agents.")
+        .supportedFamilies([.systemSmall, .systemMedium])
+    }
+}
+
+/// One hundred dots are one weekly limit: used, today, projected by the
+/// reset, and spare. Same timeline as the Rings widget.
+struct UsageHundredWidget: Widget {
+    static let kind = "dev.vatsalsaglani.rafu.widgets.hundred"
+
+    var body: some WidgetConfiguration {
+        StaticConfiguration(kind: Self.kind, provider: UsageTimelineProvider()) { entry in
+            UsageHundredView(entry: entry)
+                .widgetURL(WidgetHostApp.usageURL)
+                .containerBackground(for: .widget) { Color(nsColor: .windowBackgroundColor) }
+        }
+        .configurationDisplayName("Agent usage dots")
+        .description(
+            "Your weekly limit as 100 dots: what you used, what you used today, and what your pace adds by the reset."
+        )
         .supportedFamilies([.systemSmall, .systemMedium])
     }
 }
