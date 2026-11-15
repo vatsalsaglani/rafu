@@ -157,35 +157,50 @@ func managerPresentationInputsStaySeparate() {
         contrast: .normal
     )
 
-    #expect(current.emphasis == .managerCurrent)
+    // Current is the selection fill; the amber border is attention only;
+    // the identity colour is the dot beside the name, not a border.
+    #expect(current.emphasis == .none)
     #expect(current.rowFill == .current)
     #expect(!current.showsIdentityAccent)
     #expect(attentionWithMatchingIdentity.emphasis == .managerAttention)
+    #expect(attentionWithMatchingIdentity.emphasisRole == .warning)
     #expect(attentionWithMatchingIdentity.rowFill == .none)
-    #expect(attentionWithMatchingIdentity.showsIdentityAccent)
+    #expect(!attentionWithMatchingIdentity.showsIdentityAccent)
     #expect(attentionWithMatchingIdentity.neutralWidth == 1)
-    #expect(attentionWithMatchingIdentity.identityWidth == 2)
-    #expect(attentionWithMatchingIdentity.identityInset == 1)
     #expect(attentionWithMatchingIdentity.emphasisWidth == 1)
     #expect(attentionWithMatchingIdentity.identityAndEmphasisDoNotOverlap)
 }
 
 @Suite("Terminal manager source contract")
 struct TerminalManagerSourceContractTests {
-    @Test("The panel uses one shared header, one Start Agent pull-down, and 48 point rows")
+    /// Sidebar redesign ("tuned rows"): Start Agent is a header button and an
+    /// empty-state button that open the same popover; rows are 40 pt two-line
+    /// rows with no card, the title tail-truncates, and the count is plain.
+    @Test("The panel uses the shared header, a Start Agent popover, and tuned 40 point rows")
     func compactTerminalManagerGeometry() throws {
         let panel = try Self.source("Sources/RafuApp/Views/WorkspaceTerminalsPanelView.swift")
 
         #expect(panel.contains("RafuUtilityPanelHeader("))
         #expect(panel.contains(#"title: "Terminals""#))
+        #expect(panel.contains("RafuPanelHeaderCount("))
+        #expect(panel.contains("TerminalNaming.terminalCountLabel(count)"))
         #expect(panel.contains("AgentStartMenuView("))
+        #expect(panel.contains("agentStartControl(style: .headerIcon)"))
+        #expect(panel.contains("agentStartControl(style: .emptyStateButton)"))
+        #expect(panel.contains(".popover(isPresented: $isPresented, arrowEdge: .bottom)"))
+        #expect(panel.contains(#"Label("Start Agent", systemImage: AgentSymbols.agentTerminal)"#))
         #expect(panel.contains(#"Text("Start Agent")"#))
         #expect(panel.contains("AgentLauncherModel.checkingLine(agentCount: rows.count)"))
         #expect(!panel.contains("LazyVGrid"))
-        #expect(panel.contains("Text(row.displayName)"))
-        #expect(panel.contains("LazyVStack(spacing: 6)"))
-        #expect(panel.contains("base: 48"))
+        #expect(panel.contains("Text(row.rowTitle)"))
+        #expect(panel.contains("LazyVStack(spacing: 2)"))
+        #expect(panel.contains("static let twoLineHeight: CGFloat = 40"))
+        #expect(!panel.contains("base: 48"))
+        #expect(!panel.contains("cardBackground"))
+        #expect(!panel.contains(".truncationMode(.middle)"))
+        #expect(!panel.contains("TerminalPaneChipFlow"))
         #expect(panel.contains("RafuPanelEmptyState("))
+        #expect(panel.contains("compact: true"))
     }
 
     @Test("The header is one split pull-down: plus starts a shell, the arrow lists shells")
@@ -229,9 +244,13 @@ struct TerminalManagerSourceContractTests {
         #expect(panel.contains(".menuIndicator(.hidden)"))
         #expect(panel.contains(".fixedSize()"))
         #expect(panel.contains(#"Image(systemName: "ellipsis")"#))
-        #expect(panel.contains(#".help("Actions for \(row.displayName)")"#))
-        #expect(panel.contains(#".help("Actions for \(row.name)")"#))
-        #expect(panel.contains(#".accessibilityLabel("Actions for \(row.name)")"#))
+        // One shared hover/focus ⋯ menu; its label is its tooltip and its
+        // accessibility label.
+        #expect(panel.contains("private struct TerminalRowActionsMenu"))
+        #expect(panel.contains(".help(label)"))
+        #expect(panel.contains(".accessibilityLabel(label)"))
+        #expect(panel.contains(#"label: "Actions for \(row.displayName)""#))
+        #expect(panel.contains(#"label: "Actions for \(row.name)""#))
         #expect(panel.contains("renamingPaneID == pane.id"))
         #expect(panel.contains("beginPaneRename(pane.id, pane.name)"))
         #expect(panel.contains("session.renameTerminalPane(paneID, to: paneRenameText)"))
@@ -279,7 +298,9 @@ struct TerminalManagerSourceContractTests {
         #expect(!panel.contains("session.terminal.selectedID"))
         #expect(panel.contains(".managerRow("))
         #expect(panel.contains("needsAttention: row.needsAttention"))
-        #expect(panel.contains("identityColor: identityColor"))
+        // The session colour is the 6 pt dot beside the name, not a border.
+        #expect(!panel.contains("identityColor:"))
+        #expect(panel.contains("TerminalColorDot(color: theme.palette.color(for: color))"))
         #expect(panel.contains(#"parts.append("Current terminal")"#))
         #expect(panel.contains(".isSelected"))
     }

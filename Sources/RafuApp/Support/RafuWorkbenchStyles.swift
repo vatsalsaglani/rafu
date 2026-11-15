@@ -701,7 +701,6 @@ nonisolated struct TerminalSurfaceBorderResolution: Equatable, Sendable {
     nonisolated enum Emphasis: Equatable, Sendable {
         case none
         case editorFocus
-        case managerCurrent
         case managerAttention
     }
 
@@ -789,25 +788,25 @@ nonisolated struct TerminalSurfaceBorderStyle {
                 rowFill: .none
             )
         case .managerRow(let isCurrent, let needsAttention):
-            let emphasis: TerminalSurfaceBorderResolution.Emphasis =
-                needsAttention ? .managerAttention : (isCurrent ? .managerCurrent : .none)
-            let emphasisWidth =
-                emphasis == .none ? 0 : RafuMetrics.terminalBorderWidth
+            // Terminals panel rows (sidebar redesign, "tuned rows"): a row has
+            // no border at rest. The current row is the `selection` fill (plus
+            // a `borderStrong` hairline under Increase Contrast, so selection
+            // does not rest on a low-contrast fill); the amber border means
+            // "needs attention" only, so current and attention no longer look
+            // alike. The session colour is the 6 pt dot beside the name, never
+            // a third border. `hasIdentity` is ignored here on purpose.
+            let showsNeutral = needsAttention || (isCurrent && contrast == .increased)
             return TerminalSurfaceBorderResolution(
-                neutralStructure: isCurrent || needsAttention || contrast == .increased
-                    ? .borderStrong
-                    : .borderSubtle,
-                neutralWidth: RafuMetrics.terminalBorderWidth,
-                showsIdentityAccent: hasIdentity,
-                identityWidth: hasIdentity ? RafuMetrics.focusedTerminalBorderWidth : 0,
-                identityInset: hasIdentity ? RafuMetrics.terminalBorderWidth : 0,
-                emphasis: emphasis,
-                emphasisRole: needsAttention ? .warning : (isCurrent ? .focusRing : .clear),
-                emphasisWidth: emphasisWidth,
+                neutralStructure: showsNeutral ? .borderStrong : .clear,
+                neutralWidth: showsNeutral ? RafuMetrics.terminalBorderWidth : 0,
+                showsIdentityAccent: false,
+                identityWidth: 0,
+                identityInset: 0,
+                emphasis: needsAttention ? .managerAttention : .none,
+                emphasisRole: needsAttention ? .warning : .clear,
+                emphasisWidth: needsAttention ? RafuMetrics.terminalBorderWidth : 0,
                 emphasisInset: 0,
-                drawOrder: hasIdentity
-                    ? [.neutralStructure, .emphasis, .identity]
-                    : [.neutralStructure, .emphasis],
+                drawOrder: [.neutralStructure, .emphasis],
                 rowFill: isCurrent ? .current : .none
             )
         }
@@ -1133,42 +1132,51 @@ struct RafuSidebarSectionHeader: View {
 
 /// Shared lower-emphasis panel state. It expands to the remaining panel body,
 /// so the concrete panel's primary header stays pinned at the top.
+///
+/// `compact` is the sidebar size (sidebar redesign): a 20 pt muted icon, a
+/// 13 pt semibold title and a 12 pt message at most 220 pt wide, for the
+/// navigator panels' 260 pt column. The regular size is for window-sized
+/// surfaces.
 struct RafuPanelEmptyState<Action: View>: View {
     let icon: String
     let title: String
     let message: String
+    let compact: Bool
     @ViewBuilder let action: Action
 
     @Environment(\.rafuTheme) private var theme
     @ScaledMetric(relativeTo: .title3) private var iconSize: CGFloat = 30
+    @ScaledMetric(relativeTo: .body) private var compactIconSize: CGFloat = 20
 
     init(
         icon: String,
         title: String,
         message: String,
+        compact: Bool = false,
         @ViewBuilder action: () -> Action
     ) {
         self.icon = icon
         self.title = title
         self.message = message
+        self.compact = compact
         self.action = action()
     }
 
     var body: some View {
-        VStack(spacing: RafuMetrics.space3) {
+        VStack(spacing: compact ? RafuMetrics.space2 : RafuMetrics.space3) {
             Image(systemName: icon)
-                .font(.system(size: iconSize, weight: .medium))
-                .foregroundStyle(theme.palette.textSecondary)
+                .font(.system(size: compact ? compactIconSize : iconSize, weight: .medium))
+                .foregroundStyle(compact ? theme.palette.textMuted : theme.palette.textSecondary)
                 .accessibilityHidden(true)
             Text(title)
-                .font(.title3.weight(.semibold))
+                .font(compact ? .system(size: 13, weight: .semibold) : .title3.weight(.semibold))
                 .foregroundStyle(theme.palette.textPrimary)
                 .multilineTextAlignment(.center)
             Text(message)
-                .font(.callout)
+                .font(compact ? .system(size: 12) : .callout)
                 .foregroundStyle(theme.palette.textSecondary)
                 .multilineTextAlignment(.center)
-                .frame(maxWidth: 280)
+                .frame(maxWidth: compact ? 220 : 280)
                 .fixedSize(horizontal: false, vertical: true)
             action
         }
@@ -1179,8 +1187,8 @@ struct RafuPanelEmptyState<Action: View>: View {
 }
 
 extension RafuPanelEmptyState where Action == EmptyView {
-    init(icon: String, title: String, message: String) {
-        self.init(icon: icon, title: title, message: message) {
+    init(icon: String, title: String, message: String, compact: Bool = false) {
+        self.init(icon: icon, title: title, message: message, compact: compact) {
             EmptyView()
         }
     }

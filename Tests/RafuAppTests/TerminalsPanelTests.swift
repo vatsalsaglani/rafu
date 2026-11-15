@@ -523,20 +523,22 @@ struct TerminalIdentityGlyphTests {
     func panelRowShowsIdentityAndKeepsStatusText() throws {
         let panel = try Self.source("Sources/RafuApp/Views/WorkspaceTerminalsPanelView.swift")
 
-        // Identity in the well, terminal glyph only as the login-shell fallback.
+        // Identity in the 16 pt slot, terminal glyph only as the login-shell
+        // fallback.
         #expect(panel.contains("if let provider = row.resolvedAgentProvider {"))
-        #expect(panel.contains("AgentIconView(cli: provider, size: 16)"))
+        #expect(panel.contains("AgentIconView(cli: provider, size: 14)"))
         #expect(panel.contains(#"Image(systemName: "terminal")"#))
-        // Status survives as a WORD in the caption — the carrier that replaced
-        // the glyph. Losing this line is the regression worth failing on.
+        // Sidebar redesign: the trailing 16 pt slot carries a shape-distinct
+        // status glyph in every state, and every ABNORMAL state also leads
+        // the caption as a WORD (attention, exit). Losing either carrier is
+        // the regression worth failing on.
         #expect(panel.contains("TerminalNaming.subtitle(["))
-        #expect(panel.contains("TerminalSessionPresentation.label(row.status),"))
+        #expect(panel.contains("TerminalNaming.abnormalSessionStatusWord(row.status)"))
         #expect(panel.contains("row.shellName, row.directoryLabel,"))
-        // The status glyph now sits beside status text in the caption, not in
-        // the identity well. This shape+text pair keeps attention and exit
-        // legible without hue.
         #expect(
             panel.contains("Image(systemName: TerminalSessionPresentation.symbol(row.status))"))
+        // The accessibility value still speaks the status in every state.
+        #expect(panel.contains("TerminalSessionPresentation.label(row.status),"))
         // And the mark must not ALSO sit beside the name — one row, one mark.
         #expect(!panel.contains("ConductorCLIIcons.icon(for: provider), size: 14"))
     }

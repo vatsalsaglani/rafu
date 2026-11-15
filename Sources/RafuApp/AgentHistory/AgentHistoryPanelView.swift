@@ -74,7 +74,8 @@ private struct AgentHistoryPanelContent: View {
                 title: "No Matching Sessions",
                 message: state.query.isEmpty
                     ? "No sessions for this agent."
-                    : "No session title, folder, or branch matches."
+                    : "No session title, folder, or branch matches.",
+                compact: true
             ) {
                 if !state.query.isEmpty, state.messageMatchesQuery == nil {
                     Button("Search Message Text", action: searchMessages)
@@ -96,7 +97,8 @@ private struct AgentHistoryPanelContent: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .failed(let message):
             RafuPanelEmptyState(
-                icon: "exclamationmark.triangle", title: "History Unavailable", message: message
+                icon: "exclamationmark.triangle", title: "History Unavailable", message: message,
+                compact: true
             ) {
                 Button("Try Again") { store.refresh() }
                     .buttonStyle(RafuSecondaryButtonStyle(compact: true))
@@ -107,7 +109,8 @@ private struct AgentHistoryPanelContent: View {
                 title: "No Agent History",
                 message: store.showsClaudeCode || store.showsCodex
                     ? "Claude Code and Codex sessions on this Mac appear here."
-                    : "Turn on Claude Code or Codex history in Settings > Agents."
+                    : "Turn on Claude Code or Codex history in Settings > Agents.",
+                compact: true
             )
         }
     }

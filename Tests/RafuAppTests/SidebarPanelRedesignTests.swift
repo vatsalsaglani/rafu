@@ -81,6 +81,31 @@ struct SidebarPanelRedesignTests {
         #expect(source.contains(".padding(.horizontal, RafuMetrics.sidebarTextInset)"))
     }
 
+    @Test("Terminals: no launcher card or divider, rows keep the drag source, one pinned footer")
+    func terminalsPanel() throws {
+        let panel = try Self.source("Sources/RafuApp/Views/WorkspaceTerminalsPanelView.swift")
+        let body = try Self.section(
+            of: panel, from: "struct WorkspaceTerminalsPanelView: View",
+            to: "/// Pending rows until the probe resolves")
+        #expect(!body.contains("Divider()"))
+        #expect(!body.contains("AgentStartMenuView("))
+        // The group row stays the Ensemble drag source.
+        #expect(panel.contains(".onDrag("))
+        #expect(panel.contains("CanvasBoardDragPayload(terminalGroupID: row.id)"))
+        // Grip and ⋯ are overlays, not reserved width.
+        #expect(panel.contains(".overlay(alignment: .trailing)"))
+        #expect(panel.contains(".overlay(alignment: .leading)"))
+        // Inline rename stays on every row type.
+        #expect(panel.contains("TextField(\"Group name\""))
+        #expect(panel.contains("TextField(\"Pane name\""))
+        #expect(panel.contains("TextField(\"Name\""))
+        // The Saved footer keeps its one hairline and collapses when empty.
+        let saved = try Self.source("Sources/RafuApp/Views/TerminalGroupSavedLayoutsSection.swift")
+        #expect(saved.contains("Divider().overlay(theme.palette.borderSubtle)"))
+        #expect(saved.contains("TerminalGroupSavedLayoutsPresentation.isExpanded("))
+        #expect(saved.contains("@SceneStorage("))
+    }
+
     @Test("Section headers are Title Case with a plain count")
     func sectionHeaderStyle() throws {
         let styles = try Self.source("Sources/RafuApp/Support/RafuWorkbenchStyles.swift")

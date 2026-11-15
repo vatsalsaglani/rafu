@@ -23,6 +23,10 @@ nonisolated struct TerminalSessionRow: Identifiable, Equatable, Sendable {
     /// Vendor identity for a tokenless Agent Terminal. `nil` for login
     /// shells and Ensemble run terminals.
     var agentProvider: ConductorCLIID? = nil
+    /// The Terminals panel title with a duplicate ordinal ("Claude Code 2"),
+    /// set by `TerminalsPanelModel.hierarchyRows`; `nil` elsewhere, where
+    /// `presentedTitle` is the title.
+    var panelTitle: String? = nil
     /// The controller's full agent resolution (hook, foreground process,
     /// sticky title) when `isAgentIdentityResolved`; see
     /// `resolvedAgentProvider`.
@@ -376,9 +380,24 @@ nonisolated enum TerminalsPanelModel {
         var automaticName: String? = nil
         /// Colour tag of the focused pane, shown as a 6 pt dot.
         var sessionColor: TerminalSessionColor? = nil
+        /// The row title (`TerminalNaming.panelTitle`, with a duplicate
+        /// ordinal). Empty for a hand-built row, which falls back to
+        /// `displayName`.
+        var title: String = ""
+        /// Whether the title is a name the user typed (group or pane).
+        var isUserNamed: Bool = false
+        /// "Claude Code · rafu", "4 panes · rafu" (`TerminalNaming.panelContext`).
+        var context: String = ""
+        /// The focused pane's agent or shell name.
+        var providerOrShell: String = ""
+        /// The focused pane folder's full path, for the row's tooltip.
+        var fullPath: String? = nil
 
-        /// What the panel shows. `name` stays the stored value.
+        /// The stored or automatic name; the rename field starts from it.
         var displayName: String { automaticName ?? name }
+
+        /// What the row's first line shows.
+        var rowTitle: String { title.isEmpty ? displayName : title }
 
         var summary: String {
             TerminalNaming.groupSummary(
@@ -407,6 +426,17 @@ nonisolated enum TerminalsPanelModel {
         let providerOrShell: String
         let canStart: Bool
         let canRestart: Bool
+        /// Position in the group, from 1, in the group's pane order.
+        var ordinal: Int = 1
+        /// The pane row's short name (`TerminalNaming.paneRowTitle`). Empty
+        /// for a hand-built row, which falls back to `name`.
+        var title: String = ""
+        /// The pane's folder name when it differs from its group's.
+        var folderIfDifferent: String? = nil
+        /// The pane folder's full path, for the tooltip.
+        var fullPath: String? = nil
+
+        var rowTitle: String { title.isEmpty ? name : title }
 
         /// "Shell · Stopped", with no empty or "." parts.
         var subtitle: String {
@@ -435,10 +465,22 @@ nonisolated enum TerminalsPanelModel {
         let controllerByID = Dictionary(uniqueKeysWithValues: controllers.map { ($0.id, $0) })
         let groupedSessionIDs = Set(groups.flatMap(\.panes).compactMap(\.sessionID))
         let groupedRows = groups.flatMap { group in
-            let panes = group.panes.map { pane in
+            let focusedIndex = group.panes.firstIndex { $0.id == group.focusedPaneID } ?? 0
+            let groupFolder: String? =
+                group.panes.indices.contains(focusedIndex)
+                ? paneFolderName(
+                    group.panes[focusedIndex],
+                    controller: group.panes[focusedIndex].sessionID.flatMap {
+                        controllerByID[$0]
+                    },
+                    workspaceRoot: workspaceRoot)
+                : nil
+            let panes = group.panes.enumerated().map { index, pane in
                 let controller = pane.sessionID.flatMap { controllerByID[$0] }
                 let providerOrShell = paneProviderOrShell(pane, controller: controller)
-                return TerminalPaneRow(
+                let folder = paneFolderName(
+                    pane, controller: controller, workspaceRoot: workspaceRoot)
+                var row = TerminalPaneRow(
                     id: pane.id,
                     groupID: group.id,
                     name: paneDisplayName(
@@ -464,8 +506,18 @@ nonisolated enum TerminalsPanelModel {
                         && pane.runtimeKind == .ordinaryShell
                         && pane.startAvailability == .available
                         && pane.launchProfile != nil)
+                row.ordinal = index + 1
+                row.title = TerminalNaming.paneRowTitle(
+                    userName: pane.explicitUserName?.rawValue,
+                    reportedTitle: controller?.reportedTitle ?? pane.reportedTitle?.rawValue,
+                    providerOrShell: providerOrShell,
+                    shellName: controller?.shellDisplayName,
+                    provider: controller?.resolvedAgentProvider)
+                row.folderIfDifferent = folder != groupFolder ? folder : nil
+                row.fullPath = paneFullPath(
+                    pane, controller: controller, workspaceRoot: workspaceRoot)
+                return row
             }
-            let focusedIndex = group.panes.firstIndex { $0.id == group.focusedPaneID } ?? 0
             let storedName = group.name.rawValue
             var automaticName: String?
             if TerminalNaming.isAutomaticGroupName(storedName),
@@ -481,7 +533,21 @@ nonisolated enum TerminalsPanelModel {
             let groupColor =
                 panes.first { $0.isFocused && $0.sessionColor != nil }?.sessionColor
                 ?? panes.compactMap(\.sessionColor).first
-            let groupRow = TerminalGroupRow(
+            let focusedPane =
+                group.panes.indices.contains(focusedIndex)
+                ? group.panes[focusedIndex] : nil
+            let focusedController = focusedPane?.sessionID.flatMap { controllerByID[$0] }
+            let focusedProviderOrShell =
+                focusedPane.map {
+                    paneProviderOrShell($0, controller: focusedController)
+                } ?? "Shell"
+            let paneUserName = focusedPane?.explicitUserName?.rawValue
+            let title = TerminalNaming.panelTitle(
+                storedGroupName: storedName,
+                paneUserName: paneUserName,
+                agentTitle: agentTitle(focusedController),
+                providerOrShell: focusedProviderOrShell)
+            var groupRow = TerminalGroupRow(
                 id: group.id,
                 name: storedName,
                 paneCount: panes.count,
@@ -499,6 +565,17 @@ nonisolated enum TerminalsPanelModel {
                 isCanvasOwned: canvasOwnedGroupIDs.contains(group.id),
                 automaticName: automaticName,
                 sessionColor: groupColor)
+            groupRow.title = title
+            groupRow.isUserNamed =
+                !TerminalNaming.isAutomaticGroupName(storedName)
+                || !(paneUserName?.trimmingCharacters(in: .whitespaces).isEmpty ?? true)
+            groupRow.providerOrShell = focusedProviderOrShell
+            groupRow.context = TerminalNaming.panelContext(
+                title: title, providerOrShell: focusedProviderOrShell, folder: groupFolder,
+                paneCount: panes.count)
+            groupRow.fullPath = focusedPane.flatMap {
+                paneFullPath($0, controller: focusedController, workspaceRoot: workspaceRoot)
+            }
             return [.group(groupRow)] + panes.map(HierarchyRow.pane)
         }
         let legacyRows = rows(
@@ -507,7 +584,72 @@ nonisolated enum TerminalsPanelModel {
         ).map { row in
             HierarchyRow.legacy(row, isCurrent: currentLegacySessionID == row.id)
         }
-        return groupedRows + legacyRows
+        return disambiguated(groupedRows + legacyRows)
+    }
+
+    /// Gives the second and later look-alike manager rows an ordinal
+    /// ("Claude Code 2"), in creation order, across groups and legacy rows.
+    private static func disambiguated(_ rows: [HierarchyRow]) -> [HierarchyRow] {
+        let managerIndices = rows.indices.filter { rows[$0].isManagerItem }
+        let keys: [(title: String, context: String, isUserNamed: Bool)] = managerIndices.map {
+            switch rows[$0] {
+            case .group(let group): (group.rowTitle, group.context, group.isUserNamed)
+            case .legacy(let legacy, _):
+                (
+                    legacy.presentedTitle,
+                    TerminalNaming.subtitle([legacy.shellName, legacy.directoryLabel]),
+                    legacy.hasUserName
+                )
+            case .pane: ("", "", true)
+            }
+        }
+        let titles = TerminalNaming.disambiguatedTitles(keys)
+        var result = rows
+        for (offset, index) in managerIndices.enumerated() {
+            switch result[index] {
+            case .group(var group):
+                group.title = titles[offset]
+                result[index] = .group(group)
+            case .legacy(var legacy, let isCurrent):
+                legacy.panelTitle = titles[offset]
+                result[index] = .legacy(legacy, isCurrent: isCurrent)
+            case .pane:
+                break
+            }
+        }
+        return result
+    }
+
+    /// The agent's session title for a live agent pane, as on the editor tab
+    /// (`TerminalSessionPresentation.agentTitle`): a meaningful reported
+    /// title, else the agent's name. `nil` when no agent runs.
+    @MainActor
+    private static func agentTitle(_ controller: WorkspaceTerminalController?) -> String? {
+        guard let controller, controller.hasLiveProcess,
+            let provider = controller.resolvedAgentProvider
+        else { return nil }
+        return TerminalSessionPresentation.agentTitle(
+            reportedTitle: controller.reportedTitle, provider: provider,
+            shellName: controller.shellDisplayName)
+    }
+
+    /// The pane folder's absolute path for a tooltip: the live directory,
+    /// else the launch folder resolved against the workspace root.
+    @MainActor
+    private static func paneFullPath(
+        _ pane: TerminalPaneSnapshot,
+        controller: WorkspaceTerminalController?,
+        workspaceRoot: String?
+    ) -> String? {
+        if let live = controller?.currentDirectoryPath ?? controller?.startingDirectory {
+            return live
+        }
+        guard let raw = pane.launchProfile?.startingFolder.rawValue, !raw.isEmpty else {
+            return workspaceRoot
+        }
+        if raw.hasPrefix("/") { return raw }
+        guard let workspaceRoot else { return raw }
+        return raw == "." ? workspaceRoot : (workspaceRoot as NSString).appendingPathComponent(raw)
     }
 
     /// A pane's user name wins, then a shell-reported title (unless it is only

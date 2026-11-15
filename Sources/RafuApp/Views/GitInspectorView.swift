@@ -42,7 +42,8 @@ struct SourceControlPanelView: View {
                 RafuPanelEmptyState(
                     icon: "arrow.triangle.branch",
                     title: "No Git Repository",
-                    message: "Initialize Git in this workspace to use Source Control."
+                    message: "Initialize Git in this workspace to use Source Control.",
+                    compact: true
                 ) {
                     // Explicit user action — Rafu never initializes a
                     // repository on its own (AGENTS: Git stays explicit).
@@ -433,7 +434,8 @@ struct GitInspectorView: View {
                 RafuPanelEmptyState(
                     icon: "checkmark.circle",
                     title: "No Changes",
-                    message: "Your working tree is clean."
+                    message: "Your working tree is clean.",
+                    compact: true
                 )
             } else {
                 List(selection: $session.gitSelectedChangeIDs) {

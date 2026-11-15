@@ -176,8 +176,11 @@ struct EnsembleBarRedesignTests {
         #expect(!panel.contains("chevron.right"))
         #expect(!panel.contains("expandedGroupIDs"))
         #expect(!panel.contains("TerminalGroupPaneRowView"))
-        #expect(panel.contains("AgentStatusPill("))
-        #expect(panel.contains("TerminalPaneChipView("))
+        // Sidebar redesign ("tuned rows"): a 16 pt status glyph in place of
+        // the status pill, and panes as indented rows in place of chips.
+        #expect(panel.contains("TerminalStatusGlyph("))
+        #expect(panel.contains("TerminalPaneRowView("))
+        #expect(!panel.contains("TerminalPaneChipView("))
         // The whole card is still the drag source, carrying only the group id.
         let card = try #require(panel.range(of: "private struct TerminalGroupManagerRowView"))
         let next = try #require(
@@ -191,7 +194,8 @@ struct EnsembleBarRedesignTests {
                 "CanvasBoardDragPayload(terminalGroupID: row.id).makeItemProvider()"))
         // Hover-revealed ⋯, backed by the same items in a context menu.
         #expect(cardSource.contains(".contextMenu { actions }"))
-        #expect(cardSource.contains(".opacity(isHovering || isFocused ? 1 : 0)"))
+        #expect(cardSource.contains("private var showsActions: Bool { isHovering || isFocused }"))
+        #expect(cardSource.contains("isVisible: showsActions"))
         // One tap handler: double-click renames without delaying a click.
         #expect(cardSource.contains("TabClickIntent.current() == .selectAndRename"))
     }

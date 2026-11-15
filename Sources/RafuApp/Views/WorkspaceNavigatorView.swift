@@ -464,7 +464,8 @@ private struct WorkspaceSearchContent: View {
             RafuPanelEmptyState(
                 icon: "magnifyingglass",
                 title: "Search Workspace",
-                message: "Find or replace text across the open folder."
+                message: "Find or replace text across the open folder.",
+                compact: true
             )
         }
     }
