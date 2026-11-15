@@ -143,6 +143,15 @@ IOSurface 22 MB is the window backing store 13.2 MB plus two purgeable card
 shadow drawables (4.2 MB and 4.7 MB). Details and the cause are in
 [`autorelease-pools-in-swift-concurrency-loops.md`](autorelease-pools-in-swift-concurrency-loops.md).
 
+D2 follow-up (2026-11-15): the 94k unidentified `CFString` objects in the Live
+heap column no longer reproduce. After the pool fix the running Lightning had
+15,861 `CFString` objects (775 KB). About 38 to 40k of the old 94k stay
+unexplained. The "after the fix" row above is still pending; the user check is
+`heap -s -q --forkCorpse $(pgrep -x RafuLightning) | grep -E "CFString|WorkspaceSymbol"`
+after opening History plus one conversation and refreshing the workspace
+(expected fewer than about 25k `CFString` objects and one symbol array set,
+about 1.7k arrays, 3.4 MB; two sets means D1).
+
 ## Verification
 
 ```sh

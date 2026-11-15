@@ -19,6 +19,27 @@ footprint after the fix is pending. Deferred: D1 lazy symbol index (needs user
 approval), D2 find the 94k `CFString` objects with `MallocStackLogging`, D3 card
 shadows only if Instruments shows them idle.
 
+**Work log, 2026-11-15 — D2 follow-up (merge 56369ec "enumerator pools, native
+strings, regression tests").** Toolchain: Swift 6.4.2, Xcode with macOS 27.2 SDK
+(26B118), Darwin 27.2.0, Mac17,13. D2 investigation: the running Lightning after
+the pool fix had 15,861 `CFString` objects (775 KB), not 94k. A symbol-name probe
+over 1,097 Swift files (about 57k names) showed the old
+`(text as NSString).substring(with:)` kept 36,366 `CFString` objects plus 36,366
+storage blocks (about 2.7 MB); with `makeContiguousUTF8()` the extra is 0. An
+enumerator loop without a pool kept 137k `CFString` objects (22 MB) over `.build`
+trees. Changes: per-step pools in `WorkspaceFileNameIndex.enumeratedPaths`
+(non-git fallback), `WorkspaceSymbolIndex.enumeratedPaths`, and
+`WorkspaceSearchService.scan`; kept paths and the Codex `thread_name` title are
+native. About 38 to 40k of the old 94k stay unexplained (likely a second symbol
+array set during a rebuild, D1, or undrained autoreleased objects; not verified).
+**Open:** a pre-existing bug in the non-git enumerator fallback (a symlink to a
+directory before sibling directories drops the first sibling; fix in progress).
+**Owed (user):** the `heap -s -q --forkCorpse` check after History plus one
+conversation plus a workspace refresh; expected fewer than about 25k `CFString`
+objects and one symbol array set (about 1.7k arrays, 3.4 MB); two sets means D1.
+The branch parallel suites were green; main gate run by coordinator. Details:
+[`autorelease-pools-in-swift-concurrency-loops.md`](../../references/autorelease-pools-in-swift-concurrency-loops.md).
+
 Motivation: on 2026-07-14 the eager recursive file tree took a large monorepo
 to roughly 900 MB–1 GB resident. The fix (lazy per-directory tree plus a
 background filename index — see

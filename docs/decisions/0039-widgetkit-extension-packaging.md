@@ -66,6 +66,46 @@ notarization added to `release.yml`.
 27 only). No accessory families on macOS. Rendering modes: `fullColor`,
 `accented`, `vibrant`.
 
+## Amendment 2026-11-15: W1 shared code, snapshot v2, reload rule, usage link
+
+Merge "W1 Rings widget with shared usage code, theme inks, usage link" (commit
+c30a519).
+
+**Shared code.** The usage types the widget needs moved from the GUI target to
+`RafuWidgetShared`: `UsageWindow`, `UsagePace`, `UsageDisplayMode`,
+`UsageRingPalette`, `UsageRingLevel`, `UsageWindowPresentation`, the ring cluster
+types, and the builder `make(windows:...)`. They are `public`, use Foundation
+only, and are built with `-application-extension`. `UsageLevelThresholds` (80 and
+95) and the monochrome opacity steps are new there. `RafuApp` re-exports the
+module with `@_exported import RafuWidgetShared`, so no app call site changed. The
+app keeps `make(snapshot:...)` as a `nonisolated` overload. App-only card rules
+moved to `Usage/UsageCardPresentation.swift`. **The extension never links the GUI
+target.**
+
+**Snapshot v2.** New optional `inks` (light and dark accent, info, success,
+warning, and critical as hex, from `RafuTheme.widgetInkSet`, cached per theme id;
+the System theme writes both sets), `Provider.source`, and `Provider.tokenSummary`.
+The reader accepts versions 1 and 2. A token-only provider appears only when its
+source is `.localEstimate`. The extension never parses theme JSON; a user theme
+file is read once per theme id, in the app.
+
+**Reload rule.** The app reloads the timeline on a data change and also when 15
+minutes passed since the last reload (`keepAliveInterval`). Reload on change only
+leaves an old `writtenAt`, so the widget showed "stale" after 20 minutes. This is
+about 4 reloads per hour while Rafu runs. Risk: the WidgetKit reload budget
+(about 40 to 70 per day, not verified here) may throttle reloads; the widget then
+shows an honest stale state.
+
+**Usage link.** The widget opens Rafu with one URL scheme per variant, from
+`RafuDeepLink`: `rafu://usage` (release) and `rafu-lightning://usage`
+(Lightning). One scheme per variant means a Lightning widget never opens the
+release app. The rules and the security review are in
+[`usage-deep-link.md`](../references/usage-deep-link.md).
+
+Platform and isolation nuances are in that note and in
+[`usage-widgets.md`](../plans/phases/usage-widgets.md). The decision did not change
+the packaging, signing, or data path above. The gallery question stays open.
+
 ## Phased plan
 
 W0 to W4 and the daily usage log are tracked in
@@ -94,5 +134,6 @@ macOS adds a widget path that does not need an extension.
 ## Related
 
 - Reference: [`sdk-build-version-stamp.md`](../references/sdk-build-version-stamp.md),
-  [`build-and-run.md`](../references/build-and-run.md)
+  [`build-and-run.md`](../references/build-and-run.md),
+  [`usage-deep-link.md`](../references/usage-deep-link.md)
 - Phase: [`usage-widgets.md`](../plans/phases/usage-widgets.md)

@@ -5,7 +5,9 @@
   `FileHandle` `NSData`, bridged `String` values. Today that is
   `Sources/RafuCore/AgentHistory/**` and
   `Sources/RafuApp/Services/WorkspaceSymbolIndex.swift` and
-  `WorkspaceSymbolExtractor.swift`. The helper is
+  `WorkspaceSymbolExtractor.swift`, plus the file-system enumerator loops in
+  `WorkspaceFileNameIndex`, `WorkspaceSymbolIndex`, and
+  `WorkspaceSearchService`. The helper is
   `Sources/RafuCore/AutoreleasePool.swift`.
 - Last verified: Xcode with macOS 27.2 SDK (26B118), Swift 6 language mode,
   Darwin 27.2.0, Mac17,13, 2026-11-15. Measurements are from a debug (`-Onone`)
@@ -36,12 +38,27 @@ Where the pools are:
 | `AgentHistoryScanner.scan` | one file |
 | `AgentHistoryMessageSearch` | one session |
 | `WorkspaceSymbolIndex` `buildSymbols` and `applyDirectoryChange` | one file |
+| `WorkspaceFileNameIndex.enumeratedPaths` (non-git fallback), `WorkspaceSymbolIndex.enumeratedPaths`, `WorkspaceSearchService.scan` | one enumerator step (D2 follow-up, 2026-11-15) |
 
 Strings that are kept after the pool must be native, not bridged. A bridged
 `String` can pin the `NSString` it came from, so the pool frees nothing. Kept
 strings are copied with `makeContiguousUTF8()`: `AgentHistoryJSON.native`,
 `nonEmptyString`, `AgentTranscriptBuilder` item text and detail, and
-`WorkspaceSymbolExtractor` names.
+`WorkspaceSymbolExtractor` names. Since the D2 follow-up, the paths the
+enumerators keep are native too, and the Codex `thread_name` title is native.
+
+Native-string nuances (D2 follow-up):
+
+- `String.isContiguousUTF8` is `false` for a bridged `NSString`. Use it in
+  regression tests to prove a kept string is native.
+- A trimmed or single-lined string is already native. The copy matters only for
+  strings straight from `JSONSerialization` or `NSString.substring`. A test must
+  not pad its input, or it will pass without the copy.
+
+Actor isolation nuance: in an actor method, a `withAutoreleasePool` body that uses
+actor `self` and captures a non-`Sendable` local (an `NSDirectoryEnumerator`)
+fails with "sending risks causing data races". Use `static` helpers and local
+copies inside the body. An `isolation:` parameter on the helper did not help.
 
 What does not help (measured):
 
@@ -98,9 +115,47 @@ Deferred, not done:
 - D1: a lazy symbol index. It rebuilds on each workspace refresh today
   (`WorkspaceSession.swift` near lines 2857, 3445, 3464, 3476). It needs user
   approval.
-- D2: find the 94k `CFString` objects with `MallocStackLogging` on a renamed
-  copy of the app.
+- D2: investigated (see below); about 38 to 40k of the 94k stay unexplained.
 - D3: the Ensemble card shadow drawables, only if Instruments shows them idle.
+
+### D2 investigation (2026-11-15)
+
+Debug process, Xcode with macOS 27.2 SDK (26B118), Swift 6.4.2, Darwin 27.2.0,
+Mac17,13.
+
+- The running Lightning after the pool fix had 15,861 `CFString` objects
+  (775 KB), not 94k.
+- A symbol-name probe over 1,097 Swift files (about 57k names): the old
+  `(text as NSString).substring(with:)` kept 36,366 `CFString` objects plus 36,366
+  storage blocks, about 2.7 MB. With `makeContiguousUTF8()` the extra is 0. 47k of
+  the 57k names fit inline (15 bytes or fewer).
+- Agent History holds fewer than 2k live `CFString` objects.
+- A `FileManager` enumerator loop without a pool kept 137k `CFString` objects
+  (22 MB) walking `.build` trees.
+- Not explained: about 38 to 40k of the old 94k. Likely a second set of symbol
+  arrays during a rebuild (D1), or autoreleased objects not yet drained when the
+  heap was sampled. Not verified.
+
+Changes: per-step pools in `WorkspaceFileNameIndex.enumeratedPaths` (non-git
+fallback), `WorkspaceSymbolIndex.enumeratedPaths`, and
+`WorkspaceSearchService.scan`; kept paths native; Codex `thread_name` title native.
+
+**Open bug (found by the new tests, fix in progress, not recorded as fixed).** In
+the non-git enumerator fallback, a symlink to a directory placed before sibling
+directories made the first sibling directory drop out. A test with a `Link` to
+`Modul1` lost all 240 files of `Modul0`. Likely cause: `skipDescendants()` called
+on a symlink entry (not confirmed).
+
+**User check owed.** Open History and one conversation, refresh the workspace,
+then run:
+
+```bash
+heap -s -q --forkCorpse $(pgrep -x RafuLightning) | grep -E "CFString|WorkspaceSymbol"
+```
+
+Expected: fewer than about 25k `CFString` objects and one set of symbol arrays
+(about 1.7k arrays, 3.4 MB). Two sets points to D1 (the symbol index rebuilds on
+each workspace refresh).
 
 Debug note: a debug build uses more memory than a release build, so the debug
 number is not the release number. `DebugBuildNote` ("This is a debug build. It
@@ -116,8 +171,9 @@ another `#require` produces one. Hoist the inner value into a `let` first.
 ## Verification
 
 Each implementor ran format, build, and the full parallel suite green on its
-branch. The main gate (both modes) is run by the coordinator; no serial result
-is recorded here.
+branch (D2 follow-up: parallel suite green on the branch, merge of commit
+56369ec). Main gate run by coordinator (both modes); no serial result is
+recorded here.
 
 ```bash
 rg -n "withAutoreleasePool|makeContiguousUTF8" Sources
