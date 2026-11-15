@@ -60,7 +60,7 @@ struct CanvasBoardNoticeView: View {
             .accessibilityLabel("Dismiss")
         }
         .padding(.leading, 10).padding(.trailing, 4).padding(.vertical, 4)
-        .rafuDeckFill(theme.palette.elevatedBackground, .card, in: Capsule())
+        .rafuDeckFill(theme.palette.elevatedBackground, .boardCard, in: Capsule())
         .overlay(Capsule().strokeBorder(theme.palette.borderSubtle))
         .frame(maxWidth: 560)
         .fixedSize(horizontal: false, vertical: true)

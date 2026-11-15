@@ -7,8 +7,8 @@ import Foundation
 /// colour, through the window frame (titlebar row, Activity Rail, sidebar,
 /// status bar, and the gutter round the deck). The deck card shows a little
 /// of it too, but less than the frame: its tab shelf, Ensemble board and
-/// rows paint their tone at `deckOpacity`, Ensemble cards at the higher
-/// `cardOpacity`, and the editor, terminals and previews at
+/// rows paint their tone at `deckOpacity`, Ensemble cards and board
+/// controls opaque (`boardCard`), and the editor, terminals and previews at
 /// `contentOpacity` (opaque when "Frost the editor and terminals" is off).
 /// Solid is the default and paints every surface opaque.
 ///
@@ -58,8 +58,9 @@ nonisolated enum WindowSurfacePreference {
         /// The deck's own surfaces: tab shelf, rows, Ensemble board, empty
         /// states. Higher than the frame, so the middle stays calmer.
         var deckOpacity: Double
-        /// Ensemble cards and board chrome, over the board. Higher than the
-        /// deck, so text in a card stays readable.
+        /// The `card` layer's target over the board (the tab shelf fade)
+        /// and the `pinned` header's floor. Ensemble cards and board
+        /// controls are opaque (`boardCard`).
         var cardOpacity: Double
         /// "Frost the editor and terminals". Off keeps text surfaces opaque.
         var frostsContent: Bool
@@ -76,8 +77,14 @@ nonisolated enum WindowSurfacePreference {
         /// A text surface painted straight over the frame: editor,
         /// terminal, preview, diff.
         case content
-        /// An Ensemble card or a board control, painted over the board.
+        /// A translucent card tone painted over the board (the tab shelf
+        /// fade uses its alpha). Ensemble cards and board controls use
+        /// `boardCard`.
         case card
+        /// An Ensemble card or a floating board control. Always opaque:
+        /// cards and controls lie over other cards, and any alpha below 1
+        /// lets the card below show through.
+        case boardCard
         /// Editor-like content inside a card (a note being edited, a
         /// code view), painted over the card's own fill: clear when frosted,
         /// so the card's fill shows. Terminals use
@@ -131,6 +138,7 @@ nonisolated enum WindowSurfacePreference {
             case .card:
                 return WindowSurfacePreference.layeredOpacity(
                     target: frost.cardOpacity, over: frost.deckOpacity)
+            case .boardCard: return 1
             case .cardContent:
                 return frost.frostsContent ? 0 : 1
             case .pinned:

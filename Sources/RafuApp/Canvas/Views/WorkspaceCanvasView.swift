@@ -647,7 +647,7 @@ struct WorkspaceCanvasView: View {
             .accessibilityLabel("Dismiss")
         }
         .padding(.leading, 10).padding(.trailing, 4).padding(.vertical, 4)
-        .rafuDeckFill(theme.palette.elevatedBackground, .card, in: Capsule())
+        .rafuDeckFill(theme.palette.elevatedBackground, .boardCard, in: Capsule())
         .overlay(Capsule().strokeBorder(theme.palette.borderSubtle))
         .fixedSize()
         .accessibilityElement(children: .contain)
@@ -792,7 +792,7 @@ struct WorkspaceCanvasView: View {
                 .foregroundStyle(theme.palette.textPrimary)
         }
         .padding(.horizontal, 10).padding(.vertical, 5)
-        .rafuDeckFill(theme.palette.cardBackground, .card, in: Capsule())
+        .rafuDeckFill(theme.palette.cardBackground, .boardCard, in: Capsule())
         .overlay(Capsule().strokeBorder(theme.palette.borderSubtle))
         .fixedSize()
     }

@@ -273,12 +273,27 @@ final class TerminalMarginFillView: NSView {
             width: bounds.width, height: max(0, bounds.height - gridHeight))
     }
 
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        clipsToBounds = true
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        clipsToBounds = true
+    }
+
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
     override func isAccessibilityElement() -> Bool { false }
 
     override func draw(_ dirtyRect: NSRect) {
+        // `dirtyRect` can be larger than the bounds (an unclipped view on
+        // this SDK). Filling it would paint the translucent background over
+        // the whole terminal, above the text, and fade it.
+        let rect = bounds.intersection(dirtyRect)
+        guard !rect.isEmpty else { return }
         color.setFill()
-        dirtyRect.fill()
+        rect.fill()
     }
 }

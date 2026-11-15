@@ -76,7 +76,7 @@ struct CanvasToolPalette: View {
                 compactTools
             }
             .padding(4)
-            .rafuDeckFill(theme.palette.elevatedBackground, .card, in: .rect(cornerRadius: 10))
+            .rafuDeckFill(theme.palette.elevatedBackground, .boardCard, in: .rect(cornerRadius: 10))
             .overlay {
                 RoundedRectangle(cornerRadius: 10).strokeBorder(theme.palette.borderSubtle)
             }

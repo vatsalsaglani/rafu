@@ -139,6 +139,23 @@ struct FrostedDeckTests {
         if !frostsContent { #expect(pinned == 1) }
     }
 
+    @Test(
+        "Ensemble cards and board controls are opaque in every Frosted row",
+        arguments: [true, false])
+    func boardCardIsOpaque(frostsContent: Bool) {
+        for row in Self.table {
+            let surface = Self.resolve(
+                "frosted", row.level, isDark: row.isDark, frostsContent: frostsContent)
+            let label = "\(row.level) \(row.isDark ? "dark" : "light") \(frostsContent)"
+            #expect(surface.paintOpacity(for: .boardCard) == 1, "\(label)")
+            // `.card` keeps its translucent value (the tab shelf fade).
+            #expect(
+                surface.paintOpacity(for: .card)
+                    == Preference.layeredOpacity(target: row.card, over: row.deck), "\(label)")
+        }
+        #expect(Preference.Resolved.solid.paintOpacity(for: .boardCard) == 1)
+    }
+
     @MainActor
     @Test("Fills change only in Frosted; Solid returns the colour itself")
     func fillHelper() {
@@ -150,6 +167,8 @@ struct FrostedDeckTests {
         let frosted = Self.resolve("frosted", "balanced", isDark: true)
         #expect(frosted.fill(color, .deck) == color.opacity(0.82))
         #expect(frosted.fill(color, .underlay) == color.opacity(0))
+        #expect(frosted.fill(color, .boardCard) == color)
+        #expect(WindowSurfacePreference.Resolved.solid.fill(color, .boardCard) == color)
     }
 
     // MARK: Terminal
@@ -194,6 +213,31 @@ struct FrostedDeckTests {
         let view = TerminalMarginFillView()
         #expect(view.hitTest(.zero) == nil)
         #expect(!view.isAccessibilityElement())
+    }
+
+    @MainActor
+    @Test("The margin strip paints only inside its own bounds")
+    func terminalMarginFillStaysInBounds() throws {
+        // Regression: the strip filled `dirtyRect`, which can be larger than
+        // its bounds, and painted its translucent colour over the terminal
+        // text above it.
+        let parent = NSView(frame: NSRect(x: 0, y: 0, width: 100, height: 100))
+        parent.wantsLayer = true
+        let strip = TerminalMarginFillView(frame: NSRect(x: 0, y: 0, width: 100, height: 5))
+        strip.color = NSColor(srgbRed: 1, green: 0, blue: 0, alpha: 1)
+        parent.addSubview(strip)
+        let rep = try #require(parent.bitmapImageRepForCachingDisplay(in: parent.bounds))
+        parent.cacheDisplay(in: parent.bounds, to: rep)
+        // Bitmap rows run top-down; the unflipped strip is at the bottom.
+        let middle = try #require(rep.colorAt(x: 50, y: rep.pixelsHigh / 2))
+        #expect(middle.alphaComponent == 0)
+        let insideStrip = try #require(
+            rep.colorAt(x: 50, y: rep.pixelsHigh - 1)?.usingColorSpace(.sRGB))
+        #expect(insideStrip.alphaComponent > 0.99)
+        // The bitmap's colour space can shift pure red a little; red must
+        // still dominate.
+        #expect(insideStrip.redComponent > insideStrip.greenComponent + 0.5)
+        #expect(insideStrip.redComponent > insideStrip.blueComponent + 0.5)
     }
 
     // MARK: Editor

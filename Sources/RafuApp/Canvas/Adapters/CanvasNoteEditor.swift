@@ -496,9 +496,21 @@ struct CanvasNoteEditor: NSViewRepresentable {
         let base = NSColor(
             context.environment.rafuWindowSurface.fill(
                 theme.palette.editorBackground, .cardContent))
-        if buffer.textView.backgroundColor != base { buffer.textView.backgroundColor = base }
+        // A clip view that draws a clear or translucent colour paints it
+        // over an opaque grey base, so a non-opaque base draws nothing and
+        // the card's own fill shows instead.
+        let opaque = (base.usingColorSpace(.sRGB)?.alphaComponent ?? base.alphaComponent) >= 1
+        if buffer.scrollView.drawsBackground != opaque {
+            buffer.scrollView.drawsBackground = opaque
+        }
+        if buffer.textView.drawsBackground != opaque { buffer.textView.drawsBackground = opaque }
+        if opaque {
+            if buffer.textView.backgroundColor != base { buffer.textView.backgroundColor = base }
+            if buffer.scrollView.backgroundColor != base {
+                buffer.scrollView.backgroundColor = base
+            }
+        }
         buffer.textView.insertionPointColor = NSColor(theme.palette.accent)
-        if buffer.scrollView.backgroundColor != base { buffer.scrollView.backgroundColor = base }
         let active = board.contentIsActive && board.focusedCardID == card.id
         buffer.textView.isEditable = active
         buffer.textView.isSelectable = active

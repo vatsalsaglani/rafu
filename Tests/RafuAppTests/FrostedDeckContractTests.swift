@@ -138,11 +138,10 @@ struct FrostedDeckContractTests {
         let shell = try Self.source("Sources/RafuApp/Canvas/Views/CanvasCardViews.swift")
         #expect(
             shell.contains(
-                ".background(windowSurface.fill(theme.palette.elevatedBackground, .card))"))
+                ".background(windowSurface.fill(theme.palette.elevatedBackground, .boardCard))"))
         #expect(!shell.contains(".background(theme.palette.elevatedBackground)"))
-        // The shell's shadow shape keeps only the outside shadow in Frosted.
-        #expect(shell.contains("cornerRadius: cornerRadius, reach: Self.shadowReach,"))
-        #expect(shell.contains("isActive: windowSurface.isFrosted"))
+        // The face resolves as Solid inside the opaque card.
+        #expect(shell.contains(".environment(\\.rafuWindowSurface, .solid)"))
 
         // Kind faces paint no second full fill: read faces step aside
         // (`underlay`), editor-like faces follow the content switch.
@@ -162,7 +161,7 @@ struct FrostedDeckContractTests {
             #expect(!source.contains(".background(jsonTheme.color.surface)"), "\(path)")
         }
 
-        // Board chrome floats at the card opacity.
+        // Board chrome floats opaque, like the cards it lies over.
         let chrome = [
             "Sources/RafuApp/Canvas/Views/CanvasBar.swift",
             "Sources/RafuApp/Canvas/Views/CanvasBoardNoticeView.swift",
@@ -174,7 +173,7 @@ struct FrostedDeckContractTests {
         ]
         for path in chrome {
             let source = try Self.source(path)
-            #expect(source.contains("theme.palette.elevatedBackground, .card"), "\(path)")
+            #expect(source.contains("theme.palette.elevatedBackground, .boardCard"), "\(path)")
             #expect(!source.contains("fill(theme.palette.elevatedBackground))"), "\(path)")
             #expect(
                 !source.contains(".background(theme.palette.elevatedBackground, in:"), "\(path)")
@@ -220,6 +219,25 @@ struct FrostedDeckContractTests {
         let toggle = try Self.section(
             of: section, from: "Toggle(\"Frost the editor and terminals\"", to: "} header: {")
         #expect(toggle.contains(".disabled(!isFrostedSelected || forcedSolidReason != nil)"))
+    }
+
+    @Test("Card faces keep a frosted base from going grey, and the header button never wraps")
+    func cardFaceHardening() throws {
+        // A clip view drawing a clear colour paints it over an opaque grey.
+        let note = try Self.source("Sources/RafuApp/Canvas/Adapters/CanvasNoteEditor.swift")
+        #expect(note.contains("buffer.scrollView.drawsBackground = opaque"))
+        #expect(note.contains("buffer.textView.drawsBackground = opaque"))
+
+        let chrome = try Self.source("Sources/RafuApp/Canvas/Views/CanvasCardChrome.swift")
+        let button = try Self.section(
+            of: chrome, from: "struct CanvasReturnToBoardButton", to: "struct CanvasHeaderBadge")
+        #expect(button.contains("ViewThatFits(in: .horizontal)"))
+        #expect(button.contains(".lineLimit(1)"))
+
+        // The margin strip fills only its own bounds, never the dirty rect.
+        let terminal = try Self.source("Sources/RafuApp/Terminal/RafuTerminalView.swift")
+        #expect(!terminal.contains("dirtyRect.fill()"))
+        #expect(terminal.contains("bounds.intersection(dirtyRect)"))
     }
 
     private static func section(of source: String, from start: String, to end: String) throws

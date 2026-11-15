@@ -39,7 +39,7 @@ struct CanvasLinkStatusItem: View {
                 .lineLimit(1)
                 .padding(.horizontal, 10)
                 .frame(height: 22)
-                .rafuDeckFill(theme.palette.elevatedBackground, .card, in: Capsule())
+                .rafuDeckFill(theme.palette.elevatedBackground, .boardCard, in: Capsule())
                 .overlay(Capsule().strokeBorder(theme.palette.borderSubtle, lineWidth: 1))
                 .contentShape(Capsule())
             }
