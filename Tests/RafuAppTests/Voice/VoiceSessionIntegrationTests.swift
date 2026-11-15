@@ -135,6 +135,20 @@ final class ConfirmProbe {
     func click(_ value: VoiceConfirmAnswer) { answer?(value) }
 }
 
+/// A session clock that moves only when a test moves it. The quiet gates
+/// (speech, audible reply, update coalescing) read the session's own clock; on
+/// the real one, a loaded machine that needs seconds to open a session also
+/// makes "just opened" stop being true.
+@MainActor
+final class VoiceManualClock {
+    private let base = ContinuousClock.now
+    private(set) var offset: Duration = .zero
+
+    var now: ContinuousClock.Instant { base.advanced(by: offset) }
+
+    func advance(by duration: Duration) { offset += duration }
+}
+
 /// Removes the fixture's temporary workspace.
 private final class VoiceScratchFolder: Sendable {
     let url = FileManager.default.temporaryDirectory.appending(
@@ -160,7 +174,7 @@ private struct VoiceFixture {
         key: String? = "test-key", microphone: Bool = true, capDollars: Int? = nil,
         transport: ScriptedLiveTransport = ScriptedLiveTransport(),
         confirmTimeout: Duration = .seconds(30), transcriptDirectory: URL? = nil,
-        agentActivity: VoiceAgentActivitySource? = nil
+        agentActivity: VoiceAgentActivitySource? = nil, clock: VoiceManualClock? = nil
     ) async throws {
         let scratch = scratch
         suite = TestDefaultsSuite.name("dev.rafu.voice-tests")
@@ -204,6 +218,7 @@ private struct VoiceFixture {
         dependencies.confirmTimeout = confirmTimeout
         dependencies.debugTranscriptDirectory = transcriptDirectory
         if let agentActivity { dependencies.agentActivity = agentActivity }
+        if let clock { dependencies.now = { clock.now } }
         voice = VoiceSession(dependencies: dependencies)
     }
 
@@ -222,17 +237,30 @@ private struct VoiceFixture {
     }
 }
 
-/// Bounded: yields until `condition` holds.
+/// Bounded by wall-clock time, not by a count of yields: waits until
+/// `condition` holds. A yield-count bound measures how fast a loaded machine
+/// spins, not how long the work needs; under load a 200,000-yield budget ran
+/// out in seconds while a background task was still starved. After a short
+/// run of yields it sleeps a millisecond between checks so the work it waits
+/// for gets the CPU. The generous deadline is a failure bound only.
 @MainActor
 private func until(
     _ label: String = "condition", _ condition: @MainActor () -> Bool
 ) async throws {
-    for _ in 0..<200_000 {
-        if condition() { return }
-        await Task.yield()
+    let deadline = ContinuousClock.now.advanced(by: .seconds(120))
+    var spins = 0
+    while !condition() {
+        guard ContinuousClock.now < deadline else {
+            Issue.record("Timed out waiting for \(label)")
+            throw CancellationError()
+        }
+        spins += 1
+        if spins < 1_000 {
+            await Task.yield()
+        } else {
+            try await Task.sleep(for: .milliseconds(1))
+        }
     }
-    Issue.record("Timed out waiting for \(label)")
-    throw CancellationError()
 }
 
 private func json(_ text: String) throws -> [String: Any] {
@@ -1608,7 +1636,7 @@ struct VoiceAgentUpdateSessionTests {
         let fake = FakeAgentActivity()
         let row = UUID()
         fake.signals = [FakeAgentActivity.signal("n1", state: .working, row: row)]
-        let fixture = try await VoiceFixture(agentActivity: fake.source)
+        let fixture = try await VoiceFixture(agentActivity: fake.source, clock: VoiceManualClock())
         defer { TestDefaultsSuite.remove(fixture.suite) }
         let voice = fixture.voice
         try await fixture.openLatched()
@@ -1642,7 +1670,7 @@ struct VoiceAgentUpdateSessionTests {
     func baseline() async throws {
         let fake = FakeAgentActivity()
         fake.signals = [FakeAgentActivity.signal("n1", state: .finished, reply: UUID())]
-        let fixture = try await VoiceFixture(agentActivity: fake.source)
+        let fixture = try await VoiceFixture(agentActivity: fake.source, clock: VoiceManualClock())
         defer { TestDefaultsSuite.remove(fixture.suite) }
         try await fixture.openLatched()
         // The same reply seen again (the counter moved for another card).
@@ -1662,7 +1690,7 @@ struct VoiceAgentUpdateSessionTests {
             FakeAgentActivity.signal("n1", state: .working),
             FakeAgentActivity.signal("n2", title: "Tests", agent: "Codex", state: .working),
         ]
-        let fixture = try await VoiceFixture(agentActivity: fake.source)
+        let fixture = try await VoiceFixture(agentActivity: fake.source, clock: VoiceManualClock())
         defer { TestDefaultsSuite.remove(fixture.suite) }
         let voice = fixture.voice
         try await fixture.openLatched()
@@ -1686,7 +1714,7 @@ struct VoiceAgentUpdateSessionTests {
     func heldByConfirm() async throws {
         let fake = FakeAgentActivity()
         fake.signals = [FakeAgentActivity.signal("n1", state: .working)]
-        let fixture = try await VoiceFixture(agentActivity: fake.source)
+        let fixture = try await VoiceFixture(agentActivity: fake.source, clock: VoiceManualClock())
         defer { TestDefaultsSuite.remove(fixture.suite) }
         let voice = fixture.voice
         try await fixture.openLatched()
@@ -1707,7 +1735,7 @@ struct VoiceAgentUpdateSessionTests {
     func heldBySpeech() async throws {
         let fake = FakeAgentActivity()
         fake.signals = [FakeAgentActivity.signal("n1", state: .working)]
-        let fixture = try await VoiceFixture(agentActivity: fake.source)
+        let fixture = try await VoiceFixture(agentActivity: fake.source, clock: VoiceManualClock())
         defer { TestDefaultsSuite.remove(fixture.suite) }
         let voice = fixture.voice
         try await fixture.openLatched()
@@ -1735,7 +1763,7 @@ struct VoiceAgentUpdateSessionTests {
     func toggledOff() async throws {
         let fake = FakeAgentActivity()
         fake.signals = [FakeAgentActivity.signal("n1", state: .working)]
-        let fixture = try await VoiceFixture(agentActivity: fake.source)
+        let fixture = try await VoiceFixture(agentActivity: fake.source, clock: VoiceManualClock())
         defer { TestDefaultsSuite.remove(fixture.suite) }
         let voice = fixture.voice
         UserDefaults(suiteName: fixture.suite)?.set(false, forKey: VoicePreferences.agentUpdatesKey)
@@ -1754,7 +1782,7 @@ struct VoiceAgentUpdateSessionTests {
     func closeStopsObserving() async throws {
         let fake = FakeAgentActivity()
         fake.signals = [FakeAgentActivity.signal("n1", state: .working)]
-        let fixture = try await VoiceFixture(agentActivity: fake.source)
+        let fixture = try await VoiceFixture(agentActivity: fake.source, clock: VoiceManualClock())
         defer { TestDefaultsSuite.remove(fixture.suite) }
         let voice = fixture.voice
         try await fixture.openLatched()
@@ -1772,7 +1800,7 @@ struct VoiceAgentUpdateSessionTests {
     func updateDoesNotResetIdleClock() async throws {
         let fake = FakeAgentActivity()
         fake.signals = [FakeAgentActivity.signal("n1", state: .working)]
-        let fixture = try await VoiceFixture(agentActivity: fake.source)
+        let fixture = try await VoiceFixture(agentActivity: fake.source, clock: VoiceManualClock())
         defer { TestDefaultsSuite.remove(fixture.suite) }
         let voice = fixture.voice
         try await fixture.openLatched()
@@ -1910,7 +1938,7 @@ struct VoicePresenceSessionTests {
             FakeAgentActivity.signal(
                 "n1", title: "Tests", agent: "Codex", state: .working, row: row)
         ]
-        let fixture = try await VoiceFixture(agentActivity: fake.source)
+        let fixture = try await VoiceFixture(agentActivity: fake.source, clock: VoiceManualClock())
         defer { TestDefaultsSuite.remove(fixture.suite) }
         let voice = fixture.voice
         try await fixture.openLatched()

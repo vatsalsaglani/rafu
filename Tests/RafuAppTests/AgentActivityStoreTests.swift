@@ -184,7 +184,11 @@ struct AgentActivityStoreTests {
             }
             group.addTask {
                 // A failure deadline, not a delay used to synchronize the watcher.
-                try? await Task.sleep(for: .seconds(5))
+                // Generous on purpose: the notification and the drain need the
+                // main queue, the cooperative pool and the disk, and a machine
+                // under parallel-build load can starve all three for tens of
+                // seconds. A passing run never waits for it.
+                try? await Task.sleep(for: .seconds(120))
                 return false
             }
             let first = await group.next() ?? false
