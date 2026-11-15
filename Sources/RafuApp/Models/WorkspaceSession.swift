@@ -2115,6 +2115,12 @@ final class WorkspaceSession {
         terminalGroupWorkspaceRestoration()
     }
 
+    /// Read-only seam: the editor layout value normal workspace persistence
+    /// would encode. It filters a copy and never changes the live layout.
+    func editorLayoutForWorkspaceRestorationForTesting() -> EditorLayoutState {
+        editorLayoutForWorkspaceRestoration()
+    }
+
     /// Exercises layout repair after inert-group insertion without bookmark
     /// or file-watcher setup. It is read-only outside the session layout.
     func restoreEditorLayoutForTesting(
@@ -5807,8 +5813,9 @@ final class WorkspaceSession {
             else { return }
             let savedIDs = Set(records.map(\.id))
             for record in restoration.openGroups {
-                guard let savedLayoutID = record.savedLayoutID, savedIDs.contains(savedLayoutID)
-                else {
+                // An unsaved group (no saved layout) restores as an open tab
+                // too. A group whose saved layout was deleted stays dropped.
+                if let savedLayoutID = record.savedLayoutID, !savedIDs.contains(savedLayoutID) {
                     continue
                 }
                 do {
@@ -5991,8 +5998,7 @@ final class WorkspaceSession {
             snapshot in
             guard
                 canvasIDs.map({ $0.contains(snapshot.id) })
-                    ?? (snapshot.savedLayoutID != nil
-                        && presentedTerminalGroupIDs.contains(snapshot.id))
+                    ?? isWindowRestorableTerminalGroup(snapshot)
             else {
                 return nil
             }
@@ -6038,9 +6044,34 @@ final class WorkspaceSession {
             stored: profile, observedPath: controller?.currentDirectoryPath, root: rootURL)
     }
 
-    /// Filters a value copy only. Unsaved groups and every legacy live
-    /// terminal remain usable in this window but never enter the workspace
-    /// restoration payload.
+    /// Whether the window payload keeps `snapshot`. A group with a saved
+    /// layout is kept while presented (unchanged). An unsaved group is kept
+    /// only while it has its own editor tab and lives on no Ensemble: a
+    /// closed or hidden group has no tab, and a group an Ensemble shows is
+    /// restored by that board, so a tab would duplicate it.
+    private func isWindowRestorableTerminalGroup(_ snapshot: TerminalGroupSnapshot) -> Bool {
+        if snapshot.savedLayoutID != nil {
+            return presentedTerminalGroupIDs.contains(snapshot.id)
+        }
+        return editorLayout.tab(matching: .terminalGroup(groupID: snapshot.id)) != nil
+            && !isOnEnsemble(snapshot.id)
+    }
+
+    /// True for an Ensemble terminal group, a lease holder, or a group any
+    /// open board has a card for.
+    private func isOnEnsemble(_ groupID: TerminalGroupID) -> Bool {
+        if terminal.isEnsembleTerminalGroup(groupID) || canvasTerminalOwners[groupID] != nil {
+            return true
+        }
+        let content = CanvasCardContent.terminal(groupID: groupID)
+        return canvas.boards.values.contains { board in
+            board.cards.contains { $0.content == content }
+        }
+    }
+
+    /// Filters a value copy only. Legacy live terminals, and Terminal Group
+    /// tabs the window payload does not keep, remain usable in this window
+    /// but never enter the workspace restoration payload.
     private func editorLayoutForWorkspaceRestoration() -> EditorLayoutState {
         var layout = editorLayout
         for editorGroupID in layout.groupIDs {
@@ -6050,7 +6081,9 @@ final class WorkspaceSession {
                 case .canvas(let id): retain = canvas.boards[id]?.revision ?? 0 > 0
                 case .file: retain = true
                 case .terminalGroup(let groupID):
-                    retain = terminal.terminalGroup(groupID)?.savedLayoutID != nil
+                    retain =
+                        terminal.terminalGroup(groupID).map(isWindowRestorableTerminalGroup)
+                        ?? false
                 case .terminal, .restorable: retain = false
                 }
                 if !retain { _ = layout.closeTab(tab.id) }
