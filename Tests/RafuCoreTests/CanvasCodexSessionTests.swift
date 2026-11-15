@@ -7,6 +7,46 @@ import Testing
 
 @Suite(.serialized)
 struct CanvasCodexSessionTests {
+    /// The server makes its socket file at `bind` and accepts only after
+    /// `listen`. A connect in between is refused (CI, 2026-11-15:
+    /// "Codex did not complete the control connection"). The control
+    /// connection retries until its deadline.
+    @Test func controlConnectionWaitsForAListenerBehindAnExistingSocket() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let path = fixture.root.appendingPathComponent("socket").path
+        let server = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
+        defer { Darwin.close(server) }
+        var address = try LauncherSocketAddress.make(path: path)
+        let bound = withUnsafePointer(to: &address) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                Darwin.bind(server, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+        #expect(bound == 0)
+        // Bound and not listening for the whole timeout: refused, then timeout.
+        #expect(throws: CanvasCodexRPC.RPCError.timeout) {
+            _ = try CanvasCodexRPC(endpoint: fixture.endpoint, timeout: 0.2)
+        }
+        // Listening starts later: the connect gets through. The peer then
+        // closes without a handshake, so the error is a transport error,
+        // never the refused-connect timeout.
+        let accepted = DispatchSemaphore(value: 0)
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.15) {
+            _ = Darwin.listen(server, 1)
+            let peer = Darwin.accept(server, nil, nil)
+            if peer >= 0 { Darwin.close(peer) }
+            accepted.signal()
+        }
+        do {
+            _ = try CanvasCodexRPC(endpoint: fixture.endpoint, timeout: 5)
+            Issue.record("A peer that closes at once cannot complete the handshake.")
+        } catch let error as CanvasCodexRPC.RPCError {
+            #expect(error != .timeout)
+        }
+        #expect(accepted.wait(timeout: .now() + 5) == .success)
+    }
+
     @Test func relayRemovesTheCompressionOfferFromTheUpgrade() {
         let request =
             "GET /rpc HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\n"

@@ -14,28 +14,10 @@ public nonisolated final class CanvasCodexRPC {
 
     public init(endpoint: String, timeout: TimeInterval = 15) throws {
         try CanvasCodexSession.validateEndpoint(endpoint)
-        descriptor = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
-        guard descriptor >= 0 else { throw RPCError.transport }
         deadline = DispatchTime.now().uptimeNanoseconds + UInt64(max(0, timeout) * 1_000_000_000)
+        descriptor = try Self.connectedSocket(
+            path: String(endpoint.dropFirst("unix://".count)), deadline: deadline)
         do {
-            guard fcntl(descriptor, F_SETFL, O_NONBLOCK) == 0 else { throw RPCError.transport }
-            var address = try LauncherSocketAddress.make(
-                path: String(endpoint.dropFirst("unix://".count)))
-            let result = withUnsafePointer(to: &address) { pointer in
-                pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                    Darwin.connect(descriptor, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
-                }
-            }
-            if result != 0 {
-                guard errno == EINPROGRESS else { throw RPCError.transport }
-                try awaitReady(Int16(POLLOUT))
-                var error: Int32 = 0
-                var length = socklen_t(MemoryLayout<Int32>.size)
-                guard getsockopt(descriptor, SOL_SOCKET, SO_ERROR, &error, &length) == 0, error == 0
-                else {
-                    throw RPCError.transport
-                }
-            }
             var noSignal: Int32 = 1
             guard
                 setsockopt(
@@ -56,6 +38,40 @@ public nonisolated final class CanvasCodexRPC {
             // All stored properties are initialized. deinit owns the descriptor
             // even when the handshake fails; closing here would close it twice.
             throw error
+        }
+    }
+
+    /// Connects to the server's socket. The server creates the socket file
+    /// at `bind` and starts to accept at `listen`, so a connect in between
+    /// gets ECONNREFUSED although the file exists (seen on CI). Retry that
+    /// case, and a missing file, every 20 ms until the deadline. A new socket
+    /// is made for each attempt. The result is non-blocking.
+    private static func connectedSocket(path: String, deadline: UInt64) throws -> Int32 {
+        var address = try LauncherSocketAddress.make(path: path)
+        while true {
+            let candidate = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
+            guard candidate >= 0 else { throw RPCError.transport }
+            let result = withUnsafePointer(to: &address) { pointer in
+                pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                    Darwin.connect(candidate, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
+                }
+            }
+            if result == 0 {
+                guard fcntl(candidate, F_SETFL, O_NONBLOCK) == 0 else {
+                    Darwin.close(candidate)
+                    throw RPCError.transport
+                }
+                return candidate
+            }
+            let failure = errno
+            Darwin.close(candidate)
+            guard failure == ECONNREFUSED || failure == ENOENT || failure == EINTR,
+                DispatchTime.now().uptimeNanoseconds < deadline
+            else {
+                throw failure == ECONNREFUSED || failure == ENOENT
+                    ? RPCError.timeout : RPCError.transport
+            }
+            usleep(20_000)
         }
     }
 

@@ -116,6 +116,24 @@ Manual check the user can run later: open an Ensemble, start `codex`, select
 another tab, ask Codex to add a diagram; then press Ctrl-D, run `codex` again,
 and confirm "Codex connected".
 
+## Control connection waits for the listener (2026-11-15)
+
+- **Observation.** The app server creates its socket file at `bind` and accepts
+  only after `listen`. `CanvasCodexSession` waits only for the file
+  (`socketIsOwned`), so a control connection made in that gap gets
+  `ECONNREFUSED`. CI (Swift 6.3.3, `macos-26`, run 43728255863) failed
+  `unreachableAppDuringBindIsNamedWithoutDetail` with "Codex did not complete
+  the control connection." The race can also hit a real `codex app-server` on a
+  busy Mac.
+- **Rule.** `CanvasCodexRPC.connectedSocket(path:deadline:)` retries
+  `ECONNREFUSED`, `ENOENT` and `EINTR` every 20 ms until the RPC deadline (15 s
+  default), with a new socket for each attempt. A refused connect that lasts to
+  the deadline is `RPCError.timeout`; other connect errors are `transport`.
+- **Evidence.** `controlConnectionWaitsForAListenerBehindAnExistingSocket` binds
+  a socket without `listen`: it fails on the old code (2 issues) and passes with
+  the fix. Main gate: 530 tests in 40 suites and 3927 tests in 319 suites passed,
+  parallel and `--no-parallel` (Apple Swift 6.4.2, macOS 27.2).
+
 ## Codex relay reconnect (2026-11-15)
 
 Applies to `CanvasCodexProxy.swift`, `CanvasCodexSession.swift`,
