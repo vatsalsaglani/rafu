@@ -58,7 +58,7 @@ struct WindowTitlebarRow: View {
         // The titlebar row sits on the window's frame, matching
         // `FlatWindowChrome`'s `NSWindow.backgroundColor` and the deck
         // lane's gutter — not the Files sidebar's own tone.
-        .background(theme.palette.appBackground)
+        .frostSpikeFrame(theme.palette.appBackground)
         .task(id: session.rootURL) { workspaces.reload() }
     }
 

@@ -15,7 +15,7 @@ struct WorkspaceSidebarPanelView: View {
             // selection never changes the pane's own background — only
             // `WorkspaceSidebarView` painted this before; Search, Source
             // Control, Terminals, and History now share this same pane.
-            .background(theme.palette.sidebarBackground)
+            .frostSpikeFrame(theme.palette.sidebarBackground)
     }
 
     @ViewBuilder
@@ -62,7 +62,7 @@ struct WorkspaceActivityRail: View {
         .frame(maxHeight: .infinity)
         .fixedSize(horizontal: true, vertical: false)
         .background(WindowDragHandle())
-        .background(theme.palette.appBackground)
+        .frostSpikeFrame(theme.palette.appBackground)
     }
 
     private func railButton(_ mode: WorkspaceNavigatorMode) -> some View {

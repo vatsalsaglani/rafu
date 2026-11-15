@@ -118,6 +118,8 @@ struct WorkbenchDeckSurface<Content: View>: View {
 
     @Environment(\.rafuTheme) private var theme
     @Environment(\.colorSchemeContrast) private var colorSchemeContrast
+    // SPIKE (frosted window base, Step 0).
+    @Environment(\.rafuFrostSpike) private var frostSpike
 
     init(@ViewBuilder content: () -> Content) {
         self.content = content()
@@ -126,6 +128,9 @@ struct WorkbenchDeckSurface<Content: View>: View {
     var body: some View {
         content
             .background(theme.palette.editorBackground)
+            // SPIKE: the "clip" wedge mode clips the deck instead of
+            // painting wedges (breaks the no-clip rule; measured only).
+            .modifier(FrostSpikeDeckClip(isOn: frostSpike?.wedge == .clip))
             .background {
                 // The shadow is cast by a dedicated rounded shape behind the
                 // card's own flat fill, never applied to `content` itself —
@@ -141,11 +146,19 @@ struct WorkbenchDeckSurface<Content: View>: View {
                 // wedges cut the shadow off inside the card's bounding box,
                 // which left visible square points at the bottom corners in
                 // Khadi (design polish round 4).
-                WorkbenchDeckCornerWedges(
-                    surrounding: theme.palette.appBackground,
-                    fill: theme.palette.editorBackground,
-                    shadow: shadowColor
-                )
+                if let frostSpike, frostSpike.needsMaskedWedges {
+                    FrostSpikeWedgeBackdrops(
+                        config: frostSpike, radius: RafuMetrics.radiusWorkbenchDeck)
+                }
+                if frostSpike?.wedge != .clip {
+                    WorkbenchDeckCornerWedges(
+                        surrounding: frostSpike?.wedge == .masked
+                            ? theme.palette.appBackground.opacity(frostSpike?.tint ?? 1)
+                            : theme.palette.appBackground,
+                        fill: theme.palette.editorBackground,
+                        shadow: shadowColor
+                    )
+                }
                 // The card's edge hairline, in every theme. A light theme's
                 // shadow is faint, so this hairline is what separates the
                 // card from the frame there; a dark theme reads mostly from

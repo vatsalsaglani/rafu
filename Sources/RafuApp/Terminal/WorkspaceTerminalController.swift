@@ -1464,6 +1464,18 @@ final class WorkspaceTerminalController: Identifiable {
         guard signature != appliedStyleSignature else { return }
         appliedStyleSignature = signature
         view.nativeBackgroundColor = NSColor(rafuHex: theme.editor.background)
+        // SPIKE (frosted window base, Step 0): alpha probe. Pure red at 50 %
+        // reads dark red over the deck if SwiftTerm honours alpha, bright
+        // red if it paints opaque.
+        if UserDefaults.standard.bool(forKey: "RafuFrostSpikeTerminalProbe") {
+            view.nativeBackgroundColor = NSColor(srgbRed: 1, green: 0, blue: 0, alpha: 0.5)
+            // SwiftTerm sets `layer.backgroundColor` once, in `setupOptions()`,
+            // from the default text background; the probe clears it so the
+            // translucent cells composite over what lies behind the view.
+            if UserDefaults.standard.bool(forKey: "RafuFrostSpikeTerminalClearLayer") {
+                view.layer?.backgroundColor = NSColor.clear.cgColor
+            }
+        }
         view.nativeForegroundColor = NSColor(rafuHex: theme.editor.foreground)
         view.caretColor = NSColor(rafuHex: theme.editor.cursor)
         view.font = Self.terminalFont(for: theme)

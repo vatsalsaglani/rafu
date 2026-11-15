@@ -14,6 +14,20 @@ struct WorkspaceWindowView: View {
     @AppStorage(FileIconProvider.colouredFileIconsKey) private var colouredFileIcons = false
     /// This window's voice companion: its corner, tuck and toggles.
     @State private var voiceCompanion = VoiceCompanionModel()
+    // SPIKE (frosted window base, Step 0): debug defaults, read live.
+    @AppStorage("RafuFrostSpike") private var frostMechanism = ""
+    @AppStorage("RafuFrostSpikeMaterial") private var frostMaterial = ""
+    @AppStorage("RafuFrostSpikeState") private var frostState = "active"
+    @AppStorage("RafuFrostSpikeTint") private var frostTint = 0.74
+    @AppStorage("RafuFrostSpikeWedge") private var frostWedge = "masked"
+    @AppStorage("RafuFrostSpikeClear") private var frostClearWindow = false
+
+    private var frostSpike: FrostSpikeConfig? {
+        guard !showsWelcome else { return nil }
+        return FrostSpikeConfig.resolve(
+            mechanism: frostMechanism, material: frostMaterial, state: frostState,
+            tint: frostTint, wedge: frostWedge, clearWindow: frostClearWindow)
+    }
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -32,9 +46,11 @@ struct WorkspaceWindowView: View {
         // (see flat-window-chrome-titlebar-merge.md).
         .background(
             FlatWindowChrome(
-                titleBarColor: NSColor(
-                    showsWelcome ? theme.palette.editorBackground : theme.palette.appBackground
-                ),
+                titleBarColor: frostSpike?.clearWindow == true
+                    ? .clear
+                    : NSColor(
+                        showsWelcome ? theme.palette.editorBackground : theme.palette.appBackground
+                    ),
                 topologyToken: windowChromeTopologyToken,
                 hidesTrafficLights: false,
                 onFullScreenChange: { isFullScreen in
@@ -77,6 +93,8 @@ struct WorkspaceWindowView: View {
         .environment(\.rafuColouredFileIcons, colouredFileIcons)
         // Board cards report their drags, so the orb tucks away.
         .environment(voiceCompanion)
+        .environment(\.rafuFrostSpike, frostSpike)
+        .modifier(FrostSpikeContainerBackground(config: frostSpike))
     }
 
     private var showsWelcome: Bool {
@@ -185,7 +203,7 @@ struct WorkspaceWindowView: View {
                     )
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(theme.palette.appBackground)
+                .frostSpikeFrame(theme.palette.appBackground)
                 .layoutPriority(1)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
@@ -201,6 +219,11 @@ struct WorkspaceWindowView: View {
             WorkspaceStatusBar(session: session)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background {
+            if let frostSpike {
+                FrostSpikeBackdrop(config: frostSpike, tint: theme.palette.appBackground)
+            }
+        }
     }
 
     private var editorCanvas: some View {
