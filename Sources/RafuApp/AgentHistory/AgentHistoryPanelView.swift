@@ -43,9 +43,10 @@ private struct AgentHistoryPanelContent: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            // No divider under the controls: space separates them from the
+            // list, as in Files (sidebar redesign).
             AgentHistoryControls(
                 state: state, isQueryFocused: $isQueryFocused, searchMessages: searchMessages)
-            Divider().overlay(theme.palette.borderSubtle)
             results
         }
         .onChange(of: state.searchFocusRequest, initial: true) { _, request in
@@ -126,13 +127,20 @@ private struct AgentHistoryControls: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 6) {
-                TextField("Search history", text: $state.query)
-                    .textFieldStyle(.plain)
-                    .rafuField(isFocused: isQueryFocused.wrappedValue)
-                    .focused(isQueryFocused)
-                    .onSubmit(searchMessages)
-                    .help(
-                        "Filter by title, folder, or branch. Press Return to search message text.")
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(theme.palette.textMuted)
+                        .accessibilityHidden(true)
+                    TextField("Search history", text: $state.query)
+                        .textFieldStyle(.plain)
+                        .focused(isQueryFocused)
+                        .onSubmit(searchMessages)
+                        .help(
+                            "Filter by title, folder, or branch. Press Return to search message text."
+                        )
+                }
+                .rafuField(isFocused: isQueryFocused.wrappedValue)
                 Button(
                     "Search Message Text", systemImage: "text.magnifyingglass",
                     action: searchMessages
@@ -149,7 +157,8 @@ private struct AgentHistoryControls: View {
             .accessibilityLabel("Agent")
             messageSearchStatus
         }
-        .padding(RafuMetrics.utilityBodyInset)
+        .padding(.horizontal, RafuMetrics.sidebarTextInset)
+        .padding(.bottom, RafuMetrics.space2)
     }
 
     @ViewBuilder
