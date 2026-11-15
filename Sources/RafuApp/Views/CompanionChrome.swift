@@ -50,11 +50,6 @@ nonisolated enum CompanionChromeMetrics {
     static let cardFillOpacity: Double = 0.04
     static let cardRowSpacing: CGFloat = 5
 
-    /// The menu bar card's inner border: inset from the popover edge, and
-    /// its corner radius.
-    static let popoverBorderInset: CGFloat = 2
-    static let popoverBorderRadius: CGFloat = 12
-
     static func tabOptionHeight(for host: CompanionHost) -> CGFloat {
         host == .menuBar ? tabOptionHeightRegular : tabOptionHeightCompact
     }

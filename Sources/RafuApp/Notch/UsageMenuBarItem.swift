@@ -18,15 +18,24 @@ import SwiftUI
 /// observation of the model, never on a timer.
 ///
 /// A click (or a touch-screen tap, which macOS delivers as a click) toggles
-/// a transient popover, the menu bar card: the shared
-/// `CompanionSectionHost` with Agents, Up next, and Usage. While the card
-/// is open, bells land in its Up next feed (`NotchCompanionModel
-/// .menuPopoverWillShow()` / `menuPopoverDidClose()`).
+/// the menu bar card: a borderless panel that hangs from the status item
+/// with concave shoulders (`CompanionMenuPanel`), holding the shared
+/// `CompanionSectionHost` with Agents, Up next, and Usage. It closes on the
+/// same triggers as a transient popover (`CompanionMenuPanelClosePolicy`).
+/// While the card is open, bells land in its Up next feed
+/// (`NotchCompanionModel.menuPopoverWillShow()` / `menuPopoverDidClose()`;
+/// the model keeps the popover names).
 @MainActor
-final class UsageMenuBarItem: NSObject, NSPopoverDelegate {
+final class UsageMenuBarItem: NSObject {
     private weak var model: NotchCompanionModel?
     private var statusItem: NSStatusItem?
-    private var popover: NSPopover?
+    /// The open card, or `nil` while it is closed. A closing card is
+    /// already `nil` here while it fades out.
+    private var panel: CompanionMenuPanel?
+    private var reveal: CompanionMenuPanelReveal?
+    private var globalClickMonitor: Any?
+    private var localClickMonitor: Any?
+    private var observers: [(NotificationCenter, any NSObjectProtocol)] = []
     /// The last drawn state, so an unrelated model change never re-renders
     /// the image.
     private var lastDrawn: Drawn?
@@ -39,10 +48,6 @@ final class UsageMenuBarItem: NSObject, NSPopoverDelegate {
         let ringSize: CGFloat
     }
 
-    /// The popover content's width and height in points. Each section
-    /// scrolls inside it.
-    static let popoverSize = NSSize(width: 380, height: 460)
-
     init(model: NotchCompanionModel) {
         self.model = model
         super.init()
@@ -50,7 +55,7 @@ final class UsageMenuBarItem: NSObject, NSPopoverDelegate {
         item.behavior = []
         if let button = item.button {
             button.target = self
-            button.action = #selector(togglePopover(_:))
+            button.action = #selector(toggleCard(_:))
             button.imagePosition = .imageLeading
             button.font = NSFont.monospacedDigitSystemFont(
                 ofSize: NSFont.menuBarFont(ofSize: 0).pointSize, weight: .regular)
@@ -59,11 +64,10 @@ final class UsageMenuBarItem: NSObject, NSPopoverDelegate {
         observe()
     }
 
-    /// Takes the item out of the menu bar and closes its popover. The
+    /// Takes the item out of the menu bar and closes its card. The
     /// controller is inert afterwards.
     func remove() {
-        popover?.performClose(nil)
-        popover = nil
+        closeCard(.removed)
         if model?.isMenuPopoverShown == true { model?.menuPopoverDidClose() }
         if let statusItem { NSStatusBar.system.removeStatusItem(statusItem) }
         statusItem = nil
@@ -151,102 +155,215 @@ final class UsageMenuBarItem: NSObject, NSPopoverDelegate {
         return image
     }
 
-    // MARK: - Popover
+    // MARK: - Card panel
 
     @objc
-    private func togglePopover(_ sender: Any?) {
-        if let popover, popover.isShown {
-            popover.performClose(sender)
+    private func toggleCard(_ sender: Any?) {
+        if panel != nil {
+            closeCard(.statusItemToggled)
             return
         }
-        showPopover()
+        showCard()
     }
 
     /// Opens the card if it is closed (a `rafu://usage` widget link). An
     /// open card stays open.
     func revealCard() {
-        if popover?.isShown == true { return }
-        showPopover()
+        if panel != nil { return }
+        showCard()
     }
 
-    private func showPopover() {
-        guard let model, let button = statusItem?.button else { return }
+    private func showCard() {
+        guard let model, let button = statusItem?.button, let anchorWindow = button.window,
+            let frame = CompanionMenuPanelGeometry.frame(
+                anchor: anchorWindow.frame, screens: Self.screens())
+        else { return }
         model.refreshUsage()
         model.menuPopoverWillShow()
+        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         // Built fresh on each open so it picks up the current theme.
-        let popover = makePopover(model: model)
-        self.popover = popover
-        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-        // Key status lets Escape, the tab shortcuts, and a reply field reach
-        // the popover while it is open.
-        popover.contentViewController?.view.window?.makeKey()
+        let reveal = CompanionMenuPanelReveal(progress: reduceMotion ? 1 : 0)
+        let panel = CompanionMenuPanel(contentRect: frame)
+        panel.onCancel = { [weak self] in self?.closeCard(.escape) }
+        let content = CompanionMenuPanelView(
+            model: model, theme: RafuThemeCatalog.resolvedForCurrentAppearance(), reveal: reveal,
+            close: { [weak self] in self?.closeCard(.closeButton) })
+        let hostingView = NotchHUDPassthroughHostingView(rootView: content)
+        hostingView.sizingOptions = []
+        hostingView.frame = NSRect(origin: .zero, size: frame.size)
+        hostingView.autoresizingMask = [.width, .height]
+        panel.contentView = hostingView
+        // Beside a shoulder the card takes no click: it goes to what is
+        // behind, as the outline draws.
+        hostingView.hitOutline = CompanionMenuPanelGeometry.outline
+        self.panel = panel
+        self.reveal = reveal
+        installCloseTriggers(for: panel)
+        // Key status lets Escape, the tab shortcuts, the arrows, and a reply
+        // field reach the card. The panel is non-activating, so Rafu does
+        // not come forward and the Dock and the menu bar do not change.
+        panel.alphaValue = 0
+        panel.makeKeyAndOrderFront(nil)
+        NSAnimationContext.runAnimationGroup(
+            { context in
+                context.duration =
+                    reduceMotion
+                    ? CompanionMenuPanelReveal.reducedFadeDuration
+                    : CompanionMenuPanelReveal.fadeDuration
+                panel.animator().alphaValue = 1
+            },
+            completionHandler: { [weak panel] in
+                // The shadow follows the drawn outline once the fade ends.
+                Task { @MainActor [weak panel] in panel?.invalidateShadow() }
+            })
     }
 
-    private func makePopover(model: NotchCompanionModel) -> NSPopover {
-        let popover = NSPopover()
-        popover.behavior = .transient
-        popover.animates = !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-        popover.delegate = self
-        // The sections use the notch's always-dark ink.
-        popover.appearance = NSAppearance(named: .darkAqua)
-        let content = UsageMenuBarPopoverView(
-            model: model, theme: RafuThemeCatalog.resolvedForCurrentAppearance(),
-            close: { [weak popover] in popover?.performClose(nil) })
-        let controller = NSHostingController(rootView: content)
-        controller.sizingOptions = []
-        controller.view.frame = NSRect(origin: .zero, size: Self.popoverSize)
-        popover.contentViewController = controller
-        popover.contentSize = Self.popoverSize
-        return popover
+    /// Closes the card for `event` when the close rules say so. Every close
+    /// path ends here, so feed snippets never outlive the card (ADR 0016).
+    private func closeCard(_ event: CompanionMenuPanelCloseEvent) {
+        guard CompanionMenuPanelClosePolicy.closes(on: event), let panel else { return }
+        removeCloseTriggers()
+        self.panel = nil
+        let reveal = self.reveal
+        self.reveal = nil
+        model?.menuPopoverDidClose()
+        panel.onCancel = nil
+        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        if event == .removed {
+            panel.orderOut(nil)
+        } else {
+            if !reduceMotion, let reveal {
+                withAnimation(CompanionMenuPanelReveal.closeAnimation) { reveal.progress = 0 }
+            }
+            NSAnimationContext.runAnimationGroup(
+                { context in
+                    context.duration =
+                        reduceMotion
+                        ? CompanionMenuPanelReveal.reducedFadeDuration
+                        : CompanionMenuPanelReveal.fadeDuration
+                    panel.animator().alphaValue = 0
+                },
+                completionHandler: {
+                    // Each open builds its own panel, so this old one never
+                    // hides a newer card.
+                    Task { @MainActor in panel.orderOut(nil) }
+                })
+        }
+        returnAccessibilityFocus()
     }
 
-    // MARK: - NSPopoverDelegate
+    /// VoiceOver goes back to the status item, as when a popover closes.
+    private func returnAccessibilityFocus() {
+        guard NSWorkspace.shared.isVoiceOverEnabled, let button = statusItem?.button else {
+            return
+        }
+        NSAccessibility.post(
+            element: button, notification: .layoutChanged,
+            userInfo: [.uiElements: [button]])
+    }
 
-    /// Every close path (a click outside, Escape, the close button, the
-    /// status item) ends here, so feed snippets never outlive the card.
-    nonisolated func popoverDidClose(_ notification: Notification) {
-        let closed = (notification.object as AnyObject?).map(ObjectIdentifier.init)
-        MainActor.assumeIsolated {
-            // A stale close from an earlier popover never ends a newer one.
-            guard closed == nil || closed == popover.map(ObjectIdentifier.init) else { return }
-            popover = nil
-            model?.menuPopoverDidClose()
+    private static func screens() -> [CompanionMenuPanelScreen] {
+        NSScreen.screens.map {
+            CompanionMenuPanelScreen(frame: $0.frame, visibleFrame: $0.visibleFrame)
         }
     }
-}
 
-/// The menu bar card: the shared section host on the notch's black surface.
-private struct UsageMenuBarPopoverView: View {
-    let model: NotchCompanionModel
-    let theme: RafuTheme
-    let close: @MainActor () -> Void
+    // MARK: - Close triggers
 
-    var body: some View {
-        let border = RoundedRectangle(
-            cornerRadius: CompanionChromeMetrics.popoverBorderRadius, style: .continuous)
-        CompanionSectionHost(model: model, host: .menuBar, close: close)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            .background(Color.black)
-            // The notch's gradient border, inset inside the popover's own
-            // rim: open while shown, a sweep on a new attention event, a
-            // slow sweep while an agent works (`CompanionGlowPolicy`).
-            .overlay {
-                Color.clear
-                    .companionGlowBorder(
-                        stroke: border, clip: border, visible: true,
-                        anyWorking: model.agentSummary.working > 0,
-                        attention: model.attentionCount + model.agentSummary.attention
-                    )
-                    .padding(CompanionChromeMetrics.popoverBorderInset)
-                    .allowsHitTesting(false)
+    /// The triggers a transient popover closes on: a click outside (in
+    /// another app, the desktop, or another Rafu window), a lost key
+    /// status, a Space change, a locked screen, or a session switch. The
+    /// click handlers read only the event's window number, never its
+    /// location or keys.
+    private func installCloseTriggers(for panel: CompanionMenuPanel) {
+        let mouseDown: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+        globalClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: mouseDown) {
+            [weak self] _ in
+            // Global monitor handlers run on the main thread.
+            MainActor.assumeIsolated { self?.handleClick(windowNumber: nil, isGlobal: true) }
+        }
+        localClickMonitor = NSEvent.addLocalMonitorForEvents(matching: mouseDown) {
+            [weak self] event in
+            let windowNumber = event.window?.windowNumber
+            MainActor.assumeIsolated {
+                self?.handleClick(windowNumber: windowNumber, isGlobal: false)
             }
-            .environment(\.colorScheme, .dark)
-            .rafuTheme(theme)
-            .onExitCommand { close() }
-            .accessibilityElement(children: .contain)
-            .accessibilityLabel("Rafu")
-            // Pauses the mascot and spinners while the card is hidden or the
-            // screen is locked.
-            .rafuMotionScope()
+            return event
+        }
+        let center = NotificationCenter.default
+        let workspace = NSWorkspace.shared.notificationCenter
+        let distributed: NotificationCenter = DistributedNotificationCenter.default()
+        observers = [
+            (
+                center,
+                center.addObserver(
+                    forName: NSWindow.didResignKeyNotification, object: panel, queue: .main
+                ) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.closeCard(.resignedKey) }
+                }
+            ),
+            (
+                center,
+                center.addObserver(
+                    forName: NSApplication.didChangeScreenParametersNotification, object: nil,
+                    queue: .main
+                ) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.repositionCard() }
+                }
+            ),
+            (
+                workspace,
+                workspace.addObserver(
+                    forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil,
+                    queue: .main
+                ) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.closeCard(.activeSpaceChanged) }
+                }
+            ),
+            (
+                workspace,
+                workspace.addObserver(
+                    forName: NSWorkspace.sessionDidResignActiveNotification, object: nil,
+                    queue: .main
+                ) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.closeCard(.screenLocked) }
+                }
+            ),
+            (
+                distributed,
+                distributed.addObserver(
+                    forName: Notification.Name("com.apple.screenIsLocked"), object: nil,
+                    queue: .main
+                ) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.closeCard(.screenLocked) }
+                }
+            ),
+        ]
+    }
+
+    private func removeCloseTriggers() {
+        if let globalClickMonitor { NSEvent.removeMonitor(globalClickMonitor) }
+        if let localClickMonitor { NSEvent.removeMonitor(localClickMonitor) }
+        globalClickMonitor = nil
+        localClickMonitor = nil
+        for (center, token) in observers { center.removeObserver(token) }
+        observers = []
+    }
+
+    private func handleClick(windowNumber: Int?, isGlobal: Bool) {
+        guard let panel else { return }
+        let target = CompanionMenuPanelClosePolicy.clickTarget(
+            isGlobal: isGlobal, eventWindowNumber: windowNumber,
+            panelWindowNumber: panel.windowNumber,
+            statusItemWindowNumber: statusItem?.button?.window?.windowNumber)
+        closeCard(.mouseDown(target))
+    }
+
+    /// A display change moves the card back under the status item.
+    private func repositionCard() {
+        guard let panel, let anchor = statusItem?.button?.window?.frame,
+            let frame = CompanionMenuPanelGeometry.frame(anchor: anchor, screens: Self.screens())
+        else { return }
+        panel.setFrame(frame, display: true)
     }
 }
