@@ -346,7 +346,8 @@ enum CodexSessionIndex {
                 let id = AgentHistoryJSON.nonEmptyString(row["id"]),
                 let name = AgentHistoryJSON.string(row["thread_name"])
             else { continue }
-            let title = AgentHistoryText.singleLine(name, limit: AgentHistoryEntryText.titleLimit)
+            let title = AgentHistoryJSON.native(
+                AgentHistoryText.singleLine(name, limit: AgentHistoryEntryText.titleLimit))
             if title.isEmpty {
                 titles.removeValue(forKey: id)
             } else {

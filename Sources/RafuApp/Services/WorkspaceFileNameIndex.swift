@@ -1,4 +1,5 @@
 import Foundation
+import RafuCore
 
 /// Background filename index backing the command palette's file mode. Builds
 /// a compact `[String]` of workspace-relative paths — never the sidebar's
@@ -130,37 +131,59 @@ actor WorkspaceFileNameIndex {
             )
         else { return ([], false) }
 
+        let cap = entryCap
         var paths: [String] = []
         var visited = 0
         var isTruncated = false
-        while let url = enumerator.nextObject() as? URL {
+        // One pool per enumerated entry: every yielded `URL`, its path
+        // `String`, and the resource-value objects are freed here, not when
+        // the whole build job ends (the loop has no `await`). A kept path is
+        // copied to native storage so it does not pin a bridged `NSString`.
+        walk: while true {
             visited += 1
             if visited.isMultiple(of: 2_000) { try Task.checkCancellation() }
-            guard let values = try? url.resourceValues(forKeys: keys) else { continue }
-            if values.isSymbolicLink == true {
-                enumerator.skipDescendants()
-                continue
-            }
-            if values.isDirectory == true {
-                if WorkspaceFileService.excludedDirectories.contains(url.lastPathComponent) {
+            let step: EnumerationStep = withAutoreleasePool {
+                guard let url = enumerator.nextObject() as? URL else { return .finished }
+                guard let values = try? url.resourceValues(forKeys: keys) else { return .skipped }
+                if values.isSymbolicLink == true {
                     enumerator.skipDescendants()
+                    return .skipped
                 }
-                continue
+                if values.isDirectory == true {
+                    if WorkspaceFileService.excludedDirectories.contains(url.lastPathComponent) {
+                        enumerator.skipDescendants()
+                    }
+                    return .skipped
+                }
+                guard values.isRegularFile == true, url.lastPathComponent != ".DS_Store" else {
+                    return .skipped
+                }
+                guard paths.count < cap else { return .capReached }
+                let resolvedURL = url.resolvingSymlinksInPath().standardizedFileURL
+                var path = Self.relativePath(for: resolvedURL, rootURL: resolvedRootURL)
+                path.makeContiguousUTF8()
+                paths.append(path)
+                return .skipped
             }
-            guard values.isRegularFile == true, url.lastPathComponent != ".DS_Store" else {
-                continue
-            }
-            guard paths.count < entryCap else {
+            switch step {
+            case .skipped: continue walk
+            case .finished: break walk
+            case .capReached:
                 isTruncated = true
-                break
+                break walk
             }
-            let resolvedURL = url.resolvingSymlinksInPath().standardizedFileURL
-            paths.append(relativePath(for: resolvedURL, rootURL: resolvedRootURL))
         }
         return (paths, isTruncated)
     }
 
-    private func relativePath(for url: URL, rootURL: URL) -> String {
+    /// The outcome of one pooled enumerator step.
+    private enum EnumerationStep {
+        case skipped
+        case finished
+        case capReached
+    }
+
+    private static func relativePath(for url: URL, rootURL: URL) -> String {
         String(url.path.dropFirst(rootURL.path.count)).trimmingCharacters(
             in: CharacterSet(charactersIn: "/")
         )

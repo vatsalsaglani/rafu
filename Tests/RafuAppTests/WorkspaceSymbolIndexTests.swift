@@ -34,6 +34,53 @@ func symbolExtractorKeepsAllKindsAndDedups() async throws {
     }
 }
 
+/// A fixture whose names are longer than 15 UTF-8 bytes (so a `String` cannot
+/// hold them inline) and whose file contains a non-ASCII character before and
+/// inside the names (so the UTF-16 offsets differ from the byte offsets).
+private let nativeNameFixture = """
+    // Größe 日本語 comment
+    struct ConfigurationRegistryProvider {
+        func resolveConfigurationValueForKey() {}
+        var currentConfigurationSnapshotValue = 0
+        let größenAnpassungsFaktorWert = 1
+    }
+    func topLevelInitializationCoordinator() {}
+    """
+
+@Test("Extracted symbol names are native strings, not bridged NSString values")
+func symbolExtractorNamesAreContiguousUTF8() async throws {
+    let extracted = try #require(
+        await WorkspaceSymbolExtractor.extract(text: nativeNameFixture, grammarID: .swift))
+
+    let names = Set(extracted.map(\.name))
+    #expect(names.contains("ConfigurationRegistryProvider"))
+    #expect(names.contains("resolveConfigurationValueForKey"))
+    #expect(names.contains("größenAnpassungsFaktorWert"))
+    #expect(names.contains { $0.utf8.count > 15 })
+    // A bridged `NSString` is not contiguous UTF-8; this fails if the
+    // `makeContiguousUTF8()` copy in `WorkspaceSymbolExtractor` is removed.
+    for symbol in extracted {
+        #expect(symbol.name.isContiguousUTF8, "\(symbol.name) is not native")
+    }
+}
+
+@Test("Names returned by the built index are native strings")
+func symbolIndexNamesAreContiguousUTF8() async throws {
+    let root = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    try write(nativeNameFixture, to: root.appending(path: "Fixture.swift"))
+
+    let index = WorkspaceSymbolIndex()
+    await index.build(rootURL: root)
+
+    let matches = try await index.query(term: "Configuration", limit: 20)
+    #expect(matches.count >= 3)
+    for match in matches {
+        #expect(match.name.isContiguousUTF8, "\(match.name) is not native")
+        #expect(match.relativePath.isContiguousUTF8)
+    }
+}
+
 @Test("Extractor returns nil for a grammar without a vendored tags.scm")
 func symbolExtractorNilForUnsupportedGrammar() async throws {
     #expect(await WorkspaceSymbolExtractor.extract(text: "{}\n", grammarID: .json) == nil)

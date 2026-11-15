@@ -125,3 +125,72 @@ func forEachLineYieldsTheSameLinesForEveryChunkSize(chunkSize: Int) throws {
         #expect(none.isEmpty)
     }
 }
+
+// MARK: Native strings
+//
+// A string read out of `JSONSerialization` output can wrap its `NSString`.
+// `String.isContiguousUTF8` is false for such a string, so these tests fail
+// if a `makeContiguousUTF8()` copy is removed from a kept value.
+
+/// Longer than 15 UTF-8 bytes (no inline small string) and non-ASCII.
+private let nativeFixtureText = "Größe prüfen 日本語 und 🎉 weiter, mit einem langen Satz"
+
+/// `text` as a JSON string literal, escaped by `JSONSerialization`.
+private func jsonLiteral(_ text: String) throws -> String {
+    let data = try JSONSerialization.data(withJSONObject: [text])
+    return String(decoding: data.dropFirst().dropLast(), as: UTF8.self)
+}
+
+@Test func nonEmptyStringOutputIsContiguousUTF8() throws {
+    // No padding: `trimmingCharacters` copies a padded string, which would
+    // hide a missing `native` copy.
+    let literal = try jsonLiteral(nativeFixtureText)
+    let data = Data(#"{"t":\#(literal)}"#.utf8)
+    let parsed = try #require(AgentHistoryJSON.object(data))
+    let value = try #require(AgentHistoryJSON.nonEmptyString(parsed["t"]))
+    #expect(value == nativeFixtureText)
+    #expect(value.utf8.count > 15)
+    #expect(value.isContiguousUTF8)
+    #expect(AgentHistoryJSON.native(value).isContiguousUTF8)
+}
+
+@Test func transcriptItemTextAndDetailAreContiguousUTF8() throws {
+    let message = try jsonLiteral(nativeFixtureText)
+    let output = try jsonLiteral("Große Ausgabe der Prüfung 日本語 mit Zeilen\nzweite Zeile 🎉")
+    let common = #""timestamp":"2026-01-02T10:00:05Z","sessionId":"s","cwd":"/work/alpha""#
+    let lines =
+        [
+            #"{"type":"user","message":{"role":"user","content":\#(message)},\#(common)}"#,
+            #"{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_1","name":"Edit","input":{"file_path":"/work/alpha/Größe日本語.swift","new_string":\#(message)}}]},\#(common)}"#,
+            #"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":\#(output),"is_error":false}]},\#(common)}"#,
+            #"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":\#(message)}]},\#(common)}"#,
+        ].joined(separator: "\n") + "\n"
+    let url = try AgentHistoryFixtures.temporaryFile(lines)
+    defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+    let value = try AgentTranscriptLoader.load(
+        fileURL: url, key: AgentHistorySessionKey(provider: .claudeCode, sessionID: "s"),
+        limits: .standard)
+
+    #expect(value.items.count == 4)
+    #expect(value.items.filter { $0.detail != nil }.count >= 2)
+    #expect(value.items.contains { $0.text.utf8.count > 15 })
+    for item in value.items {
+        #expect(item.text.isContiguousUTF8, "item \(item.id) text is not native")
+        if let detail = item.detail {
+            #expect(detail.isContiguousUTF8, "item \(item.id) detail is not native")
+        }
+    }
+}
+
+@Test func codexSessionIndexTitlesAreContiguousUTF8() throws {
+    let name = try jsonLiteral("Größe prüfen 日本語 und 🎉 weiter, mit einem langen Titel")
+    let row = #"{"id":"22222222-2222-4222-8222-222222222222","thread_name":\#(name)}"# + "\n"
+    let url = try AgentHistoryFixtures.temporaryFile(row, name: "session_index.jsonl")
+    defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+
+    let titles = try CodexSessionIndex.load(index: url)
+    let title = try #require(titles["22222222-2222-4222-8222-222222222222"])
+    #expect(title == "Größe prüfen 日本語 und 🎉 weiter, mit einem langen Titel")
+    #expect(title.utf8.count > 15)
+    #expect(title.isContiguousUTF8)
+}
