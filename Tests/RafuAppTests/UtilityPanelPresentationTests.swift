@@ -120,7 +120,9 @@ struct UtilityPanelPresentationTests {
 
         #expect(source.contains("items: GitInspectorSection.allCases"))
         #expect(source.contains("selection: $session.gitInspectorSection"))
-        #expect(source.contains("GitSectionPicker("))
+        #expect(source.contains("RafuSegmentedPicker("))
+        #expect(!source.contains("GitSectionPicker"))
+        #expect(source.contains("symbol: { $0.symbolName }"))
         #expect(source.contains(".accessibilityLabel(\"Source Control section\")"))
         #expect(source.contains(".accessibilityValue(session.gitInspectorSection.title)"))
         #expect(

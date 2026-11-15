@@ -280,6 +280,15 @@ struct RafuSecondaryButtonStyle: ButtonStyle {
 }
 
 /// Theme-tinted segmented control replacing the system blue segmented picker.
+/// It is the one segmented control in Rafu: the Source Control section picker
+/// and the History provider filter use it as well.
+///
+/// The look has no outer border (sidebar redesign): the track is the chip
+/// fill, and the selected segment is the selection fill with a semibold label
+/// and the `.isSelected` trait, so selection never depends on colour alone.
+/// With Increase Contrast the selected segment also gets a `borderStrong`
+/// hairline. Both fills are opaque tokens, so the control reads the same on a
+/// translucent sidebar.
 ///
 /// `fillsWidth` exists for the call sites that replaced a system segmented
 /// picker inside a `Form` row or a full-width
@@ -287,73 +296,105 @@ struct RafuSecondaryButtonStyle: ButtonStyle {
 /// width and split it evenly between segments. Left at `false` the control
 /// hugs its labels, which is what the inline (toolbar/header) call sites
 /// want.
+///
+/// `symbol` is optional. When it is given, the control shows words while they
+/// fit and changes to icons (with the word as tooltip and accessibility
+/// label) only when they do not. Words are always tried first: three icons
+/// are hard to learn.
 struct RafuSegmentedPicker<Item: Hashable>: View {
     let items: [Item]
     @Binding var selection: Item
     var fillsWidth: Bool = false
     let title: (Item) -> String
+    let symbol: ((Item) -> String)?
 
     init(
         items: [Item],
         selection: Binding<Item>,
         fillsWidth: Bool = false,
+        symbol: ((Item) -> String)? = nil,
         title: @escaping (Item) -> String
     ) {
         self.items = items
         self._selection = selection
         self.fillsWidth = fillsWidth
+        self.symbol = symbol
         self.title = title
     }
 
     @Environment(\.rafuTheme) private var theme
+    @Environment(\.colorSchemeContrast) private var contrast
     @Namespace private var segmentNamespace
 
     var body: some View {
+        if let symbol {
+            ViewThatFits(in: .horizontal) {
+                track(usesIcons: false, symbol: symbol)
+                track(usesIcons: true, symbol: symbol)
+            }
+        } else {
+            track(usesIcons: false, symbol: nil)
+        }
+    }
+
+    private func track(usesIcons: Bool, symbol: ((Item) -> String)?) -> some View {
         HStack(spacing: 2) {
             ForEach(items, id: \.self) { item in
-                segment(for: item)
+                segment(for: item, usesIcons: usesIcons, symbol: symbol)
                     .frame(maxWidth: fillsWidth ? .infinity : nil)
             }
         }
         .padding(2)
         .background(
             RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .fill(theme.palette.appBackground.opacity(0.6))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .strokeBorder(theme.palette.borderSubtle)
+                .fill(theme.palette.chipBackground)
         )
     }
 
-    private func segment(for item: Item) -> some View {
+    private func segment(
+        for item: Item, usesIcons: Bool, symbol: ((Item) -> String)?
+    ) -> some View {
         let isSelected = item == selection
+        let label = title(item)
         return Button {
             withAnimation(RafuMotion.selection) { selection = item }
         } label: {
-            Text(title(item))
-                .rafuNoWrapSegmentLabel()
-                .font(.system(size: 11.5, weight: isSelected ? .semibold : .regular))
-                .foregroundStyle(
-                    isSelected ? theme.palette.textPrimary : theme.palette.textSecondary
-                )
-                .padding(.horizontal, 12)
-                .padding(.vertical, 3.5)
-                .frame(maxWidth: fillsWidth ? .infinity : nil)
-                .background {
-                    if isSelected {
-                        RoundedRectangle(cornerRadius: 5.5, style: .continuous)
-                            .fill(theme.palette.elevatedBackground)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 5.5, style: .continuous)
-                                    .strokeBorder(theme.palette.borderStrong.opacity(0.6))
-                            )
-                            .matchedGeometryEffect(id: "segment", in: segmentNamespace)
-                    }
+            Group {
+                if usesIcons, let symbol {
+                    Image(systemName: symbol(item))
+                        .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
+                } else {
+                    Text(label)
+                        .rafuNoWrapSegmentLabel()
+                        .font(.system(size: 11.5, weight: isSelected ? .semibold : .regular))
                 }
-                .contentShape(RoundedRectangle(cornerRadius: 5.5, style: .continuous))
+            }
+            .foregroundStyle(
+                isSelected ? theme.palette.textPrimary : theme.palette.textSecondary
+            )
+            // A full-width control splits the width anyway, so its segments
+            // need less padding; that lets the words fit a 240 pt sidebar.
+            .padding(.horizontal, fillsWidth ? 6 : 12)
+            .padding(.vertical, 3.5)
+            .frame(maxWidth: fillsWidth ? .infinity : nil)
+            .background {
+                if isSelected {
+                    RoundedRectangle(cornerRadius: 5.5, style: .continuous)
+                        .fill(theme.palette.selection)
+                        .overlay {
+                            if contrast == .increased {
+                                RoundedRectangle(cornerRadius: 5.5, style: .continuous)
+                                    .strokeBorder(theme.palette.borderStrong)
+                            }
+                        }
+                        .matchedGeometryEffect(id: "segment", in: segmentNamespace)
+                }
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 5.5, style: .continuous))
         }
         .buttonStyle(.plain)
+        .help(symbol == nil ? "" : label)
+        .accessibilityLabel(label)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }

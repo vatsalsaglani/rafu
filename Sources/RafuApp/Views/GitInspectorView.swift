@@ -14,6 +14,11 @@ struct SourceControlPanelView: View {
     @State private var isCreatingBranch = false
     @State private var newBranchName = ""
     @State private var pendingMergeBranch: String?
+    @State private var isStashSheetPresented = false
+    /// The same stored key `GitInspectorView` reads, so the overflow menu's
+    /// "View as" and the Changes list always agree.
+    @AppStorage("gitChangesViewMode") private var gitChangesViewModeRaw =
+        GitChangesViewMode.flat.rawValue
 
     var body: some View {
         VStack(spacing: 0) {
@@ -24,6 +29,7 @@ struct SourceControlPanelView: View {
                 }
                 .buttonStyle(RafuIconButtonStyle(size: 24))
                 .help("Refresh Source Control")
+                overflowMenu
             }
 
             SourceControlRepositoriesSection(session: session)
@@ -49,6 +55,9 @@ struct SourceControlPanelView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .sheet(isPresented: $isStashSheetPresented) {
+            GitStashChangesSheet(session: session)
+        }
         .sheet(isPresented: $isCreatingBranch) {
             RafuTextFieldPopup(
                 symbol: "arrow.triangle.branch", title: "Create Branch",
@@ -85,22 +94,44 @@ struct SourceControlPanelView: View {
         }
     }
 
+    /// The third and later header actions (design: at most two icon
+    /// buttons, then one overflow menu): Stash Changes… and View as. Both
+    /// keep their own labels; the stash item is disabled with no changes.
+    private var overflowMenu: some View {
+        RafuPanelHeaderOverflowMenu(accessibilityLabel: "More Source Control Actions") {
+            Button("Stash Changes…", systemImage: "archivebox") {
+                isStashSheetPresented = true
+            }
+            .disabled(
+                snapshot.changes.isEmpty || session.isGitBusy || session.isGitHunkActionBusy)
+            Picker("View as", selection: changesViewModeBinding) {
+                ForEach(GitChangesViewMode.allCases, id: \.self) { mode in
+                    Label(mode.title, systemImage: mode.symbolName).tag(mode)
+                }
+            }
+            .pickerStyle(.inline)
+        }
+        .disabled(session.gitSnapshot == nil)
+    }
+
+    private var changesViewModeBinding: Binding<GitChangesViewMode> {
+        Binding(
+            get: { GitChangesViewMode(rawValue: gitChangesViewModeRaw) ?? .flat },
+            set: { gitChangesViewModeRaw = $0.rawValue }
+        )
+    }
+
+    /// The branch and sync row: a secondary row on the one sidebar surface,
+    /// so no fill and no hairline (sidebar redesign), with its text on the
+    /// header title's 10 pt edge.
     private var repositoryContext: some View {
         HStack(spacing: RafuMetrics.space2) {
             branchMenu
             Spacer(minLength: RafuMetrics.space1)
             syncMenu
         }
-        .padding(.horizontal, RafuMetrics.utilityBodyInset)
-        .padding(.vertical, RafuMetrics.space2)
-        .background(theme.palette.elevatedBackground)
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(theme.palette.borderSubtle)
-                .frame(height: RafuMetrics.hairline)
-                .allowsHitTesting(false)
-                .accessibilityHidden(true)
-        }
+        .padding(.horizontal, RafuMetrics.sidebarTextInset)
+        .frame(minHeight: 26)
         .accessibilityElement(children: .contain)
     }
 
@@ -216,9 +247,9 @@ struct SourceControlPanelView: View {
                 }
             }
         } label: {
+            // The counts are the label. The circular-arrows glyph read as a
+            // second Refresh beside the header's.
             HStack(spacing: 4) {
-                Image(systemName: "arrow.triangle.2.circlepath")
-                    .font(.system(size: 10, weight: .medium))
                 Text(presentation.label)
                     .font(.system(size: 11, weight: .medium))
                     .monospacedDigit()
@@ -288,7 +319,6 @@ struct SourceControlPanelView: View {
 struct GitInspectorView: View {
     @Environment(\.rafuTheme) private var theme
     @Bindable var session: WorkspaceSession
-    @State private var isStashSheetPresented = false
     @State private var isStashesExpanded = true
     @State private var isAddWorktreeSheetPresented = false
     @State private var pendingStashAction: PendingStashAction?
@@ -309,14 +339,20 @@ struct GitInspectorView: View {
             if let mergeState = session.gitMergeState {
                 mergeBanner(mergeState)
             }
-            GitSectionPicker(
+            // "Changes 3 | History | Worktrees" in words; icons (with the word
+            // as tooltip) only when the words do not fit the sidebar.
+            RafuSegmentedPicker(
                 items: GitInspectorSection.allCases,
                 selection: $session.gitInspectorSection,
-                changeCount: snapshot.changes.count
+                fillsWidth: true,
+                symbol: { $0.symbolName },
+                title: { [changeCount = snapshot.changes.count] section in
+                    section.segmentLabel(changeCount: changeCount)
+                }
             )
             .accessibilityLabel("Source Control section")
             .accessibilityValue(session.gitInspectorSection.title)
-            .padding(.horizontal, RafuMetrics.utilityBodyInset)
+            .padding(.horizontal, RafuMetrics.sidebarTextInset)
             .padding(.vertical, RafuMetrics.space2)
             .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -361,9 +397,6 @@ struct GitInspectorView: View {
                 pendingStashAction = nil
             }
         }
-        .sheet(isPresented: $isStashSheetPresented) {
-            GitStashChangesSheet(session: session)
-        }
     }
 
     private func mergeBanner(_ mergeState: GitMergeState) -> some View {
@@ -405,33 +438,45 @@ struct GitInspectorView: View {
             } else {
                 List(selection: $session.gitSelectedChangeIDs) {
                     if !snapshot.conflicts.isEmpty {
-                        Section("Conflicts (\(snapshot.conflicts.count))") {
+                        Section {
                             ForEach(snapshot.conflicts) { change in
                                 changeRow(change, scope: .workingTree)
                             }
+                        } header: {
+                            RafuSidebarSectionHeader(
+                                title: "Conflicts", count: snapshot.conflicts.count)
                         }
                     }
                     switch changesViewMode {
                     case .flat:
                         if !snapshot.stagedChanges.isEmpty {
-                            Section("Staged (\(snapshot.stagedChanges.count))") {
+                            Section {
                                 ForEach(snapshot.stagedChanges) { change in
                                     changeRow(change, scope: .staged)
                                 }
+                            } header: {
+                                RafuSidebarSectionHeader(
+                                    title: "Staged", count: snapshot.stagedChanges.count)
                             }
                         }
                         if !snapshot.unstagedChanges.isEmpty {
-                            Section("Changes (\(snapshot.unstagedChanges.count))") {
+                            Section {
                                 ForEach(snapshot.unstagedChanges) { change in
                                     changeRow(change, scope: .workingTree)
                                 }
+                            } header: {
+                                RafuSidebarSectionHeader(
+                                    title: "Changes", count: snapshot.unstagedChanges.count)
                             }
                         }
                     case .tree:
                         let nonConflictedChanges = snapshot.changes.filter { !$0.isConflicted }
                         if !nonConflictedChanges.isEmpty {
-                            Section("Changes (\(nonConflictedChanges.count))") {
+                            Section {
                                 GitChangeTreeRows(session: session, changes: nonConflictedChanges)
+                            } header: {
+                                RafuSidebarSectionHeader(
+                                    title: "Changes", count: nonConflictedChanges.count)
                             }
                         }
                     }
@@ -447,63 +492,19 @@ struct GitInspectorView: View {
         }
     }
 
-    /// Count on the left; a neutral "View as" pull-down and a neutral stash
-    /// icon on the right (G5). Nothing here is gold.
+    /// With changes, the List section headers carry the counts, so no
+    /// summary row is drawn. With no changes but stashes, one quiet line says
+    /// so (with neither, the "No Changes" empty state does). Stash Changes…
+    /// and View as moved to the header's overflow menu.
+    @ViewBuilder
     private var changesHeader: some View {
-        HStack(spacing: 6) {
-            Text(
-                "\(snapshot.changes.count) changed \(snapshot.changes.count == 1 ? "file" : "files")"
-            )
-            .font(.system(size: 12))
-            .foregroundStyle(theme.palette.textSecondary)
-            .lineLimit(1)
-            Spacer(minLength: 4)
-            Button("Stash Changes…", systemImage: "archivebox") {
-                isStashSheetPresented = true
-            }
-            .buttonStyle(RafuIconButtonStyle(size: 22, iconSize: 11))
-            .disabled(snapshot.changes.isEmpty || session.isGitBusy || session.isGitHunkActionBusy)
-            .help("Stash Changes…")
-            viewAsMenu
+        if snapshot.changes.isEmpty, !session.gitStashes.isEmpty {
+            Text("No changes")
+                .font(.system(size: 12))
+                .foregroundStyle(theme.palette.textSecondary)
+                .frame(maxWidth: .infinity, minHeight: 26, alignment: .leading)
+                .padding(.horizontal, RafuMetrics.sidebarTextInset)
         }
-        .padding(.horizontal, 10)
-        .padding(.top, 8)
-        .padding(.bottom, 2)
-    }
-
-    private var viewAsMenu: some View {
-        Menu {
-            Picker("View as", selection: changesViewModeBinding) {
-                ForEach(GitChangesViewMode.allCases, id: \.self) { mode in
-                    Label(mode.title, systemImage: mode.symbolName).tag(mode)
-                }
-            }
-            .pickerStyle(.inline)
-            .labelsHidden()
-        } label: {
-            HStack(spacing: 3) {
-                Text("View as")
-                    .font(.system(size: 12))
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 8, weight: .semibold))
-            }
-            .foregroundStyle(theme.palette.textSecondary)
-            .contentShape(.rect)
-        }
-        .menuStyle(.borderlessButton)
-        .tint(theme.palette.textSecondary)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .help("View as List or Tree")
-        .accessibilityLabel("View as")
-        .accessibilityValue(changesViewMode.title)
-    }
-
-    private var changesViewModeBinding: Binding<GitChangesViewMode> {
-        Binding(
-            get: { changesViewMode },
-            set: { gitChangesViewModeRaw = $0.rawValue }
-        )
     }
 
     private var stashSection: some View {
@@ -525,9 +526,9 @@ struct GitInspectorView: View {
                 HStack(spacing: 6) {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(theme.palette.textSecondary)
                         .rotationEffect(.degrees(isStashesExpanded ? 90 : 0))
-                    Label("Stashes (\(session.gitStashes.count))", systemImage: "archivebox")
-                    Spacer()
+                    RafuSidebarSectionHeader(title: "Stashes", count: session.gitStashes.count)
                 }
                 .contentShape(.rect)
             }
@@ -845,75 +846,6 @@ struct GitInspectorView: View {
     private func refreshAllGitState() async {
         await session.refreshGit()
         await GitStashCoordinator.refresh(session: session)
-    }
-}
-
-/// "Changes (n) | History | Worktrees" (G1). Words never wrap: every segment
-/// is one line with a fixed (equal) width, and below
-/// `GitSectionPickerLayout.iconThreshold` the segments show icons with
-/// tooltips instead.
-private struct GitSectionPicker: View {
-    @Environment(\.rafuTheme) private var theme
-    let items: [GitInspectorSection]
-    @Binding var selection: GitInspectorSection
-    let changeCount: Int
-
-    var body: some View {
-        GeometryReader { proxy in
-            let usesIcons = GitSectionPickerLayout.usesIcons(forWidth: proxy.size.width)
-            HStack(spacing: 2) {
-                ForEach(items, id: \.self) { item in
-                    segment(for: item, usesIcons: usesIcons)
-                }
-            }
-            .padding(2)
-            .background(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(theme.palette.appBackground.opacity(0.6))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .strokeBorder(theme.palette.borderSubtle)
-            )
-        }
-        .frame(height: 28)
-    }
-
-    private func segment(for item: GitInspectorSection, usesIcons: Bool) -> some View {
-        let isSelected = item == selection
-        let label = item.segmentLabel(changeCount: changeCount)
-        return Button {
-            selection = item
-        } label: {
-            Group {
-                if usesIcons {
-                    Image(systemName: item.symbolName)
-                        .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
-                } else {
-                    Text(label)
-                        .font(.system(size: 11.5, weight: isSelected ? .semibold : .regular))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.85)
-                }
-            }
-            .foregroundStyle(isSelected ? theme.palette.textPrimary : theme.palette.textSecondary)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background {
-                if isSelected {
-                    RoundedRectangle(cornerRadius: 5.5, style: .continuous)
-                        .fill(theme.palette.elevatedBackground)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 5.5, style: .continuous)
-                                .strokeBorder(theme.palette.borderStrong.opacity(0.6))
-                        )
-                }
-            }
-            .contentShape(RoundedRectangle(cornerRadius: 5.5, style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .help(label)
-        .accessibilityLabel(item.title)
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
 

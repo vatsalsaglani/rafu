@@ -1102,6 +1102,35 @@ struct RafuPanelHeaderOverflowMenu<Content: View>: View {
     }
 }
 
+/// One section header style for the sidebar lists ("Staged", "Changes",
+/// "Saved Terminal Groups"): 11 pt semibold in the secondary tone, Title Case
+/// (never upper case), and an optional plain count in muted monospaced
+/// digits, with no parentheses, no chip and no line.
+struct RafuSidebarSectionHeader: View {
+    let title: String
+    var count: Int?
+
+    @Environment(\.rafuTheme) private var theme
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(title)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(theme.palette.textSecondary)
+                .lineLimit(1)
+            if let count {
+                Text("\(count)")
+                    .font(.system(size: 11).monospacedDigit())
+                    .foregroundStyle(theme.palette.textMuted)
+            }
+            Spacer(minLength: 0)
+        }
+        .textCase(nil)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
+    }
+}
+
 /// Shared lower-emphasis panel state. It expands to the remaining panel body,
 /// so the concrete panel's primary header stays pinned at the top.
 struct RafuPanelEmptyState<Action: View>: View {

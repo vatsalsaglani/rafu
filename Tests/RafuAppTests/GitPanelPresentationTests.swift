@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Testing
 
@@ -76,18 +77,22 @@ struct GitPanelPresentationTests {
     @Test("Section order is Changes, History, Worktrees, with the change count")
     func sectionLabels() {
         #expect(GitInspectorSection.allCases.map(\.title) == ["Changes", "History", "Worktrees"])
-        #expect(GitInspectorSection.changes.segmentLabel(changeCount: 4) == "Changes (4)")
+        #expect(GitInspectorSection.changes.segmentLabel(changeCount: 4) == "Changes 4")
         #expect(GitInspectorSection.changes.segmentLabel(changeCount: 0) == "Changes")
         #expect(GitInspectorSection.history.segmentLabel(changeCount: 4) == "History")
         #expect(GitInspectorSection.worktrees.segmentLabel(changeCount: 4) == "Worktrees")
     }
 
-    @Test("The section picker switches to icons below 320 pt")
-    func sectionPickerIconThreshold() {
-        #expect(GitSectionPickerLayout.usesIcons(forWidth: 300))
-        #expect(GitSectionPickerLayout.usesIcons(forWidth: 319.5))
-        #expect(!GitSectionPickerLayout.usesIcons(forWidth: 320))
-        #expect(!GitSectionPickerLayout.usesIcons(forWidth: 340))
+    /// The fixed 320 pt threshold put the picker on icons at every normal
+    /// sidebar width. The shared picker now tries the words first and uses
+    /// the icons only when the words do not fit.
+    @Test("Every section has a real SF Symbol for the narrow fallback")
+    func sectionPickerIconFallback() {
+        for section in GitInspectorSection.allCases {
+            #expect(
+                NSImage(systemSymbolName: section.symbolName, accessibilityDescription: nil)
+                    != nil)
+        }
     }
 
     @Test("View as offers List and Tree")
