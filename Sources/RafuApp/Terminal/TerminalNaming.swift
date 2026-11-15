@@ -89,6 +89,13 @@ nonisolated enum TerminalNaming {
         livePaneCount > 0 ? "Running" : "Not running"
     }
 
+    /// The Terminals header count, spoken: "1 terminal", "3 terminals". A
+    /// group and an ungrouped session each count as one terminal; "legacy"
+    /// is an internal word and never reaches the user.
+    static func terminalCountLabel(_ count: Int) -> String {
+        count == 1 ? "1 terminal" : "\(count) terminals"
+    }
+
     /// "1 needs attention", "2 need attention".
     static func attentionLabel(_ count: Int) -> String {
         count == 1 ? "1 needs attention" : "\(count) need attention"

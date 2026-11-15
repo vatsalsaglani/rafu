@@ -78,6 +78,17 @@ nonisolated enum RafuMetrics {
     static let radiusWorkbenchField: CGFloat = 5
     static let radiusTransientPopover: CGFloat = 8
     static let utilityBodyInset: CGFloat = 8
+    /// The sidebar's one text left edge: every navigator panel header title,
+    /// secondary row and list row starts this far from the pane edge (the
+    /// Files tree's own inset).
+    static let sidebarTextInset: CGFloat = 10
+    /// The one navigator panel header row (Files, Search, Source Control,
+    /// Terminals, History): a 24 pt row with no fill, whose centre
+    /// `rafuNavigatorHeaderPlacement(rowHeight:)` puts on the tab-label line.
+    static let navigatorHeaderRowHeight: CGFloat = 24
+    /// Space between a navigator panel header and the first content row.
+    /// Space, not a hairline or a fill, separates the two.
+    static let navigatorHeaderBottomSpacing: CGFloat = 8
     static let settingsSectionInset: CGFloat = 14
     static let settingsRowMinHeight: CGFloat = 36
     static let settingsSectionGap: CGFloat = 28

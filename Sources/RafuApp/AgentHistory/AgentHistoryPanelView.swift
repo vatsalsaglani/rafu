@@ -9,12 +9,7 @@ struct AgentHistoryPanelView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            RafuUtilityPanelHeader(
-                icon: WorkspaceNavigatorMode.history.symbolName,
-                title: "History",
-                closeAccessibilityLabel: "Close History",
-                onClose: { session.isSidebarCollapsed = true }
-            ) {
+            RafuUtilityPanelHeader(title: "History") {
                 AgentHistoryRefreshButton(store: AgentHistoryStore.shared)
             }
             AgentHistoryPanelContent(

@@ -86,18 +86,42 @@ struct WorkspaceActivityRail: View {
                 RafuRailButtonStyle(
                     isSelected: isActive,
                     deckFacingEdge: .trailing,
-                    tooltip: isEnabled ? mode.title : "\(mode.title) — open a folder first",
+                    tooltip: NavigatorRailPresentation.tooltip(
+                        title: mode.title, isEnabled: isEnabled, isActive: isActive),
                     badge: mode == .terminals && attentionCount > 0 ? attentionCount : nil
                 )
             )
             .disabled(!isEnabled)
+        // The panel headers have no close button (ADR 0002: one sidebar
+        // toggle), so the active rail icon says that a click hides the panel.
+        let value = NavigatorRailPresentation.accessibilityValue(
+            isActive: isActive, attentionCount: attentionCount)
         return Group {
-            if mode == .terminals, attentionCount > 0 {
-                button.accessibilityValue("\(attentionCount) needing attention")
+            if let value {
+                button.accessibilityValue(value)
             } else {
                 button
             }
         }
+    }
+}
+
+/// Tooltip and VoiceOver value for one Activity Rail button. A click on the
+/// active icon hides the sidebar (`selectNavigatorRailIcon`); with no close
+/// button in the panel headers, the rail must say so.
+nonisolated enum NavigatorRailPresentation {
+    static func tooltip(title: String, isEnabled: Bool, isActive: Bool) -> String {
+        guard isEnabled else { return "\(title) — open a folder first" }
+        return isActive ? "Hide \(title)" : title
+    }
+
+    /// "Selected, sidebar shown" for the active icon, plus the Terminals
+    /// attention count; `nil` when there is nothing to say.
+    static func accessibilityValue(isActive: Bool, attentionCount: Int) -> String? {
+        var parts: [String] = []
+        if isActive { parts.append("Selected, sidebar shown") }
+        if attentionCount > 0 { parts.append("\(attentionCount) needing attention") }
+        return parts.isEmpty ? nil : parts.joined(separator: ", ")
     }
 }
 
@@ -189,12 +213,7 @@ struct WorkspaceSearchNavigatorView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            RafuUtilityPanelHeader(
-                icon: WorkspaceNavigatorMode.search.symbolName,
-                title: "Search",
-                closeAccessibilityLabel: "Close Search",
-                onClose: { session.isSidebarCollapsed = true }
-            ) {
+            RafuUtilityPanelHeader(title: "Search") {
                 EmptyView()
             }
             WorkspaceSearchContent(session: session, search: session.workspaceSearch)

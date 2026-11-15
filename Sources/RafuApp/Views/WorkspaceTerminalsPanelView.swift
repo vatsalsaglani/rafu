@@ -142,19 +142,11 @@ struct WorkspaceTerminalsPanelView: View {
 
     private func header(count: Int) -> some View {
         RafuUtilityPanelHeader(
-            icon: "terminal",
             title: "Terminals",
-            closeAccessibilityLabel: "Close Terminals",
-            onClose: { session.isSidebarCollapsed = true },
             context: {
-                RafuChip(
-                    text: "\(count)",
-                    monospacedDigit: true
-                )
-                .accessibilityLabel(
-                    count == 1
-                        ? "1 terminal group or legacy terminal"
-                        : "\(count) terminal groups or legacy terminals")
+                RafuPanelHeaderCount(
+                    count: count,
+                    accessibilityLabel: TerminalNaming.terminalCountLabel(count))
             },
             actions: { newTerminalControl }
         )

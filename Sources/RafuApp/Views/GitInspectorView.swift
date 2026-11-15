@@ -17,12 +17,7 @@ struct SourceControlPanelView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            RafuUtilityPanelHeader(
-                icon: WorkspaceNavigatorMode.sourceControl.symbolName,
-                title: "Source Control",
-                closeAccessibilityLabel: "Close Source Control",
-                onClose: { session.isSidebarCollapsed = true }
-            ) {
+            RafuUtilityPanelHeader(title: "Source Control") {
                 Button("Refresh", systemImage: "arrow.clockwise") {
                     Task { await refreshAllGitState() }
                     session.refreshAllGitRepositories()
