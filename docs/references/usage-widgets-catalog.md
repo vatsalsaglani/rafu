@@ -85,6 +85,16 @@ declared `@available(macOS 27.0, iOS 27.0)` in the macOS 27.2 SDK, and the
 deployment target is macOS 15. Both `supportedFamilies` and every `family ==`
 comparison need `if #available(macOS 27.0, *)`.
 
+**The macOS 26 SDK does not compile it.** In the macOS 26 SDK (Swift 6.3.3, the
+`macos-26` CI and release runners) the symbol is marked unavailable on macOS, so
+`#available` alone fails the build: "'systemExtraLargePortrait' is unavailable in
+macOS" (release run 43719940272, 2026-11-15). Wrap each use in
+`#if compiler(>=6.4)` as well; Swift 6.4 ships with the macOS 27 SDK. A build
+made on CI therefore has no portrait Board size until the runners move to the
+macOS 27 SDK. A local build (Swift 6.4.2, macOS 27.2 SDK) has it. This Mac has
+no Swift 6.3 toolchain, so only CI can check the macOS 26 SDK path: any new
+macOS 27 API needs the same compile-time gate before a push.
+
 **Rows.** One row per provider. Each row uses the same `WidgetHundredCard` and
 `WidgetSevenCard` that the Hundred and Seven widgets make (a test checks equality).
 
