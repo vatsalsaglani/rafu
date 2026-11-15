@@ -1306,9 +1306,10 @@ struct CanvasLiveBridgeTests {
 @Suite("Canvas messages to a peer that is still starting")
 @MainActor
 struct CanvasHeldMessageTests {
-    /// Bounded: yields until `done`. The flush runs in its own task.
+    /// Bounded by a wall-clock deadline: waits until `done`. The flush runs in
+    /// its own task. A missed deadline shows in the assertions that follow.
     private func settle(_ done: () -> Bool) async {
-        for _ in 0..<1_000 where !done() { await Task.yield() }
+        _ = await waitUntil { done() }
     }
 
     private func quiet() async {

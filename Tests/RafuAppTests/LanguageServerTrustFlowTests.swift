@@ -110,18 +110,6 @@ private actor TestLanguageServerSpawner: LanguageServerSpawning {
     }
 }
 
-private func waitUntil(
-    timeout: Duration = .seconds(2), pollInterval: Duration = .milliseconds(5),
-    _ predicate: @MainActor () async -> Bool
-) async -> Bool {
-    let deadline = ContinuousClock.now.advanced(by: timeout)
-    while ContinuousClock.now < deadline {
-        if await predicate() { return true }
-        try? await Task.sleep(for: pollInterval)
-    }
-    return await predicate()
-}
-
 /// Places an executable fixture exactly where `InstallLayout` /
 /// `CuratedCatalog`'s "marksman" entry expects an installed binary, so
 /// `InstalledServerResolver.resolve(languageID: "markdown")` succeeds the
@@ -174,7 +162,7 @@ struct LanguageServerTrustFlowTests {
                     let session = await coordinator.session(forLanguageID: "markdown")
                     #expect(session == nil)
 
-                    let raised = await waitUntil {
+                    let raised = await waitUntilOnMain {
                         coordinator.pendingTrustRequest?.serverID == "marksman"
                     }
                     #expect(raised)
@@ -199,7 +187,7 @@ struct LanguageServerTrustFlowTests {
                     await coordinator.workspaceDidOpen(root: URL(fileURLWithPath: "/workspace"))
 
                     _ = await coordinator.session(forLanguageID: "markdown")
-                    let raised = await waitUntil {
+                    let raised = await waitUntilOnMain {
                         coordinator.pendingTrustRequest?.serverID == "marksman"
                     }
                     #expect(raised)
@@ -209,7 +197,7 @@ struct LanguageServerTrustFlowTests {
                     let pendingAfterApprove = await coordinator.pendingTrustRequest
                     #expect(pendingAfterApprove == nil)
 
-                    let resolvedSession = await waitUntil {
+                    let resolvedSession = await waitUntilOnMain {
                         await coordinator.session(forLanguageID: "markdown") != nil
                     }
                     #expect(resolvedSession)
@@ -240,7 +228,7 @@ struct LanguageServerTrustFlowTests {
                     await coordinator.workspaceDidOpen(root: URL(fileURLWithPath: "/workspace"))
 
                     _ = await coordinator.session(forLanguageID: "markdown")
-                    let raised = await waitUntil {
+                    let raised = await waitUntilOnMain {
                         coordinator.pendingTrustRequest?.serverID == "marksman"
                     }
                     #expect(raised)

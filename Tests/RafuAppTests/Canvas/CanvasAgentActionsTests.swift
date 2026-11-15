@@ -81,15 +81,12 @@ private struct CanvasAgentFixture {
                 agentCall: call))
     }
 
-    /// Bounded: yields until an approval for this board appears.
+    /// Bounded by a wall-clock deadline: waits until an approval for this
+    /// board appears.
     func pendingApproval() async -> CanvasAgentApproval? {
-        for _ in 0..<1_000 {
-            if let approval = CanvasAgentCenter.shared.approvals(for: board.id).first {
-                return approval
-            }
-            await Task.yield()
-        }
-        return nil
+        let boardID = board.id
+        _ = await waitUntil { !CanvasAgentCenter.shared.approvals(for: boardID).isEmpty }
+        return CanvasAgentCenter.shared.approvals(for: boardID).first
     }
 }
 
@@ -831,8 +828,8 @@ struct CanvasTerminalStartTests {
         let response = try await CanvasTerminalStarter.$drainSeams.withValue(seams) {
             let response = try await fixture.call(
                 "terminal_create", ["agent": "claude", "prompt": "fix \(secretLine) now"])
-            // The drain runs in its own task after the reply. Bounded, no sleep.
-            for _ in 0..<1_000 where typed.lines.isEmpty { await Task.yield() }
+            // The drain runs in its own task after the reply. Wall-clock bound.
+            _ = await waitUntil { typed.lines.isEmpty == false }
             return response
         }
         #expect(response.error == nil)
@@ -874,13 +871,8 @@ struct CanvasTerminalStartTests {
         // What a mounted card does when it cannot take the view: it clears the
         // request and starts nothing.
         let dropper = Task { @MainActor in
-            for _ in 0..<10_000 {
-                if board.terminalStartRequest == card.id {
-                    board.terminalStartRequest = nil
-                    return
-                }
-                await Task.yield()
-            }
+            let seen = await waitUntil { board.terminalStartRequest == card.id }
+            if seen { board.terminalStartRequest = nil }
         }
         let report = try await withShortStartWait(steps: 3) {
             try await CanvasTerminalStarter.start(

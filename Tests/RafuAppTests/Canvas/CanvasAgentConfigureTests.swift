@@ -114,9 +114,17 @@ private struct ConfigureFixture {
     }
 }
 
-/// Bounded: yields until `condition` holds.
+/// Bounded by a wall-clock deadline: waits until `condition` holds.
 @MainActor
 private func eventually(_ condition: @MainActor () -> Bool) async -> Bool {
+    await waitUntil { condition() }
+}
+
+/// For a NEGATIVE assertion ("this never happens"): there is nothing to poll
+/// for, so it yields a bounded number of times to give pending work every
+/// reasonable chance to run, then reports `condition`.
+@MainActor
+private func holdsAfterDrain(_ condition: @MainActor () -> Bool) async -> Bool {
     for _ in 0..<10_000 {
         if condition() { return true }
         await Task.yield()
@@ -212,7 +220,7 @@ struct CanvasAgentConfigureAppTests {
         #expect(CanvasAgentConfigureQueue.shared.isPending(fixture.card.id))
         // A permission prompt is not the end of the turn.
         fixture.fake.state = .waitingForPermission
-        #expect(await eventually { !fixture.fake.typed.isEmpty } == false)
+        #expect(await holdsAfterDrain { !fixture.fake.typed.isEmpty } == false)
         fixture.fake.state = .finished
         #expect(await eventually { fixture.fake.typed == ["/model sonnet"] })
         #expect(!CanvasAgentConfigureQueue.shared.isPending(fixture.card.id))

@@ -62,14 +62,6 @@ private func initializeResponseBody(id: JSONRPCID, capabilitiesJSON: String) -> 
             .utf8)
 }
 
-private func waitUntil(maxIterations: Int = 20_000, _ predicate: () async -> Bool) async -> Bool {
-    for _ in 0..<maxIterations {
-        if await predicate() { return true }
-        await Task.yield()
-    }
-    return false
-}
-
 private let fullCapabilitiesJSON = """
     {"positionEncoding":"utf-16","textDocumentSync":{"openClose":true,"change":2},\
     "definitionProvider":true,"declarationProvider":true,"referencesProvider":true,\

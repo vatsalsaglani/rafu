@@ -227,16 +227,12 @@ func naturalExitUnregistersFromProcessResourceRegistry() async throws {
     controller.processDidTerminate(exitCode: nil)
 
     // `processDidTerminate` unregisters via its own detached `Task`, not
-    // synchronously — poll cooperatively (never a fixed sleep) until the
-    // registry actor has processed it.
-    var unregistered = false
-    for _ in 0..<20_000 {
+    // synchronously — poll (wall-clock deadline, never a fixed sleep) until
+    // the registry actor has processed it.
+    let controllerID = controller.id
+    let unregistered = await waitUntil {
         let samples = await ProcessResourceRegistry.shared.sample()
-        if !samples.contains(where: { $0.id == controller.id }) {
-            unregistered = true
-            break
-        }
-        await Task.yield()
+        return !samples.contains(where: { $0.id == controllerID })
     }
     #expect(unregistered)
 }

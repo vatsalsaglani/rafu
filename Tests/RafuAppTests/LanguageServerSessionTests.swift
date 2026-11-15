@@ -81,19 +81,6 @@ private func nullResultResponseBody(id: JSONRPCID) -> Data {
     Data(#"{"jsonrpc":"2.0","id":\#(jsonIDFragment(id)),"result":null}"#.utf8)
 }
 
-/// Polls `predicate` on cooperative `Task.yield()`s (never a fixed sleep)
-/// until it's `true` or `maxIterations` is exhausted — the only reliable way
-/// to observe a background actor task (`monitorNotifications()`) having
-/// processed an `AsyncStream` element it consumes independently of the
-/// test's own task.
-private func waitUntil(maxIterations: Int = 20_000, _ predicate: () async -> Bool) async -> Bool {
-    for _ in 0..<maxIterations {
-        if await predicate() { return true }
-        await Task.yield()
-    }
-    return false
-}
-
 private let fullCapabilitiesJSON = """
     {"positionEncoding":"utf-16","textDocumentSync":{"openClose":true,"change":2},\
     "definitionProvider":true,"declarationProvider":true,"referencesProvider":true,\

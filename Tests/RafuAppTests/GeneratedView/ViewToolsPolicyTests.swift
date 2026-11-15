@@ -49,15 +49,12 @@ private struct ViewPolicyFixture {
         return await CanvasAgentActions.handle(call, caller: caller)
     }
 
-    /// Bounded: yields until an approval for this board appears.
+    /// Bounded by a wall-clock deadline: waits until an approval for this
+    /// board appears.
     func pendingApproval() async -> CanvasAgentApproval? {
-        for _ in 0..<10_000 {
-            if let approval = CanvasAgentCenter.shared.approvals(for: board.id).first {
-                return approval
-            }
-            await Task.yield()
-        }
-        return nil
+        let boardID = board.id
+        _ = await waitUntil { !CanvasAgentCenter.shared.approvals(for: boardID).isEmpty }
+        return CanvasAgentCenter.shared.approvals(for: boardID).first
     }
 
     var views: [CanvasCard] {

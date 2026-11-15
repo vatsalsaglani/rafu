@@ -3,23 +3,6 @@ import Testing
 
 @testable import RafuApp
 
-/// Not `@MainActor`-annotated — every call into `WorkspaceTrustSettingsModel`
-/// (a `@MainActor` type) below crosses the actor boundary via an explicit
-/// `await`, matching `LanguageServersCatalogModelTests`'s convention so
-/// these tests stay free of a `@MainActor` test function nesting the shared
-/// (non-`@Sendable`-closure) `withTemporaryDirectory` helper.
-private func waitUntil(
-    timeout: Duration = .seconds(2), pollInterval: Duration = .milliseconds(5),
-    _ predicate: @MainActor () async -> Bool
-) async -> Bool {
-    let deadline = ContinuousClock.now.advanced(by: timeout)
-    while ContinuousClock.now < deadline {
-        if await predicate() { return true }
-        try? await Task.sleep(for: pollInterval)
-    }
-    return await predicate()
-}
-
 @Suite("Workspace trust settings model")
 struct WorkspaceTrustSettingsModelTests {
     @Test("Loading flattens every workspace's approvals into sorted rows")
@@ -74,7 +57,7 @@ struct WorkspaceTrustSettingsModelTests {
             let row = try #require(await model.rows.first { $0.serverID == "clangd" })
             await model.revoke(row)
 
-            let landed = await waitUntil { model.rows.count == 1 }
+            let landed = await waitUntilOnMain { model.rows.count == 1 }
             #expect(landed)
             let rows = await model.rows
             #expect(rows.first?.serverID == "rust-analyzer")
