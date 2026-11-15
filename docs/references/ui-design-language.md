@@ -31,6 +31,16 @@ surface map below. Current language:
   the selected tab — and both go through `WorkbenchDeckShadowStyle`. A source
   test pins that count, so a third shadow is a test failure, not a review note.
 
+**Update 2026-11-15 (ADR 0031 section j, ADR 0038).** The figures above are
+historical. Current: the deck insets are per edge (`RafuMetrics.deckInsetTop` 6,
+`deckInsetLeading` 6, `deckInsetTrailing` 8, `deckInsetBottom` 12; each equals
+the shadow reach on that edge, and `workbenchInset` is gone); the Activity Rail
+is 38 pt wide; the shelf, header and tab-label alignment follow the 6 pt top
+inset (navigator header title centre 25, top inset 13). Frame surfaces paint
+through `rafuFrameSurface`: the token in Solid, nothing in Frosted (the opt-in
+frosted window base, see [`frosted-window-base.md`](frosted-window-base.md));
+Reduce Transparency and Increase Contrast force Solid.
+
 **Proposed successor:** the 2026-07-29
 [`workbench-presentation-upgrade.md`](../plans/phases/workbench-presentation-upgrade.md)
 and [ADR 0022](../decisions/0022-recessed-workbench-deck.md) propose revisiting

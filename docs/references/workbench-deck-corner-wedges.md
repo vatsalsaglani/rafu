@@ -35,6 +35,14 @@ The mask applies only to this decoration layer. The card's content is still
 never clipped or masked, and the wedges stay `allowsHitTesting(false)` and
 `accessibilityHidden(true)`.
 
+**Frosted base (2026-11-15, ADR 0038).** In the Frosted window base the frame
+is a blur, so a flat `appBackground` wedge would show a solid patch. Four masked
+`.behindWindow` wedge views (2r x 2r tiles, cached even-odd `maskImage`) sit
+under the existing masked wedge ZStack, which is tinted with
+`appBackground.opacity(tint)`. The deck is still never clipped. See
+[`frosted-window-base.md`](frosted-window-base.md). The 6 pt gutters of ADR 0031
+section j are the metrics to check these corners against.
+
 ## Why it matters
 
 - The defect is invisible in a dark theme with a faint shadow and obvious in a

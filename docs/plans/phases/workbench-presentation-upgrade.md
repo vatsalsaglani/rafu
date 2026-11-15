@@ -133,6 +133,43 @@ VoiceOver traits and the rail value. Deferred: arrow-key movement in Terminals
 (frosted-window work, ADR 0038 planned). Rules:
 [`sidebar-panel-anatomy-and-terminal-rows.md`](../../references/sidebar-panel-anatomy-and-terminal-rows.md).
 
+**Work log, 2026-11-15 — optional frosted window base and tighter frame gaps
+(merge 8d97ed6).** Two user requests. First, the user saw and approved a frost in
+a spike build (Indigo, tint 0.5) and asked for it as a setting:
+[ADR 0038](../../decisions/0038-optional-frosted-window-base.md) (Settings >
+Appearance > Window, Solid default, Subtle / Balanced / Strong; Reduce
+Transparency and Increase Contrast force Solid; amends ADRs 0012, 0022, 0030,
+0031; AGENTS.md interface rules updated). The one-time migration ran on first
+launch of Rafu Lightning from `main` and set `windowSurfaceStyle = frosted`,
+`windowSurfaceFrost = balanced`. Second, the user asked for a smaller left gap
+beside the Activity Rail and a smaller band above the deck: ADR 0031 section j
+(deck insets top 6 / leading 6 / trailing 8 / bottom 12 from 12 on every edge,
+rail 40 -> 38 pt, rail top padding 6, navigator header title centre 31 -> 25 and
+top inset 19 -> 13, window floor 766 -> 754 so the deck gains 20 pt at the 774 pt
+minimum; `RafuMetrics.workbenchInset` replaced by `deckInsetTop` / `Leading` /
+`Trailing` / `Bottom`). Evidence: merged to `main`; build OK; parallel and
+`--no-parallel` both green, each 451 tests in 31 suites plus 3708 tests in 301
+suites; Rafu Lightning launched from `main`. Spike cost (Debug, busy Mac, rough):
+WindowServer CPU +4 to +5 points, Rafu memory change under 1 MB. Notes:
+[`frosted-window-base.md`](../../references/frosted-window-base.md),
+[`workbench-split-handle.md`](../../references/workbench-split-handle.md),
+[`workbench-deck-corner-wedges.md`](../../references/workbench-deck-corner-wedges.md).
+GUI checks owed on the final build (none done):
+
+- Solid looks identical to before except the new gaps.
+- Frosted at Subtle, Balanced and Strong in Indigo and in Khadi, with clean deck
+  corners at the new 6 pt gutters.
+- Navigator header titles align with the tab labels.
+- The rail app tile is level with the deck top (y = 34).
+- The collapsed-sidebar gap (handle only, 10 pt).
+- Reduce Transparency and Increase Contrast switch to Solid at once, with the
+  footnote shown.
+- A second window follows the setting.
+- WindowServer cost in a Release build (the spike figures are Debug).
+
+Open: the per-region backdrop alternative is not measured; terminal alpha
+(step 3) is not started.
+
 Parallel execution is specified by
 [`workbench-presentation-upgrade/README.md`](workbench-presentation-upgrade/README.md):
 one serial shared foundation, six file-disjoint worktrees from its exact commit,

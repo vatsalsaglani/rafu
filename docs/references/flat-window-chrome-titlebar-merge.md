@@ -179,7 +179,8 @@ Last verified: Apple Swift 6.4 (swiftlang-6.4.0.34.1), macOS 27.0.1 (26A434),
 
 Decision: [ADR 0030](../decisions/0030-framed-workbench-left-rail-and-detached-tabs.md).
 
-- `WorkspaceActivityRail` is 40 pt wide on the window's left edge, below the
+- `WorkspaceActivityRail` is 40 pt wide (38 pt since 2026-11-15, ADR 0031
+  section j; its top padding is now `deckInsetTop`, 6 pt) on the window's left edge, below the
   titlebar row, and is never gated on sidebar collapse. It carries Files,
   Search, Source Control, Terminals, and History.
 - The window frame is `appBackground`: both `FlatWindowChrome.titleBarColor`

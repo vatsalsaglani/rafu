@@ -43,8 +43,11 @@ component) and [ADR 0002](../decisions/0002-native-workbench-navigation.md)
 - Frosted-window readiness: no new slabs; fields and chips are opaque. The Source
   Control `List(.inset)` section headers stay the system sticky headers. The
   nested `sidebarBackground` paints in `WorkspaceSidebarView.swift` and
-  `WorkspaceSidebarPanelView` remain, to be handled by the frosted-window work
-  (plan in progress, ADR 0038 planned).
+  `WorkspaceSidebarPanelView` were to be handled by the frosted-window work; it
+  landed 2026-11-15 as [ADR 0038](../decisions/0038-optional-frosted-window-base.md)
+  (`rafuFrameSurface` paints nothing in Frosted). The 19 pt header top inset and
+  the 31 pt title centre above became 13 pt and 25 pt with the 6 pt deck top
+  inset (ADR 0031 section j).
 
 ### Segmented control
 

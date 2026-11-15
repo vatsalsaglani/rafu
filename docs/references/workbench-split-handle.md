@@ -88,6 +88,27 @@ Recorded in [ADR 0031](../decisions/0031-card-header-tabs-and-themed-chrome.md).
   open, the leading gutter is still handle + inset. Tested in
   `WorkbenchDeckPresentationTests.collapsedGutterIsEqual`.
 
+### 2026-11-15: per-edge deck insets and a 38 pt rail
+
+Recorded in [ADR 0031](../decisions/0031-card-header-tabs-and-themed-chrome.md)
+section j. `RafuMetrics.workbenchInset` is replaced by `deckInsetTop` 6,
+`deckInsetLeading` 6, `deckInsetTrailing` 8 and `deckInsetBottom` 12;
+`WorkbenchDeckLane.padding(isSidebarCollapsed:handleWidth:insets:)` takes
+`EdgeInsets`. The rule: each inset equals the shadow reach on that edge
+(top reach radius - y = 4, inset 6; sides reach radius = 8, trailing inset 8;
+bottom reach radius + y = 12, inset 12; the leading 6 counts the 10 pt handle).
+
+- Sidebar open: sidebar-to-deck gap 22 -> 16 (handle 10 + inset 6).
+- Sidebar collapsed: rail-to-deck gap 12 -> 10 (handle only; the "equal gutter"
+  of the round 4 section above no longer holds). Rail icon edge to deck 17 -> 13.
+- The rail is 38 pt (was 40).
+- The window floor sum is now 38 + 220 + 10 + 472 + 6 + 8 = **754**, so the
+  774 pt `minWidth` is unchanged and the deck gains 20 pt at minimum width.
+  The collapsed-gutter test `WorkbenchDeckPresentationTests.collapsedGutterIsEqual`
+  describes the old rule; its current name and assertions were not supplied.
+
+Not screenshot-verified.
+
 ### 2026-11-01: no navigator may declare a width minimum above 220 pt
 
 Verified on Swift 6.2 language mode, macOS Darwin 27.0.0.

@@ -2,7 +2,9 @@
 
 - **Status:** Accepted (2026-10-20) on the user's explicit direction, across
   three design rounds the user reviewed; amended by round 4 (§g), which
-  changes deck depth, frame/card tones, and the sidebar scroller
+  changes deck depth, frame/card tones, and the sidebar scroller; amended
+  2026-11-15 (§j): per-edge deck insets, 38 pt rail, and the frosted base
+  (ADR 0038)
 - **Date:** 2026-10-20
 - **Supersedes** (clause by clause, from
   [ADR 0030](0030-framed-workbench-left-rail-and-detached-tabs.md)):
@@ -260,10 +262,45 @@ band" utility header (14 pt above) in §g.
 - **Section headers**: `RafuSidebarSectionHeader`, 11 pt semibold, Title Case,
   plain count.
 - **Frosted-window readiness.** No new slabs; fields and chips are opaque. The
-  nested `sidebarBackground` paints remain until the frosted-window work (ADR
-  0038, planned, not yet written).
+  nested `sidebarBackground` paints remain until the frosted-window work
+  (landed 2026-11-15 as [ADR 0038](0038-optional-frosted-window-base.md):
+  `rafuFrameSurface` paints nothing in Frosted).
 
-Details and the Terminals row rules:
+### j. Frame gaps and frosted base amendment (2026-11-15)
+
+[ADR 0038](0038-optional-frosted-window-base.md) amends the "opaque tonal
+surfaces / no material, blur" clause and "Reduce Transparency stays a no-op":
+the frame may show an opt-in frost (default Solid). Separately, on the user's
+request for more content area, §c and §g metrics change. Where this section and
+the text above disagree, this section holds.
+
+**Rule.** Each deck edge's inset equals the shadow reach on that edge: top is
+radius - y, the sides are radius, the bottom is radius + y. The leading edge
+counts the 10 pt split handle. Gutters are no longer equal on every edge.
+`RafuMetrics.workbenchInset` is replaced by `deckInsetTop`, `deckInsetLeading`,
+`deckInsetTrailing`, and `deckInsetBottom`; `WorkbenchDeckLane.padding
+(isSidebarCollapsed:handleWidth:insets:)` takes `EdgeInsets`.
+
+| Metric (pt) | Before | After | Reason |
+|---|---|---|---|
+| Deck top inset | 12 | 6 | Shadow reaches radius - y = 4 above |
+| Deck leading inset | 12 | 6 | Handle 10 + inset 6 gives the open gap |
+| Sidebar-to-deck gap | 22 | 16 | Handle 10 + inset 6 |
+| Rail-to-deck gap, sidebar collapsed | 12 | 10 | Handle only; rail icon edge to deck 17 to 13 |
+| Deck trailing inset | 12 | 8 | Shadow reaches radius = 8 sideways |
+| Deck bottom inset | 12 | 12 | Unchanged: radius + y = 12; the opaque status bar would cut it |
+| Activity Rail width | 40 | 38 | Leading 5; deck side 5 to 3 |
+| Rail top padding | 10 | `deckInsetTop` (6) | App tile top level with the deck top (y = 34) |
+| Navigator header title centre | 31 | 25 | Follows the tab labels |
+| Navigator header top inset | 19 | 13 | Follows the tab labels |
+| Window floor sum | 766 | 754 | 38 + 220 + 10 + 472 + 6 + 8 |
+
+Unchanged: titlebar row 28 pt, window `minWidth` 774 pt, deck shadow (radius 8,
+y 4). At minimum width the deck gains 20 pt. The 12 pt "equal gutter" in §g and
+the 31 pt / 19 pt header figures in §g and §i are superseded by this table.
+Not screenshot-verified; see the GUI checks in the phase work log.
+
+Details of §i and the Terminals row rules:
 [`sidebar-panel-anatomy-and-terminal-rows.md`](../references/sidebar-panel-anatomy-and-terminal-rows.md).
 
 ## Alternatives considered

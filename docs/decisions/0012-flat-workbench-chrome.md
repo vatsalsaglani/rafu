@@ -206,6 +206,15 @@ accessibility requirements, no-`NSToolbar` titlebar treatment, and
 no-Liquid-Glass rule all remain in force. The titlebar zone is now coloured
 `appBackground`, not the sidebar fill.
 
+## Amendment (2026-11-15): optional frosted window base
+
+[ADR 0038](0038-optional-frosted-window-base.md), on the user's explicit
+direction and through this ADR's own revisit clause, amends the "no system
+materials / heavy translucency" rule and the Reduce Transparency sentence. One
+opt-in behind-window frost (default Solid) may show under the window frame.
+Reduce Transparency and Increase Contrast force the solid base. Everything else
+here stays opaque.
+
 ## Related plan, reference, and implementation paths
 
 - Plan: [`ui-flat-modern-refresh.md`](../plans/phases/ui-flat-modern-refresh.md)

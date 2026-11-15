@@ -184,6 +184,14 @@ only, so it does not reintroduce materials or Liquid Glass.
   splitter has its own note,
   [`workbench-split-handle.md`](../references/workbench-split-handle.md).
 
+## Amendment (2026-11-15): frosted base and frame gaps
+
+[ADR 0038](0038-optional-frosted-window-base.md) amends the "no material, blur"
+clause and "Reduce Transparency stays a no-op": the window frame may show an
+opt-in behind-window frost (default Solid), and Reduce Transparency forces
+Solid. Deck inset and rail width changed again; see
+[ADR 0031](0031-card-header-tabs-and-themed-chrome.md) section j.
+
 ## Revisit trigger
 
 Revisit if a manual pass shows that the shadow reads as a material or fails

@@ -159,6 +159,12 @@ above, so the deck is the editor alone. This ADR's theme-token ownership (no new
 JSON keys), its rule that Rafu owns geometry and the theme owns colour, its
 editor-group separation, and its terminal-perimeter clauses are unchanged.
 
+## Amendment (2026-11-15): optional frosted window base
+
+[ADR 0038](0038-optional-frosted-window-base.md) amends the "opaque tonal
+surfaces / no material, blur" clauses: the window frame may show an opt-in
+behind-window frost (default Solid). The deck, editor, and terminal stay opaque.
+
 ## Revisit trigger
 
 Revisit if measured minimum-window usability, splitter accessibility, TextKit or
