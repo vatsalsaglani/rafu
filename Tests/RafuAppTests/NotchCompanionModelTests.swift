@@ -426,6 +426,62 @@ func refreshUsageRespectsTTLUnlessForced() async {
     await forced?.value
 }
 
+// MARK: - Usage schedule wiring
+
+@MainActor
+@Test("Usage schedule: a turn end with a status item schedules a read; none without a surface")
+func turnEndSchedulesUsageRead() {
+    let clock = Date(timeIntervalSince1970: 5_000)
+    let model = NotchCompanionModel()
+    model.usageReader = fixtureReader(descriptors: [])
+    model.usageNow = { clock }
+    // Nothing shows usage: the event changes nothing.
+    model.agentTurnsEnded([.claude])
+    #expect(model.usageSchedule.turnEndDue == nil)
+
+    // A status item exists (no panel): the loop runs without one.
+    model.usageSurfaceOverrideForTesting = true
+    model.agentTurnsEnded([.claude])
+    #expect(model.usageSchedule.turnEndDue == clock.addingTimeInterval(15))
+}
+
+@MainActor
+@Test("Usage schedule: the wake-up reads only when due")
+func usageWakeReadsWhenDue() async {
+    let start = Date(timeIntervalSince1970: 5_000)
+    var clock = start
+    let model = NotchCompanionModel()
+    model.usageReader = fixtureReader(descriptors: [])
+    model.usageSurfaceOverrideForTesting = true
+    model.usageNow = { clock }
+    await model.refreshUsage()?.value
+    #expect(model.usageSchedule.lastStarted == start)
+
+    clock = start.addingTimeInterval(100)
+    model.agentTurnsEnded([.claude])
+    // The turn end is 15 s away: an early wake-up does nothing.
+    model.usageWakeFired()
+    #expect(model.usageSchedule.lastStarted == start)
+    #expect(!model.isUsageRefreshing)
+
+    clock = start.addingTimeInterval(120)
+    model.usageWakeFired()
+    #expect(model.isUsageRefreshing)
+    #expect(model.usageSchedule.lastStarted == clock)
+}
+
+@MainActor
+@Test("Usage schedule: a forced refresh joins a running read instead of starting another")
+func forcedRefreshJoinsRunningRead() async {
+    let model = NotchCompanionModel()
+    model.usageReader = fixtureReader(descriptors: [])
+    let first = model.refreshUsage()
+    let joined = model.refreshUsage(force: true)
+    #expect(first != nil)
+    #expect(joined == first)
+    await first?.value
+}
+
 // MARK: - Usage front-line/overflow (agent-usage-providers.md,
 // "Multi-provider display in the notch")
 

@@ -41,6 +41,12 @@ final class AgentActivityStore {
     /// tool event in a busy session does not wake it.
     private(set) var replyRevision = 0
 
+    /// Called once per fold with the providers that ended a turn in fresh
+    /// events (`UsageRefreshTrigger.isFreshTurnEnd`), so usage can refresh
+    /// right after an agent turn. A closure, not observed state: no view
+    /// re-renders for it. Never carries an event, a message, or a path.
+    @ObservationIgnored var onTurnEnded: (@MainActor (Set<AgentHookProvider>) -> Void)?
+
     let paths: AgentTrackingPaths
     @ObservationIgnored private var ledger = AgentSessionLedger()
     @ObservationIgnored private var acknowledgedReplies: Set<UUID> = []
@@ -141,12 +147,21 @@ final class AgentActivityStore {
     func apply(_ events: [AgentHookEvent], at date: Date) {
         var changed = false
         let before = Self.attentionMarks(ledger)
-        for event in events where ledger.apply(event) { changed = true }
+        var endedTurns: Set<AgentHookProvider> = []
+        for event in events where ledger.apply(event) {
+            changed = true
+            // Only events the ledger accepted, and only fresh ones: a spool
+            // replayed at launch must not start a usage read burst.
+            if UsageRefreshTrigger.isFreshTurnEnd(event, now: date) {
+                endedTurns.insert(event.provider)
+            }
+        }
         if changed, Self.attentionMarks(ledger) != before { replyRevision += 1 }
         if ledger.expire(now: date) { changed = true }
         now = date
         if changed { sessions = ledger.sessions }
         updateClock()
+        if !endedTurns.isEmpty { onTurnEnded?(endedTurns) }
     }
 
     /// What Voice announces per session: the reply, or the waiting state.

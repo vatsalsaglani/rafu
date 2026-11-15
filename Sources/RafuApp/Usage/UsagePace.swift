@@ -317,10 +317,15 @@ nonisolated enum UsageWindowPresentation {
         return "Average \(number)% of this limit per hour"
     }
 
-    /// `"Just updated"` under a minute, then `"5m ago"`, `"2h 3m ago"`.
+    /// The real age of the read: `"Just updated"` under 10 seconds, then
+    /// `"Updated 30s ago"`, `"5m ago"` (whole minutes, rounded down, so a
+    /// 61-second-old read never says 2m), `"2h 3m ago"`.
     static func ageLabel(observedAt: Date, now: Date) -> String {
-        let seconds = now.timeIntervalSince(observedAt)
-        return seconds < 60 ? "Just updated" : UsagePace.durationLabel(seconds) + " ago"
+        let seconds = max(0, now.timeIntervalSince(observedAt))
+        if seconds < 10 { return "Just updated" }
+        if seconds < 60 { return "Updated \(Int(seconds / 10) * 10)s ago" }
+        if seconds < 3_600 { return "\(Int(seconds / 60))m ago" }
+        return UsagePace.durationLabel(seconds) + " ago"
     }
 
     private static func wholeNumber(_ label: String, suffix: Character) -> Int? {

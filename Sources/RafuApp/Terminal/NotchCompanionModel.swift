@@ -243,19 +243,25 @@ final class NotchCompanionModel: NSObject {
     var usageReader = UsageRegistryReader()
     @ObservationIgnored
     private var usageRefreshTask: Task<Void, Never>?
+    /// When usage is read: after agent turns, on open when old, and on a slow
+    /// fallback. Pure; this model owns the one wake-up that follows it.
     @ObservationIgnored
-    private var lastUsageRefreshDate: Date?
+    private(set) var usageSchedule = UsageRefreshSchedule()
+    /// Sleeps until the schedule's next read. Lives while a status item or the
+    /// panel exists — not only while the panel is pinned.
     @ObservationIgnored
-    private var usageRefreshTimer: Timer?
-    /// Never refresh more than this often, even if `refreshUsage()` is
-    /// called from multiple triggers in quick succession (dwell + a
-    /// same-tick click).
-    private static let usageRefreshTTL: TimeInterval = 60
-    /// The periodic refresh interval while pinned — deliberately a "few
-    /// minutes", not aggressive polling: usage budgets do not change fast
-    /// enough to justify anything shorter, and both sources are read-only
-    /// file scans off-main.
-    private static let usageTimerInterval: TimeInterval = 180
+    private var usageWakeTask: Task<Void, Never>?
+    /// The clock for the usage schedule and the observed-at times; tests
+    /// substitute a fake.
+    @ObservationIgnored
+    var usageNow: @MainActor () -> Date = { Date() }
+    /// Test seam: pretend a status item exists, so a headless test exercises
+    /// the schedule without creating a real `NSStatusItem`.
+    @ObservationIgnored
+    var usageSurfaceOverrideForTesting = false
+    /// While the screen is locked or asleep, nobody can see usage and a read
+    /// could raise a Keychain prompt behind the lock: check again this often.
+    private static let usageInactiveRecheck: TimeInterval = 60
 
     // MARK: - Test seams (mirroring NotchHUDController's reply/reveal routes)
 
@@ -840,6 +846,7 @@ final class NotchCompanionModel: NSObject {
                     position: usageGlancePosition, isEnabled: preferenceStore.isEnabled())
             } ?? .none
         syncUsageMenuBarItem(installed: wanted.showsMenuBarItem)
+        observeAgentTurnEnds()
         guard wanted.showsPanel,
             let metrics = screen,
             NotchCompanionGeometry.restingFrame(for: metrics, allowsPill: allowsPill) != nil
@@ -866,6 +873,7 @@ final class NotchCompanionModel: NSObject {
             usageMenuBarItem?.remove()
             usageMenuBarItem = nil
         }
+        rearmUsageWake()
     }
 
     /// Resolved from the same inputs `WorkspaceSceneRoot` binds through the
@@ -929,6 +937,7 @@ final class NotchCompanionModel: NSObject {
         // The island capsule shows a usage ring at rest, so read usage once
         // (TTL-gated) when it appears. No periodic timer at rest.
         if surface == .island { refreshUsage() }
+        rearmUsageWake()
     }
 
     /// Records the strip's band, height and notch-ness from the screen the
@@ -959,22 +968,26 @@ final class NotchCompanionModel: NSObject {
     /// Recomputes `usageSnapshots` OFF the main actor (the registry's
     /// strategies — file reads today, network calls in later phases — all
     /// run inside `Task.detached`) and assigns the result back on the main
-    /// actor when done. TTL-gated unless `force` —
-    /// `dwellTimerFired()`/`clicked()` call this unconditionally (subject to
-    /// the TTL), the periodic pinned-state timer passes `force: true` since
-    /// its whole point is a fresh read on its own schedule. Returns the
-    /// spawned task (`nil` when the TTL suppressed the call) so tests can
-    /// await completion instead of polling.
+    /// actor when done. Without `force` this is an "a surface opened"
+    /// request: it reads only when the last read is more than
+    /// `UsageRefreshSchedule.openStaleness` old. With `force` (the refresh
+    /// button, Settings) it always reads, or joins a read that already runs.
+    /// Returns the task (`nil` when fresh data suppressed the call) so tests
+    /// can await completion instead of polling.
     @discardableResult
     func refreshUsage(force: Bool = false) -> Task<Void, Never>? {
-        let now = Date()
-        if !force, let last = lastUsageRefreshDate,
-            now.timeIntervalSince(last) < Self.usageRefreshTTL
-        {
+        let now = usageNow()
+        if force {
+            if !usageSchedule.shouldStartManualRefresh() { return usageRefreshTask }
+        } else if !usageSchedule.shouldRefreshOnOpen(at: now) {
             return nil
         }
-        lastUsageRefreshDate = now
-        usageRefreshTask?.cancel()
+        return startUsageRead(at: now)
+    }
+
+    /// Starts one read. The caller has checked that none runs.
+    private func startUsageRead(at now: Date) -> Task<Void, Never>? {
+        guard usageSchedule.begin(at: now) else { return usageRefreshTask }
         isUsageRefreshing = true
         let reader = usageReader
         let task = Task { [weak self] in
@@ -1009,6 +1022,11 @@ final class NotchCompanionModel: NSObject {
         usageStaleProviderIDs = merged.staleProviderIDs
         usageNetworkConsentIDs = networkConsent
         isUsageRefreshing = false
+        // A read fails only when providers show stale data and none came
+        // back fresh; "no providers at all" is a success.
+        let failed = fresh.isEmpty && !merged.staleProviderIDs.isEmpty
+        usageSchedule.finish(at: usageNow(), succeeded: !failed)
+        rearmUsageWake()
     }
 
     func setUsageDisplayMode(_ mode: UsageDisplayMode) {
@@ -1035,26 +1053,67 @@ final class NotchCompanionModel: NSObject {
             hasNetworkConsent: usageNetworkConsentIDs.contains(id))
     }
 
-    private func startUsageTimerIfNeeded() {
-        guard usageRefreshTimer == nil else { return }
-        let timer = Timer.scheduledTimer(
-            withTimeInterval: Self.usageTimerInterval, repeats: true
-        ) { [weak self] _ in
-            MainActor.assumeIsolated {
-                // Nobody can see the panel behind a locked or sleeping
-                // screen; the next tick or a hover reads fresh usage.
-                guard RafuMotionGate.shared.isScreenActive else { return }
-                _ = self?.refreshUsage(force: true)
-            }
-        }
-        // Lets the system coalesce this wake-up with others.
-        timer.tolerance = Self.usageTimerInterval / 10
-        usageRefreshTimer = timer
+    // MARK: - Usage schedule wake-up
+
+    /// What is on screen decides the fallback cadence.
+    private var usageCadence: UsageRefreshSchedule.Cadence {
+        .resolve(
+            hasStatusItem: usageMenuBarItem != nil || usageSurfaceOverrideForTesting,
+            hasPanel: panel != nil, isPinned: hoverState == .pinned)
     }
 
-    private func stopUsageTimer() {
-        usageRefreshTimer?.invalidate()
-        usageRefreshTimer = nil
+    /// Sleeps until the schedule's next read, replacing any earlier wake-up.
+    /// Safe to call after any change; with nothing on screen it only cancels.
+    private func rearmUsageWake(minimumDelay: TimeInterval = 0) {
+        usageWakeTask?.cancel()
+        usageWakeTask = nil
+        guard let due = usageSchedule.next(cadence: usageCadence) else { return }
+        let delay = max(due.timeIntervalSince(usageNow()), minimumDelay, 0)
+        usageWakeTask = Task { [weak self] in
+            // Lets the system coalesce this wake-up with others.
+            try? await Task.sleep(for: .seconds(delay), tolerance: .seconds(delay / 10))
+            guard !Task.isCancelled, let self else { return }
+            self.usageWakeFired()
+        }
+    }
+
+    /// The wake-up: read if due, then plan the next one. Internal for tests.
+    func usageWakeFired() {
+        usageWakeTask = nil
+        let now = usageNow()
+        guard usageSchedule.isDue(at: now, cadence: usageCadence) else {
+            rearmUsageWake()
+            return
+        }
+        // Nobody can see a locked or sleeping screen, and a read could raise
+        // a Keychain prompt behind it: look again soon instead.
+        guard RafuMotionGate.shared.isScreenActive else {
+            rearmUsageWake(minimumDelay: Self.usageInactiveRecheck)
+            return
+        }
+        _ = startUsageRead(at: now)
+        rearmUsageWake()
+    }
+
+    /// Agent turn ends (from the Activity tracking hooks) feed the schedule.
+    private func observeAgentTurnEnds() {
+        AgentActivityStore.shared.onTurnEnded = { [weak self] providers in
+            self?.agentTurnsEnded(providers)
+        }
+    }
+
+    /// Internal for tests. Ignored while nothing shows usage, and when none
+    /// of the providers has its usage turned on.
+    func agentTurnsEnded(_ providers: Set<AgentHookProvider>) {
+        guard usageCadence != .none else { return }
+        let reader = usageReader
+        guard
+            providers.contains(where: {
+                reader.isEnabled(UsageRefreshTrigger.usageProvider(for: $0))
+            })
+        else { return }
+        usageSchedule.receivedTurnEnd(at: usageNow())
+        rearmUsageWake()
     }
 
     /// Removes the panel and its timers. `keepingUsageRefresh` leaves an
@@ -1063,10 +1122,11 @@ final class NotchCompanionModel: NSObject {
         nowPlaying.stop()
         cancelTimers()
         removeIslandYieldMonitor()
-        stopUsageTimer()
         if !keepingUsageRefresh {
             usageRefreshTask?.cancel()
+            usageRefreshTask = nil
             isUsageRefreshing = false
+            usageSchedule.abort()
         }
         clearKeyEngagement()
         searchQuery = ""
@@ -1077,6 +1137,8 @@ final class NotchCompanionModel: NSObject {
         }
         panel = nil
         hoverState = .resting
+        // Keeps a wake-up only while the status item still shows usage.
+        rearmUsageWake()
     }
 
     /// Recomputes the panel's frame from the CURRENT screen for the CURRENT
@@ -1305,12 +1367,9 @@ final class NotchCompanionModel: NSObject {
             : CompanionHoverPolicy.onClick(hoverState)
         refreshTheme()
         refreshEditorRows(animated: true)
-        if hoverState == .pinned {
-            refreshUsage()
-            startUsageTimerIfNeeded()
-        } else {
-            stopUsageTimer()
-        }
+        if hoverState == .pinned { refreshUsage() }
+        // Pinned reads faster than resting (`UsageRefreshSchedule.Cadence`).
+        rearmUsageWake()
     }
 
     /// Escape always collapses — `CompanionHoverPolicy.onEscape` always
@@ -1324,7 +1383,6 @@ final class NotchCompanionModel: NSObject {
     func escapePressed() {
         cancelTimers()
         disengageReply()
-        stopUsageTimer()
         let next = CompanionHoverPolicy.onEscape(hoverState)
         if next == .resting {
             searchQuery = ""
@@ -1332,6 +1390,7 @@ final class NotchCompanionModel: NSObject {
         }
         guard next != hoverState else { return }
         hoverState = next
+        rearmUsageWake()
         reposition(animated: true)
     }
 

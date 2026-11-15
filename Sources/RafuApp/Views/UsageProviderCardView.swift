@@ -4,7 +4,7 @@ import SwiftUI
 /// notch uses the compact form (up to three small rings, reset countdowns,
 /// one pace line); Settings ▸ Usage uses the full form (bigger rings, a pace
 /// note and hourly average per window, the data source, and the stale
-/// notice). A `TimelineView` re-renders the countdowns once a minute, and
+/// notice). A `TimelineView` re-renders the countdowns and the age label every 30 seconds, and
 /// only while the card is on screen. The card reads no store and starts no
 /// work: `connect` is the caller's action.
 struct UsageProviderCardView: View {
@@ -35,7 +35,7 @@ struct UsageProviderCardView: View {
     }
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 60)) { context in
+        TimelineView(.periodic(from: .now, by: 30)) { context in
             UsageProviderCardContent(
                 card: card, providerID: providerID, displayName: displayName,
                 authPattern: authPattern, mode: mode, isRefreshing: isRefreshing,
@@ -88,7 +88,7 @@ private struct UsageProviderCardContent: View {
     }
 }
 
-/// Brand icon, name, and "Just updated" / "5m ago" or a spinner.
+/// Brand icon, name, and "Just updated" / "Updated 30s ago" / "5m ago" or a spinner.
 private struct UsageCardHeader: View {
     let providerID: UsageProviderID
     let displayName: String
