@@ -96,12 +96,14 @@ public nonisolated enum CanvasBridgeLaunch {
                         environmentBuffer.baseAddress!)
                 }
             }
-            FileHandle.standardError.write(
-                Data("Rafu: The agent executable could not start.\n".utf8))
+            try? FileHandle.standardError.write(
+                contentsOf:
+                    Data("Rafu: The agent executable could not start.\n".utf8))
             return 126
         } catch {
-            FileHandle.standardError.write(
-                Data("Rafu: The Ensemble agent launch could not be prepared.\n".utf8))
+            try? FileHandle.standardError.write(
+                contentsOf:
+                    Data("Rafu: The Ensemble agent launch could not be prepared.\n".utf8))
             return 127
         }
     }

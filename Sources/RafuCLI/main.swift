@@ -3,7 +3,7 @@ import Foundation
 import RafuCore
 
 private func writeError(_ message: String) {
-    FileHandle.standardError.write(Data("\(message)\n".utf8))
+    try? FileHandle.standardError.write(contentsOf: Data("\(message)\n".utf8))
 }
 
 private func runOpen(bundleURL: URL, documentURL: URL?) throws -> Int32 {

@@ -58,6 +58,25 @@ struct RafuDialogPolicyTests {
         #expect(menus.contains("RafuTextFieldPopup("))
     }
 
+    /// `FileHandle.write(_:)` raises an Objective-C exception when stderr is
+    /// closed (the terminal is gone), and the helper aborts. Crash report
+    /// rafu-2026-11-15-190621: `CanvasCodexSession.run` closure, exit line.
+    @Test("Helper processes write stderr with the throwing API only")
+    func stderrWritesCannotAbort() throws {
+        for path in [
+            "Sources/RafuCore/CanvasBridge/CanvasCodexSession.swift",
+            "Sources/RafuCore/CanvasBridge/CanvasBridgeLaunch.swift",
+            "Sources/RafuCore/CanvasBridge/CanvasBridgeMCPServer.swift",
+            "Sources/RafuCLI/main.swift",
+        ] {
+            let text = try CanvasBoardKeyMapTests.source(path)
+            let raising =
+                text.components(separatedBy: "standardError.write(").count
+                - text.components(separatedBy: "standardError.write(contentsOf:").count
+            #expect(raising == 0, "\(path) uses the raising FileHandle.write(_:)")
+        }
+    }
+
     @Test("Import Pack closes the floating Icon Library before its sheet opens")
     func importClosesTheLibraryFirst() throws {
         let menus = try CanvasBoardKeyMapTests.source(

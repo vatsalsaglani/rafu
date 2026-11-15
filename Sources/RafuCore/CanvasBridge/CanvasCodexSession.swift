@@ -33,7 +33,7 @@ public nonisolated enum CanvasCodexSession {
                 return result
             },
             report: { line in
-                FileHandle.standardError.write(Data((line + "\n").utf8))
+                try? FileHandle.standardError.write(contentsOf: Data((line + "\n").utf8))
             })
     }
 
