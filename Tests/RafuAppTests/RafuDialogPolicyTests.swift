@@ -69,7 +69,9 @@ struct RafuDialogPolicyTests {
             "Sources/RafuCore/CanvasBridge/CanvasBridgeMCPServer.swift",
             "Sources/RafuCLI/main.swift",
         ] {
+            // The formatter can wrap `contentsOf:` onto its own line.
             let text = try CanvasBoardKeyMapTests.source(path)
+                .filter { !$0.isWhitespace }
             let raising =
                 text.components(separatedBy: "standardError.write(").count
                 - text.components(separatedBy: "standardError.write(contentsOf:").count
