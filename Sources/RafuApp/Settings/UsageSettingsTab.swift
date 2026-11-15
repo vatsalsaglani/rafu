@@ -29,7 +29,7 @@ struct UsageSettingsSection: View {
                 Text("Providers")
             } footer: {
                 Text(
-                    "Rafu reads only metric fields — percent used, token totals, reset times — never message or prompt content. API keys and imported cookie headers are stored only in Rafu's Keychain. Provider tests and browser imports run only when you explicitly request them."
+                    "Rafu reads only metric fields — percent used, token totals, reset times — never message or prompt content. API keys and imported cookie headers are stored only in Rafu's Keychain. Provider tests and browser imports run only when you explicitly request them. Usage also refreshes shortly after an agent turn ends when Activity tracking is connected (Settings ▸ Agents), and every few minutes while the menu bar item or the notch companion is showing."
                 )
             }
         }

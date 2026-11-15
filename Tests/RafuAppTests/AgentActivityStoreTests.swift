@@ -49,6 +49,54 @@ struct AgentActivityStoreTests {
         store.stop()
     }
 
+    @Test("Only fresh turn-end events reach onTurnEnded, once per fold")
+    func turnEndTrigger() {
+        let (store, suite) = makeStore()
+        defer { TestDefaultsSuite.remove(suite) }
+        var calls: [Set<AgentHookProvider>] = []
+        store.onTurnEnded = { calls.append($0) }
+        let now = Date(timeIntervalSince1970: 1_000)
+        // Work events never trigger.
+        store.apply(
+            [hookEvent("UserPromptSubmit", at: 990), hookEvent("PostToolUse", at: 991)], at: now)
+        #expect(calls.isEmpty)
+        // A fresh SubagentStop and Stop make one call.
+        store.apply(
+            [hookEvent("SubagentStop", at: 995), hookEvent("Stop", at: 996)], at: now)
+        #expect(calls == [[.claude]])
+        store.stop()
+    }
+
+    @Test("An old turn-end event, as from a spool replayed at launch, never triggers")
+    func oldTurnEndDoesNotTrigger() {
+        let (store, suite) = makeStore()
+        defer { TestDefaultsSuite.remove(suite) }
+        var calls = 0
+        store.onTurnEnded = { _ in calls += 1 }
+        let now = Date(timeIntervalSince1970: 10_000)
+        store.apply(
+            [
+                hookEvent("UserPromptSubmit", at: 100), hookEvent("Stop", at: 200),
+                hookEvent("SessionEnd", at: 300),
+            ], at: now)
+        #expect(calls == 0)
+        store.stop()
+    }
+
+    @Test("A duplicate turn-end event the ledger rejects does not trigger twice")
+    func duplicateTurnEndDoesNotTrigger() {
+        let (store, suite) = makeStore()
+        defer { TestDefaultsSuite.remove(suite) }
+        var calls = 0
+        store.onTurnEnded = { _ in calls += 1 }
+        let now = Date(timeIntervalSince1970: 1_000)
+        let stop = hookEvent("Stop", at: 995)
+        store.apply([stop], at: now)
+        store.apply([stop], at: now)
+        #expect(calls == 1)
+        store.stop()
+    }
+
     @Test(
         "markReplyRead is a cheap no-op without a matching reply; a real read bumps the revision once"
     )

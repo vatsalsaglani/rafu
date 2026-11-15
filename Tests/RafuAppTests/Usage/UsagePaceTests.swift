@@ -268,8 +268,14 @@ func usageResetAndAgeLabels() {
             for: sessionWindow(percent: nil, resetIn: nil), now: paceNow)
             == "Not reported")
     #expect(
-        UsageWindowPresentation.ageLabel(observedAt: paceNow.addingTimeInterval(-30), now: paceNow)
+        UsageWindowPresentation.ageLabel(observedAt: paceNow.addingTimeInterval(-5), now: paceNow)
             == "Just updated")
+    #expect(
+        UsageWindowPresentation.ageLabel(observedAt: paceNow.addingTimeInterval(-37), now: paceNow)
+            == "Updated 30s ago")
+    #expect(
+        UsageWindowPresentation.ageLabel(observedAt: paceNow.addingTimeInterval(-119), now: paceNow)
+            == "1m ago")
     #expect(
         UsageWindowPresentation.ageLabel(observedAt: paceNow.addingTimeInterval(-300), now: paceNow)
             == "5m ago")
