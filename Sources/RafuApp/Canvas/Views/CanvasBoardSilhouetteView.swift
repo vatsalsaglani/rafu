@@ -21,7 +21,7 @@ struct CanvasBoardSilhouetteView: View {
         .frame(
             width: CanvasBoardSilhouette.size.width, height: CanvasBoardSilhouette.size.height
         )
-        .rafuDeckFill(theme.palette.elevatedBackground, .card, in: .rect(cornerRadius: 4))
+        .rafuDeckFill(theme.palette.elevatedBackground, .boardCard, in: .rect(cornerRadius: 4))
         .overlay {
             RoundedRectangle(cornerRadius: 4)
                 .strokeBorder(

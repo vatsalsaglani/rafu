@@ -386,9 +386,19 @@ struct CanvasReturnToBoardButton: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 4) {
-                Text("Return to Board")
-                Text("⌃⇥").foregroundStyle(theme.palette.textMuted)
+            // One line always: the full label when the header has room,
+            // else the shortcut alone (the help and the accessibility label
+            // keep the full name).
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 4) {
+                    Text("Return to Board")
+                    Text("⌃⇥").foregroundStyle(theme.palette.textMuted)
+                }
+                .lineLimit(1)
+                .fixedSize()
+                Text("⌃⇥")
+                    .lineLimit(1)
+                    .fixedSize()
             }
             .font(.system(size: 11, weight: .medium))
             .foregroundStyle(theme.palette.textPrimary)

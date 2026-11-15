@@ -208,7 +208,7 @@ struct CanvasZoomCapsule: View {
         }
         .padding(.horizontal, 3)
         .frame(height: 28)
-        .rafuDeckFill(theme.palette.elevatedBackground, .card, in: Capsule())
+        .rafuDeckFill(theme.palette.elevatedBackground, .boardCard, in: Capsule())
         .overlay(Capsule().strokeBorder(theme.palette.borderSubtle))
         .fixedSize()
     }

@@ -56,7 +56,7 @@ struct CanvasAgentControlItem: View {
             .background(
                 pending > 0
                     ? theme.palette.warning.opacity(0.18)
-                    : windowSurface.fill(theme.palette.elevatedBackground, .card),
+                    : windowSurface.fill(theme.palette.elevatedBackground, .boardCard),
                 in: Capsule()
             )
             .overlay(Capsule().strokeBorder(theme.palette.borderSubtle, lineWidth: 1))
