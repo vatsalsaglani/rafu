@@ -251,7 +251,8 @@ public enum WidgetProviderStatus: Equatable, Sendable {
 }
 
 /// When the widget's timeline needs a new entry without new data: now,
-/// each hour up to `horizon`, each window's reset, the moment each
+/// each hour up to `horizon`, each window's reset, each day boundary of a
+/// window with a day split (v3), the moment each
 /// provider's pace goes unknown and the snapshot turns stale, and the
 /// moment it is abandoned. The timeline ends at the last date
 /// (`.atEnd`), so WidgetKit asks again within `horizon`.
@@ -269,6 +270,12 @@ public enum WidgetTimelinePlan {
                 candidates.append(
                     provider.observedAt.addingTimeInterval(WidgetRingsPresentation.staleAge))
                 candidates.append(contentsOf: provider.windows.compactMap(\.resetsAt))
+                // v3: each day boundary of a window with a day split, so
+                // the Hundred widget moves "today" without a reload.
+                for start in provider.windows.compactMap(\.windowStart) {
+                    candidates.append(
+                        contentsOf: (1..<7).map { start.addingTimeInterval(Double($0) * 86_400) })
+                }
             }
         }
         let end = now.addingTimeInterval(horizon)
