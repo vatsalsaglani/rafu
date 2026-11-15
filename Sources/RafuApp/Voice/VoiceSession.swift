@@ -64,6 +64,9 @@ final class VoiceSession {
         var debugTranscriptDirectory: URL? = nil
         /// Where spoken agent updates read hook activity. Tests give a double.
         var agentActivity: VoiceAgentActivitySource = .live
+        /// The session's time source. Tests inject a manual clock so the quiet
+        /// gates do not depend on how long a loaded machine took to run them.
+        var now: @MainActor () -> ContinuousClock.Instant = { ContinuousClock.now }
 
         static var live: Dependencies {
             Dependencies(
@@ -169,7 +172,7 @@ final class VoiceSession {
     @ObservationIgnored private var isClosing = false
     /// Bumped by every open and close, so a stale async step drops its result.
     @ObservationIgnored private var generation = 0
-    @ObservationIgnored private var openedAt = ContinuousClock.now
+    @ObservationIgnored private var openedAt: ContinuousClock.Instant
     @ObservationIgnored private var clock = VoiceActivityClock()
     @ObservationIgnored private var inFlightCalls = 0
     @ObservationIgnored private var outputsAwaitingCreate = 0
@@ -221,6 +224,7 @@ final class VoiceSession {
 
     init(dependencies: Dependencies = .live) {
         self.dependencies = dependencies
+        openedAt = dependencies.now()
         costStore = VoiceCostStore(suiteName: dependencies.costSuiteName)
     }
 
@@ -228,7 +232,7 @@ final class VoiceSession {
         VoicePersona.rafu.with(voice: dependencies.preferences.voice)
     }
 
-    private func elapsed() -> Duration { ContinuousClock.now - openedAt }
+    private func elapsed() -> Duration { dependencies.now() - openedAt }
 
     /// Time since the session opened. Tests add to it for `tick(at:)`.
     var sessionElapsed: Duration { elapsed() }
@@ -378,7 +382,7 @@ final class VoiceSession {
     private func open() {
         generation += 1
         let ticket = generation
-        openedAt = ContinuousClock.now
+        openedAt = dependencies.now()
         clock = VoiceActivityClock()
         clock.setLatched(machine.mic == .latched, at: .zero)
         lastError = nil
