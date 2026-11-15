@@ -16,6 +16,10 @@ import WidgetKit
 /// (v3). The log is read and written only on its actor, never on the main
 /// actor; the extension never reads it.
 ///
+/// Once a day, when the Codex provider is on, the log also gets a backfill of
+/// the current week from the local Codex rollouts (`CodexRolloutBackfill`),
+/// read off the main actor. Backfilled records never replace live ones.
+///
 /// Writes only from a staged Rafu or Rafu Lightning bundle, so `swift test`
 /// and raw `swift run` never touch the user's Application Support folder.
 @MainActor
@@ -37,6 +41,10 @@ final class WidgetSnapshotPublisher {
     private var lastFingerprint: String?
     private var lastReloadAt: Date?
     private var writeTask: Task<Void, Never>?
+    /// The running Codex backfill, if any; at most one at a time.
+    private var backfillTask: Task<Void, Never>?
+    /// `UserDefaults` key: seconds since 1970 of the last finished backfill.
+    nonisolated static let backfillDefaultsKey = "RafuUsageCodexBackfillLastRun"
     /// The daily usage log; `nil` outside a staged bundle.
     private let sampleLog: UsageSampleLogStore?
     /// Theme inks by theme identifier, so a user theme file is read once.
@@ -68,6 +76,7 @@ final class WidgetSnapshotPublisher {
         stale: Set<UsageProviderID>, mode: UsageDisplayMode, palette: UsageRingPalette, now: Date
     ) {
         guard let appName = Self.hostAppName else { return }
+        startBackfillIfDue(snapshots: snapshots, now: now)
         var widget = Self.makeSnapshot(
             snapshots: snapshots, observedAt: observedAt, stale: stale, mode: mode,
             palette: palette, now: now, inks: currentInks())
@@ -104,6 +113,35 @@ final class WidgetSnapshotPublisher {
                 }
             }
         }
+    }
+
+    /// Starts the daily Codex rollout backfill when it is due. It needs the
+    /// log (a staged bundle) and the Codex provider on (it has a snapshot),
+    /// so a user who turned Codex off never has its rollouts read.
+    private func startBackfillIfDue(snapshots: [UsageSnapshot], now: Date) {
+        guard let sampleLog, backfillTask == nil,
+            snapshots.contains(where: { $0.providerID == .codex })
+        else { return }
+        let lastRun = UserDefaults.standard.object(forKey: Self.backfillDefaultsKey)
+            .flatMap { $0 as? Double }.map { Date(timeIntervalSince1970: $0) }
+        guard CodexRolloutBackfill.isDue(lastRun: lastRun, now: now) else { return }
+        let sessions = FileManager.default.homeDirectoryForCurrentUser.appending(
+            path: ".codex/sessions", directoryHint: .isDirectory)
+        backfillTask = Task.detached(priority: .utility) { [weak self] in
+            let outcome = try? await CodexRolloutBackfill.run(
+                store: sampleLog, sessionsDirectory: sessions, now: now)
+            await self?.backfillFinished(changed: outcome, at: now)
+        }
+    }
+
+    /// `changed` is `nil` when the run was cancelled: it is tried again
+    /// later. A changed log forces the next publish to reload the widgets,
+    /// because the fingerprint does not include the day split.
+    private func backfillFinished(changed: Bool?, at date: Date) {
+        backfillTask = nil
+        guard let changed else { return }
+        UserDefaults.standard.set(date.timeIntervalSince1970, forKey: Self.backfillDefaultsKey)
+        if changed { lastFingerprint = nil }
     }
 
     /// One log record for each window with a used percent of each fresh

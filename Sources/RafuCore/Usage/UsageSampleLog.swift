@@ -15,15 +15,22 @@ public struct UsageSampleRecord: Codable, Equatable, Sendable {
     public var usedPercent: Double
     public var resetsAt: Date?
     public var observedAt: Date
+    /// `true` for a record rebuilt from a local rollout after the fact
+    /// (`UsageSampleLog.mergeBackfill`), `false` for a live observation.
+    /// Stored only when `true`, so live records keep their short form and an
+    /// older log reads as all live.
+    public var isBackfill: Bool
 
     public init(
-        providerID: String, window: String, usedPercent: Double, resetsAt: Date?, observedAt: Date
+        providerID: String, window: String, usedPercent: Double, resetsAt: Date?, observedAt: Date,
+        isBackfill: Bool = false
     ) {
         self.providerID = providerID
         self.window = window
         self.usedPercent = usedPercent
         self.resetsAt = resetsAt
         self.observedAt = observedAt
+        self.isBackfill = isBackfill
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -32,6 +39,27 @@ public struct UsageSampleRecord: Codable, Equatable, Sendable {
         case usedPercent = "u"
         case resetsAt = "r"
         case observedAt = "o"
+        case isBackfill = "b"
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        providerID = try container.decode(String.self, forKey: .providerID)
+        window = try container.decode(String.self, forKey: .window)
+        usedPercent = try container.decode(Double.self, forKey: .usedPercent)
+        resetsAt = try container.decodeIfPresent(Date.self, forKey: .resetsAt)
+        observedAt = try container.decode(Date.self, forKey: .observedAt)
+        isBackfill = try container.decodeIfPresent(Bool.self, forKey: .isBackfill) ?? false
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(providerID, forKey: .providerID)
+        try container.encode(window, forKey: .window)
+        try container.encode(usedPercent, forKey: .usedPercent)
+        try container.encodeIfPresent(resetsAt, forKey: .resetsAt)
+        try container.encode(observedAt, forKey: .observedAt)
+        if isBackfill { try container.encode(true, forKey: .isBackfill) }
     }
 }
 
@@ -46,6 +74,8 @@ public struct UsageSampleRecord: Codable, Equatable, Sendable {
 /// - A record older than the newest record of its window is ignored.
 /// - Records later than `now` come from a clock that ran ahead and was
 ///   set back; they are dropped, so the log stays in time order.
+/// - A backfill merge (`mergeBackfill`) adds samples from local rollouts
+///   without replacing any record that is already there.
 /// - Records older than `retention` (five weeks) are pruned, and the log
 ///   never holds more than `maximumRecords` or encodes to more than
 ///   `maximumBytes`.
@@ -111,6 +141,81 @@ public struct UsageSampleLog: Codable, Equatable, Sendable {
             changed = true
         }
         return prune(now: now) || changed
+    }
+
+    /// Most backfill samples one merge accepts.
+    public static let maximumBackfillSamples = 1_000
+
+    /// Merges samples rebuilt from local rollouts (`isBackfill` is set on
+    /// each). Live records are never changed or replaced: a sample is added
+    /// only when no record of the same window lies within `minimumInterval`
+    /// of it, unless both name a known `resetsAt` and the two differ by more
+    /// than `resetTolerance` (a reset boundary). The same rule dedupes
+    /// backfill against backfill, so a second merge of the same samples adds
+    /// nothing. A sample at or before `now - retention`, or later than `now`
+    /// plus `futureTolerance`, or with a non-finite percent, is ignored.
+    /// Returns `true` when the log changed and must be written.
+    @discardableResult
+    public mutating func mergeBackfill(_ samples: [UsageSampleRecord], now: Date) -> Bool {
+        let cutoff = now.addingTimeInterval(-Self.retention)
+        let limit = now.addingTimeInterval(Self.futureTolerance)
+        let accepted = samples.prefix(Self.maximumBackfillSamples).filter {
+            $0.usedPercent.isFinite && $0.observedAt > cutoff && $0.observedAt <= limit
+        }.sorted { $0.observedAt < $1.observedAt }
+
+        // Per window: the observation times and resets already in the log,
+        // sorted, so each sample is checked against its two neighbours.
+        struct Key: Hashable {
+            var providerID: String
+            var window: String
+        }
+        var existing: [Key: [(at: Date, resetsAt: Date?)]] = [:]
+        for record in records {
+            existing[Key(providerID: record.providerID, window: record.window), default: []]
+                .append((record.observedAt, record.resetsAt))
+        }
+
+        var added: [UsageSampleRecord] = []
+        for sample in accepted {
+            var clean = sample
+            clean.usedPercent = min(max(sample.usedPercent, 0), 100)
+            clean.isBackfill = true
+            let key = Key(providerID: clean.providerID, window: clean.window)
+            let observed = clean.observedAt
+            let resets = clean.resetsAt
+            // Check the two neighbours inside a block, so the borrowed
+            // array is released before it is mutated (no copy).
+            let (index, blocked): (Int, Bool) = {
+                let neighbours = existing[key] ?? []
+                // First index at or after the sample.
+                var low = 0
+                var high = neighbours.count
+                while low < high {
+                    let middle = (low + high) / 2
+                    if neighbours[middle].at < observed { low = middle + 1 } else { high = middle }
+                }
+                func conflicts(_ other: (at: Date, resetsAt: Date?)) -> Bool {
+                    let distance = abs(other.at.timeIntervalSince(observed))
+                    if distance == 0 { return true }
+                    guard distance < Self.minimumInterval else { return false }
+                    if let lhs = other.resetsAt, let rhs = resets {
+                        return !Self.resetChanged(lhs, rhs)
+                    }
+                    return true
+                }
+                let before = low > 0 && conflicts(neighbours[low - 1])
+                let after = low < neighbours.count && conflicts(neighbours[low])
+                return (low, before || after)
+            }()
+            if blocked { continue }
+            existing[key, default: []].insert((observed, resets), at: index)
+            added.append(clean)
+        }
+        if !added.isEmpty {
+            records.append(contentsOf: added)
+            records.sort { $0.observedAt < $1.observedAt }
+        }
+        return prune(now: now) || !added.isEmpty
     }
 
     /// Removes records older than `retention` and the oldest records past
@@ -341,6 +446,17 @@ public actor UsageSampleLogStore {
             try? write(current)
         }
         return current
+    }
+
+    /// Merges backfill samples (`UsageSampleLog.mergeBackfill`) and writes
+    /// the file when the log changed. Returns whether it changed.
+    @discardableResult
+    public func backfill(_ samples: [UsageSampleRecord], now: Date) -> Bool {
+        var current = load()
+        guard current.mergeBackfill(samples, now: now) else { return false }
+        log = current
+        try? write(current)
+        return true
     }
 
     private func write(_ log: UsageSampleLog) throws {
