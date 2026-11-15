@@ -160,7 +160,8 @@ struct AgentTranscriptBuilder {
         }
         items.append(
             AgentTranscriptItem(
-                id: items.count, role: role, kind: kind, text: body.text, detail: boundedDetail,
+                id: items.count, role: role, kind: kind, text: AgentHistoryJSON.native(body.text),
+                detail: boundedDetail.map(AgentHistoryJSON.native),
                 toolName: toolName, isError: isError, timestamp: timestamp,
                 isTruncated: body.truncated || detailCut))
         if items.count >= limits.maximumItems { isFull = true }

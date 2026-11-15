@@ -55,8 +55,27 @@ nonisolated enum MemoryChipPresentation {
     }
 
     static func help(_ settling: MemorySettling, live: UInt64?) -> String {
-        "Rafu process memory footprint, as Activity Monitor shows it. "
+        let base =
+            "Rafu process memory footprint, as Activity Monitor shows it. "
             + values(settling, live: live) + " Shared by all windows."
+        guard let note = DebugBuildNote.current else { return base }
+        return base + " " + note
+    }
+}
+
+/// A short note that only a debug build shows. A debug build uses more memory
+/// than a release build, so its number is not the release number. The number
+/// itself is never changed.
+nonisolated enum DebugBuildNote {
+    static let text = "This is a debug build. It uses more memory than a release build."
+
+    /// `text` in a debug build, `nil` in a release build.
+    static var current: String? {
+        #if DEBUG
+            text
+        #else
+            nil
+        #endif
     }
 }
 
@@ -330,6 +349,12 @@ struct ResourcesView: View {
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityLabel("Summary: \(summaryLine)")
+            if let note = DebugBuildNote.current {
+                Text(note)
+                    .font(.caption2)
+                    .foregroundStyle(theme.palette.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if showsExplanation {
                 Text(tab == .composition ? compositionExplanationText : Self.timelineExplanation)
                     .font(.caption2)

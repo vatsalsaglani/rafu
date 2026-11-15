@@ -58,20 +58,29 @@ enum AgentHistoryFileReader {
         while consumed < maxBytes {
             try Task.checkCancellation()
             let count = min(chunkSize, maxBytes - consumed)
-            guard let chunk = try handle.read(upToCount: count), !chunk.isEmpty else {
-                // End of file: the final line may lack a newline.
-                if !buffer.isEmpty { _ = try body(buffer) }
+            // One pool per chunk, and one per line below: the read data and
+            // the parsed trees are freed per unit, not at the end of the job.
+            let finished = try withAutoreleasePool { () throws -> Bool in
+                guard let chunk = try handle.read(upToCount: count), !chunk.isEmpty else {
+                    // End of file: the final line may lack a newline.
+                    if !buffer.isEmpty { _ = try body(buffer) }
+                    return true
+                }
+                consumed += chunk.count
+                buffer.append(chunk)
+                var start = buffer.startIndex
+                while let end = buffer[start...].firstIndex(of: newline) {
+                    let line = buffer[start..<end]
+                    if !line.isEmpty {
+                        let shouldContinue = try withAutoreleasePool { try body(Data(line)) }
+                        if !shouldContinue { return true }
+                    }
+                    start = buffer.index(after: end)
+                }
+                buffer = Data(buffer[start...])
                 return false
             }
-            consumed += chunk.count
-            buffer.append(chunk)
-            var start = buffer.startIndex
-            while let end = buffer[start...].firstIndex(of: newline) {
-                let line = buffer[start..<end]
-                if !line.isEmpty, try !body(Data(line)) { return false }
-                start = buffer.index(after: end)
-            }
-            buffer = Data(buffer[start...])
+            if finished { return false }
         }
         // Limit reached. A trailing partial line is dropped.
         let next = try handle.read(upToCount: 1) ?? Data()
@@ -92,7 +101,11 @@ enum AgentHistoryJSON {
         guard let first = line.first(where: { $0 != 0x20 && $0 != 0x09 }), first == 0x7B else {
             return nil
         }
-        return (try? JSONSerialization.jsonObject(with: line)) as? [String: Any]
+        // The parsed tree is autoreleased. Drain it here; the returned
+        // dictionary is retained by Swift and survives the pool.
+        return withAutoreleasePool {
+            (try? JSONSerialization.jsonObject(with: line)) as? [String: Any]
+        }
     }
 
     static func object(jsonText: String) -> [String: Any]? {
@@ -107,7 +120,17 @@ enum AgentHistoryJSON {
     static func nonEmptyString(_ value: Any?) -> String? {
         guard let text = value as? String else { return nil }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
+        return trimmed.isEmpty ? nil : native(trimmed)
+    }
+
+    /// A copy backed by native Swift storage. A string taken from
+    /// `JSONSerialization` output can wrap its `NSString`, which keeps the
+    /// Foundation object alive for as long as the string is kept. The value
+    /// is equal to the input.
+    static func native(_ text: String) -> String {
+        var copy = text
+        copy.makeContiguousUTF8()
+        return copy
     }
 
     static func bool(_ value: Any?) -> Bool {
