@@ -176,7 +176,10 @@ Never save:
 - environment values;
 - credentials, tokens, notification reply IDs, or Ensemble capability;
 - `TerminalProcessSpec`;
-- an automatically observed live working directory;
+- an automatically observed live working directory in a **named** saved layout
+  (ADR 0023, 2026-11-15 amendment: workspace restoration and Ensemble board
+  records may keep a validated workspace-relative `lastWorkingFolder`; see
+  [`terminal-last-working-folder.md`](../../references/terminal-last-working-folder.md));
 - the raw absolute workspace root or an absolute child folder;
 - an OSC-reported terminal title or computed display name;
 - provider/model identity, runtime error text, or an arbitrary unavailable
@@ -294,6 +297,25 @@ persisted free-form text.
     expansion state, or session.
 16. Save, folder-picker, and close-confirmation modal states block all group
     shortcuts from changing covered state.
+
+## Work log
+
+### 2026-11-15: terminals start in their last working folder (0c1b81a)
+
+Delivered on `main`. Workspace restoration and Ensemble board records carry an
+optional `lastWorkingFolder` on `TerminalPaneLaunchProfile`; a pane starts in it
+after window close or app relaunch. Start order: last folder, then starting
+folder, then the existing refusal (no workspace-root substitution). Named saved
+layouts never hold it. Restoration is still inert and starts no process. ADR 0023
+is amended; ADR 0004 has a cross-reference.
+
+Evidence: both test modes on `main` passed (parallel and `--no-parallel`: 3640
+tests in 294 suites); the user confirmed the shell-folder restore in Rafu
+Lightning on macOS 27.2 (Mac17,13). Known limits and the capture rules are in
+[`terminal-last-working-folder.md`](../../references/terminal-last-working-folder.md).
+
+Open: unsaved Terminal Group tabs are still not restored; Restart Shell on an
+exited pane uses the original start folder.
 
 ## Explicit non-goals
 

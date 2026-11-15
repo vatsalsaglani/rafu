@@ -356,3 +356,43 @@ promise registration at the source.
 LaunchServices caches type declarations: after changing a `UTType` identifier,
 stale declarations from an older bundle can still be resolved, so a
 mis-registering build may appear to survive the fix.
+
+## Board drop routing and the failed History drag (2026-11-15)
+
+Last verified: Xcode with the macOS 27.2 SDK (26B118), Swift 6 language mode,
+Darwin 27.2.0, Mac17,13. Both test modes on `main` passed (3640 tests in 294
+suites each).
+
+**Report.** A user could not drag a History item onto an Ensemble board. The
+report was against a Rafu Lightning built from `fd3ed77`. After a rebuild from
+`ec33440` (no drag code change in between) the drag works; the user confirmed
+History to board in Rafu Lightning.
+
+**Proven by hosted tests** (`Tests/RafuAppTests/Canvas/CanvasBoardDropRoutingTests.swift`,
+gated on Launch Services declaring the type, like `StripDropFixture`):
+
+- `-[NSWindow _findDragTargetFrom:]` routes an `ensemble-drag-v2` drag over a
+  visible board to the **board's own** SwiftUI drop target (900x431), never to
+  the editor group's `.onDrop` (900x462).
+- `_findDragTargetFrom:` skips unregistered sibling `NSView`s, so live terminal
+  and web views do not hide the board target.
+- A SwiftUI `.onDrop` is an `AppKitPlatformViewHost<...DraggingDestinationView>`
+  that holds a `_PlatformDraggingDestinationView` registered for
+  `public.data` and `public.item`.
+- The board mounts two `CanvasScrollBridge.Host` instances: a visibility-only
+  one (`drop == nil`) and the drop bridge. Filter on `drop != nil` to find the
+  drop one.
+
+**Not provable in a test.** Synthetic events do not start a SwiftUI `.onDrag` in
+a test process, so a drag-start regression needs a manual GUI check.
+
+**Probable, unproven cause of the old failure.** Launch Services listed 8
+`ensemble-drag-v2` declarations from several staged bundles. A stale or
+duplicate type registration is the probable cause of the failed drag start in
+the older build. This was not isolated. First diagnostic when a drag does not
+start: rebuild, then re-register the bundle (`lsregister -f` on the staged app)
+and look at the `lsregister -dump` count for the identifier.
+
+**Verification.** `swift test --filter CanvasBoardDropRoutingTests` (hosted
+tests skip unless the bundle is registered; see "Tests need the Launch Services
+declaration" above).

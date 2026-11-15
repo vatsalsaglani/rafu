@@ -45,8 +45,9 @@ Manual checks still open — no person has looked at the window yet:
   and the tab accessories.
 - Full screen round trip and a second window.
 - The 770 pt minimum window, and a restart keeping the stored sidebar width.
-- The hover preview's z-order over split groups and terminal panes (known open:
-  x-position is clamped, y is approximate).
+- The hover preview's z-order over split groups and terminal panes (fixed
+  2026-11-15: `TabHoverPreviewPlacement` puts the card below the shelf and the
+  tab bar has `.zIndex(1)`; see `docs/references/swiftui-macos-click-latency.md`).
 - The `+` menu items (New File, New Terminal, New Terminal Group, New Ensemble).
 - The Ensemble tab's close button now hover/selected-gated.
 

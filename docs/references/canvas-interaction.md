@@ -1099,6 +1099,50 @@ and trackpad over a Markdown/MDX card without a click; at the card's end the
 next gesture pans the board; ⌘-scroll zooms; Space or Hand tool pans over a
 card; a terminal that is not active still lets the board pan.
 
+## Body click (2026-11-15)
+
+Applies to `CanvasBodyClickMonitor` and the pure resolver `CanvasBodyClick`
+(`Canvas/`). Last verified: Xcode with the macOS 27.2 SDK (26B118), Swift 6
+language mode, Darwin 27.2.0, Mac17,13. Both test modes on `main` passed
+(parallel and `--no-parallel`: 3640 tests in 294 suites). The user confirmed in
+Rafu Lightning that a click in a card body selects and focuses the card. No ADR
+change: the lease rules are unchanged.
+
+**Rule.** A left click anywhere in a card body selects and focuses that card.
+
+- One board-level, non-consuming left-mouse-down monitor decides. The event
+  still reaches the view under it.
+- The frontmost card that contains the point owns it.
+- The header is 33 board units times the scale. An 8 screen-point band at the
+  card edge is not body (resize and port zones).
+- Compact zoom faces and whiteboard items have no body.
+- Overlays register their frames in the coordinate space
+  `dev.rafu.canvas.body-click`.
+- ⌘ and ⇧ keep their selection meaning (toggle and extend). The decision uses
+  the state from **before** dispatch. It is applied in a `Task` after dispatch,
+  so a native self-focus (SwiftTerm, a web view) cannot undo the ⌘/⇧ result.
+- A terminal receives keys only when this board holds the presentation lease and
+  a controller exists. A click never steals a lease and never starts a shell.
+- Per-kind mouse-up taps must not handle ⌘/⇧ any more. The monitor owns that.
+
+**Root cause.** Two defects, both from the code:
+
+1. Some bodies had no handler at all: the generated view, Mermaid (except a
+   double-click), a terminal that is not running, held elsewhere or in a claim
+   block, and a web view before it loads.
+2. Others used SwiftUI mouse-up taps. A mouse-up tap misses a click that a
+   nested AppKit tracking loop takes (selectable text, scrollers).
+
+Why mouse-down: see
+[`appkit-click-tracking-and-synthetic-events.md`](appkit-click-tracking-and-synthetic-events.md).
+
+**Verification.** `./script/test.sh` and `./script/test.sh --no-parallel`
+(a focused `--filter` name was not in the handoff). Manual: click the body
+of each card kind (note, file, Markdown, generated view, Mermaid, web before and
+after load, terminal not running, held elsewhere, live) and see it select and
+focus; ⌘-click and ⇧-click still toggle and extend; a click on a terminal held
+elsewhere does not take the lease.
+
 ## 2026-11-07: UX Round A — arrival, zoom floor, overview, drop grammar, landing, seeds
 
 Applies to `CanvasArrival`, `CanvasMinimapLayout`, `CanvasSeedLayout`
@@ -1295,6 +1339,7 @@ On a Mac, in this order (run one SwiftPM invocation at a time):
 ./script/format.sh --lint
 ./script/build.sh
 ./script/test.sh --filter Canvas
+./script/test.sh --filter CanvasBodyClickTests
 ./script/test.sh
 ./script/test.sh --no-parallel
 ./script/build_and_run.sh --verify

@@ -104,3 +104,12 @@ metadata and never restore a process.
 add of a terminal card on an Ensemble board counts as the explicit start. The
 rule "explicit user start, no automatic command execution" is unchanged; no
 command is sent and no process is restored.
+
+## Cross-reference (2026-11-15): last working folder
+
+[ADR 0023](0023-terminal-groups-and-saved-layouts.md), 2026-11-15 amendment: the
+2026-08-16 amendment above says Rafu "never persists an observed live working
+directory". That sentence is narrowly superseded. Workspace restoration and
+Ensemble board records may keep a validated, workspace-relative
+`lastWorkingFolder`; user-named saved layouts never do. Rafu still never sends
+`cd` to a live shell.

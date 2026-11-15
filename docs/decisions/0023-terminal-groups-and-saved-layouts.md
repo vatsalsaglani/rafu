@@ -240,3 +240,32 @@ cap is gone. Terminal Group editor tabs keep every bound in this ADR and ADR
 [ADR 0025](0025-workspace-canvas-and-app-previews.md), Amendment 5: adding an
 Ensemble terminal card is the explicit user start, so its shell starts without a
 second click. Saved boards still restore inert and no process is restored.
+
+## Amendment (2026-11-15): a terminal starts in its last working folder
+
+The user asked that a terminal start in the folder where the shell last was,
+after a window close or an app relaunch. This narrowly supersedes two earlier
+statements in this ADR: "An observed live working directory stays live-only"
+(Set Pane Starting Folder paragraph) and "Saved data must never contain ...
+observed working directory" (saved-data list). Nothing else in the saved-data
+list changes.
+
+- **Where it is stored.** Workspace restoration payloads and Ensemble board
+  records may carry an optional `lastWorkingFolder` on
+  `TerminalPaneLaunchProfile`. It is **not** part of a user-named Saved Terminal
+  Group: `TerminalGroupRestorationCodec.savedRecord` strips it, so a named layout
+  never holds an observed folder.
+- **What it may hold.** A workspace-relative path only. It is symlink-resolved,
+  inside the workspace root, and revalidated on restore and again on every
+  start. It is never absolute and never a command. A value equal to the pane's
+  `startingFolder` is stored as nil. In a remote workspace (`rootURL` nil) it is
+  cleared.
+- **Start fallback order.** The last folder if usable, then the starting folder
+  if usable, then the existing refusal. Rafu does not substitute the workspace
+  root; this ADR forbids substitution and that rule is unchanged.
+- **Unchanged.** Spawn is still lazy and still follows a visible user action.
+  Restoration is still inert and starts no process. Rafu never sends `cd` to a
+  live shell. Set Pane Starting Folder still sets only the future-start folder.
+
+Detail, the OSC 7 host rule and the capture points:
+[`terminal-last-working-folder.md`](../references/terminal-last-working-folder.md).

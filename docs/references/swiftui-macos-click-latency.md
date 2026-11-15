@@ -50,8 +50,24 @@ causes were found. Each can recur on a new tab or row type.
    `.task(id:)`, is `allowsHitTesting(false)` and `accessibilityHidden`, has no
    transition under Reduce Motion, and its content is text only (built by the
    pure `TabHoverPreviewContentBuilder`; no thumbnails). Its x-position is
-   clamped; the y-position is approximate, and whether it sits above split
-   groups and terminal panes is unverified.
+   placed by the pure `TabHoverPreviewPlacement` (2026-11-15, below).
+
+   **Hover card placement (2026-11-15).** Last verified: Xcode with the macOS
+   27.2 SDK (26B118), Swift 6 language mode, Darwin 27.2.0, Mac17,13; both test
+   modes on `main` passed (3640 tests in 294 suites each).
+   The card used `.position(x: clamp(midX, 130...width-130), y: 0)`. That put
+   its centre on the shelf's top edge, so it covered the hovered tab and the
+   title-bar row, and the fixed 130 pt half-width clamp misplaced a narrow card.
+   Now `TabHoverPreviewPlacement.origin(tabFrame:cardSize:shelfSize:)`
+   (`RafuWorkbenchStyles.swift`) puts the card **below** the shelf with a gap of
+   `space1` (4 pt), centred on the tab and clamped by its measured width with
+   `space2` margins. `EditorGroupTabBar` has `.zIndex(1)` in `EditorGroupView`,
+   so later `VStack` siblings (the group body) do not paint over the card. The
+   card is hidden while `session.dragInFlight != nil`. The 500 ms delay, the
+   cancel on hover end and the Reduce Motion `.identity` transition are
+   unchanged. Do not switch to `.popover` (it steals key focus). Tests:
+   `Tests/RafuAppTests/TabHoverPreviewPlacementTests.swift`. Not stated in the
+   handoff: a manual pass of the new placement by the user.
 2. **`onTapGesture(count: 2)` next to a single tap.** With both gestures,
    SwiftUI holds every single click until the system double-click interval
    passes. It affected the Terminals panel row and the Terminal Group tab
