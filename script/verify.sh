@@ -23,6 +23,7 @@ jq empty Resources/Themes/*.json
 xmllint --noout Resources/AppIcon/rafu-icon-seam.svg
 ./script/generate_app_icon.sh "$ICON_CHECK/Rafu.icns"
 test -s "$ICON_CHECK/Rafu.icns"
+./script/check_sdk_stamp.sh --self-test
 ./script/build.sh
 
 # AppKit routes the private drag type to SwiftUI `.onDrop` targets only
