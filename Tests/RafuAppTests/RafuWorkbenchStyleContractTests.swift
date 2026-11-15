@@ -10,17 +10,29 @@ struct RafuWorkbenchStyleContractTests {
     func compactMetrics() {
         // Design polish round 2: the inset grew 8 → 10 so the stronger deck
         // shadow (radius 6 → 7, y 2 → 3) still fits inside the gutter; round
-        // 4 grew it to 12 for a deeper shadow (radius 8, y 4).
-        #expect(RafuMetrics.workbenchInset == 12)
+        // 4 grew it to 12 for a deeper shadow (radius 8, y 4). The window gap
+        // tightening (2026-11-15) made it per edge, so the card gets more
+        // room: top 12 → 6, leading 12 → 6, trailing 12 → 8, bottom 12.
+        #expect(RafuMetrics.deckInsetTop == 6)
+        #expect(RafuMetrics.deckInsetLeading == 6)
+        #expect(RafuMetrics.deckInsetTrailing == 8)
+        #expect(RafuMetrics.deckInsetBottom == 12)
         #expect(RafuMetrics.editorGroupGapTarget == 4)
         #expect(RafuMetrics.radiusWorkbenchDeck == 12)
         #expect(RafuMetrics.radiusEditorGroup == 5)
         #expect(RafuMetrics.deckShadowRadius == 8)
         #expect(RafuMetrics.deckShadowY == 4)
-        // The shadow must stay inside the deck lane's 12 pt gutter, or the
-        // lane would clip it.
+        // The shadow's reach on each edge must stay inside that edge's
+        // gutter, or the window edge, status bar, or rail would cut it.
+        let shadow = RafuMetrics.deckShadowRadius
+        let offset = RafuMetrics.deckShadowY
+        #expect(shadow + offset <= RafuMetrics.deckInsetBottom)
+        #expect(shadow - offset <= RafuMetrics.deckInsetTop)
+        #expect(shadow <= RafuMetrics.deckInsetTrailing)
+        // Leading: the split handle's hit area is always part of that gutter.
         #expect(
-            RafuMetrics.deckShadowRadius + RafuMetrics.deckShadowY <= RafuMetrics.workbenchInset)
+            shadow
+                <= max(RafuMetrics.deckInsetLeading, WorkbenchSplitHandle.hitAreaWidth))
         #expect(RafuMetrics.radiusWorkbenchTab == 10)
         // Round 3 widened the selected tab's shadow (3 → 4) so it lifts off
         // the Khadi shelf; it must still fit inside the shelf's breathing

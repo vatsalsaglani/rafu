@@ -9,17 +9,19 @@ import Testing
 /// 14 pt higher; these checks keep the panels from drifting apart again.
 @Suite("Navigator panel header placement")
 struct NavigatorPanelHeaderPlacementTests {
-    @Test("The title centre is the deck inset plus half the tab shelf")
+    @Test("The title centre is the deck's top inset plus half the tab shelf")
     func sharedMetric() {
         #expect(
             RafuMetrics.navigatorHeaderTitleCenterY
-                == RafuMetrics.workbenchInset + RafuMetrics.tabShelfHeight / 2)
-        #expect(RafuMetrics.navigatorHeaderTitleCenterY == 31)
+                == RafuMetrics.deckInsetTop + RafuMetrics.tabShelfHeight / 2)
+        // Window gap tightening: the deck's top inset 12 → 6 moved the tab
+        // labels up 6 pt, so the headers follow (31 → 25, inset 19 → 13).
+        #expect(RafuMetrics.navigatorHeaderTitleCenterY == 25)
         // Every panel, Files included, uses the one 24 pt header row.
         #expect(RafuMetrics.navigatorHeaderRowHeight == 24)
         #expect(
             RafuMetrics.navigatorHeaderTopInset(rowHeight: RafuMetrics.navigatorHeaderRowHeight)
-                == 19)
+                == 13)
         // A row taller than the line never gets a negative inset.
         #expect(RafuMetrics.navigatorHeaderTopInset(rowHeight: 80) == 0)
     }

@@ -45,6 +45,10 @@ struct WorkspaceActivityRail: View {
     @Bindable var session: WorkspaceSession
     @Environment(\.rafuTheme) private var theme
 
+    /// The rail's full width: `leadingInset` + a 30 pt button + 3 pt.
+    static let width: CGFloat = 38
+    static let leadingInset: CGFloat = 5
+
     var body: some View {
         VStack(spacing: 6) {
             // 4 pt plus the stack's 6 pt spacing: a 10 pt gap to the modes.
@@ -56,9 +60,14 @@ struct WorkspaceActivityRail: View {
             Spacer()
         }
         // The rail starts below the titlebar row (`WindowTitlebarRow`) so
-        // the traffic lights and sidebar toggle stay clear above it.
-        .padding(.top, 10)
-        .frame(width: 40)
+        // the traffic lights and sidebar toggle stay clear above it. The top
+        // padding equals the deck's top inset, so the app tile's top edge
+        // lines up with the deck card's (window gap tightening: 10 → 6).
+        .padding(.top, RafuMetrics.deckInsetTop)
+        // 30 pt buttons: 5 pt from the window edge, and only 3 pt on the
+        // deck side, where the split handle's 10 pt follows (40 → 38).
+        .padding(.leading, Self.leadingInset)
+        .frame(width: Self.width, alignment: .leading)
         .frame(maxHeight: .infinity)
         .fixedSize(horizontal: true, vertical: false)
         .background(WindowDragHandle())

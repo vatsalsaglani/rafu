@@ -171,7 +171,13 @@ struct SidebarTreeAndRailPolishTests {
         let modes = try #require(rail.range(of: "ForEach(WorkspaceNavigatorMode.allCases"))
         #expect(tileCall.lowerBound < modes.lowerBound)
         #expect(rail.contains("VStack(spacing: 6)"))
-        #expect(rail.contains(".padding(.top, 10)"))
+        // Window gap tightening: the rail's top padding follows the deck's
+        // top inset (10 → 6), so the app tile lines up with the card's top,
+        // and the rail is 38 pt with 3 pt on the deck side (was 40, 5 pt).
+        #expect(rail.contains(".padding(.top, RafuMetrics.deckInsetTop)"))
+        #expect(WorkspaceActivityRail.width == 38)
+        #expect(WorkspaceActivityRail.leadingInset == 5)
+        #expect(rail.contains(".frame(width: Self.width, alignment: .leading)"))
         // Clicks on the tile fall through to the rail's window-drag handle.
         let railBody = try Self.section(
             of: source, from: "struct WorkspaceActivityRail: View", to: "struct RafuRailAppTile")

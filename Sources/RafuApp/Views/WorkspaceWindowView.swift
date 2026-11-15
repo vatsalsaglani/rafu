@@ -76,10 +76,11 @@ struct WorkspaceWindowView: View {
         .modifier(CanvasPresentations(session: session))
         // Raised from 720, then from 760 when the HSplitView divider
         // became the explicit `WorkbenchSplitHandle`, then to 774 when the
-        // deck inset grew to 10 pt: the left Activity Rail (40) + sidebar
-        // min (220) + the handle's hit area (10) + deck lane (editor min
-        // 472 + 20 pt inset) floor to 762; 774 keeps the same 12 pt margin
-        // above it. See `workbenchContent`'s comment.
+        // deck inset grew. The window gap tightening kept 774: the floor is
+        // now the Activity Rail (38) + sidebar min (220) + the handle's hit
+        // area (10) + deck lane (editor min 472 + leading 6 + trailing 8)
+        // = 754, so the deck gains 20 pt at the minimum width. See
+        // `workbenchContent`'s comment.
         .frame(minWidth: 774, minHeight: 480)
         .navigationTitle(session.windowTitle)
         .focusedSceneValue(\.workspaceSession, session)
@@ -183,11 +184,11 @@ struct WorkspaceWindowView: View {
                 // `editorCanvas` now, not a separate docked panel here.
                 WorkbenchDeckSurface {
                     editorCanvas
-                        // Resize floor: rail 40 + sidebar min 220 + the
+                        // Resize floor: rail 38 + sidebar min 220 + the
                         // handle's 10 pt hit area + deck lane (this 472 +
-                        // the 12 pt inset on both sides below, 24) = 766.
-                        // The window's own `minWidth` (below, in `body`)
-                        // is raised to 774 to clear it with a small margin.
+                        // the 6 pt leading and 8 pt trailing insets below)
+                        // = 754. The window's own `minWidth` (above, in
+                        // `body`) stays 774, clear of it.
                         // `sidebarWidth` is not window-responsive, so this
                         // floor holds only at a 220 pt sidebar. Below the
                         // true floor the deck clips at the trailing edge
@@ -197,8 +198,8 @@ struct WorkspaceWindowView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .layoutPriority(1)
                 }
-                // Equal gutter on all four sides when the sidebar is
-                // collapsed: the handle's hit area counts toward it.
+                // Per-edge gutter (`RafuMetrics.deckInset*`); a collapsed
+                // sidebar's handle hit area counts toward the leading one.
                 .padding(
                     WorkbenchDeckLane.padding(
                         isSidebarCollapsed: session.isSidebarCollapsed,
