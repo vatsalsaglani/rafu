@@ -153,9 +153,10 @@ nonisolated struct TerminalReportedTitle: RawRepresentable, Hashable, Sendable {
     }
 }
 
-/// A normalized path below the workspace root. It never represents an
-/// observed live working directory and cannot contain an absolute path or a
-/// traversal component.
+/// A normalized path below the workspace root. It cannot contain an absolute
+/// path or a traversal component. It holds an observed working directory only
+/// as `TerminalPaneLaunchProfile.lastWorkingFolder`, after the observed path
+/// was resolved and proved to be inside the workspace root.
 nonisolated struct TerminalWorkspaceRelativePath: RawRepresentable, Codable, Hashable, Sendable {
     static let root = TerminalWorkspaceRelativePath(unchecked: ".")
     static let maximumUTF8Length = 1_024
@@ -338,7 +339,37 @@ nonisolated enum TerminalPaneShellChoice: Codable, Equatable, Hashable, Sendable
 /// process.
 nonisolated struct TerminalPaneLaunchProfile: Codable, Equatable, Hashable, Sendable {
     let shell: TerminalPaneShellChoice
+    /// The folder the user chose ("Set Pane Starting Folder"), or the folder
+    /// the pane was created in.
     let startingFolder: TerminalWorkspaceRelativePath
+    /// The folder the shell was last in, inside the workspace. Only workspace
+    /// restoration and Ensemble boards carry it; named saved layouts never do
+    /// (`withoutLastWorkingFolder`). An old record without the key decodes as
+    /// `nil`, and a `nil` value is not encoded. It is never a command.
+    var lastWorkingFolder: TerminalWorkspaceRelativePath? = nil
+
+    /// The same profile with no observed folder: the form for a named saved
+    /// layout and for a new split pane.
+    var withoutLastWorkingFolder: TerminalPaneLaunchProfile {
+        TerminalPaneLaunchProfile(shell: shell, startingFolder: startingFolder)
+    }
+
+    /// Stores `folder` as the last working folder. A folder equal to the
+    /// starting folder adds nothing, so it is stored as `nil`.
+    func withLastWorkingFolder(_ folder: TerminalWorkspaceRelativePath?)
+        -> TerminalPaneLaunchProfile
+    {
+        TerminalPaneLaunchProfile(
+            shell: shell, startingFolder: startingFolder,
+            lastWorkingFolder: folder == startingFolder ? nil : folder)
+    }
+
+    /// The folder a start tries first: the last working folder, else the
+    /// starting folder. The start path revalidates it on disk
+    /// (`TerminalStartFolderResolver`).
+    var preferredStartFolder: TerminalWorkspaceRelativePath {
+        lastWorkingFolder ?? startingFolder
+    }
 }
 
 /// Runtime-only launch input. Saved and restoration records must use

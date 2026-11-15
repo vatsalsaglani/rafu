@@ -1609,6 +1609,7 @@ final class WorkspaceTerminalController: Identifiable {
             state = classified
         }
         noteForeground(state)
+        refreshCurrentDirectoryFromProcess()
         let secondsSinceOutput = lastOutputDate.map { Date().timeIntervalSince($0) }
         if TerminalForegroundSampling.continuesPolling(
             after: state, isVisible: terminalView?.window != nil,
@@ -1632,17 +1633,32 @@ final class WorkspaceTerminalController: Identifiable {
     }
 
     /// OSC 7 delivers the shell's cwd as a `file://host/path` URI; some
-    /// shells send a bare path instead. `nil` clears the report.
-    fileprivate func updateCurrentDirectory(_ directory: String?) {
+    /// shells send a bare path instead. `nil` clears the report. A report
+    /// that names another host (a shell inside `ssh host`) is ignored: that
+    /// path is not on this Mac. Internal so tests can drive it.
+    func updateCurrentDirectory(_ directory: String?) {
         guard let directory, !directory.isEmpty else {
             currentDirectoryPath = nil
             return
         }
-        if directory.hasPrefix("file://"), let url = URL(string: directory) {
-            currentDirectoryPath = url.path
-        } else {
-            currentDirectoryPath = directory
-        }
+        guard
+            let path = TerminalWorkingDirectoryReport.localPath(
+                directory, localHostNames: TerminalWorkingDirectoryReport.currentHostNames)
+        else { return }
+        if currentDirectoryPath != path { currentDirectoryPath = path }
+    }
+
+    /// Reads the login shell's current directory from the process itself
+    /// (one `proc_pidinfo` call) and keeps it as `currentDirectoryPath`.
+    /// Shells that send no OSC 7 (stock zsh and bash) are covered this way.
+    /// A program the shell runs (an agent CLI) does not change the shell's
+    /// folder, so the shell PID is the right process. Does nothing for a
+    /// spec-backed process or without a live shell; the last value stays.
+    func refreshCurrentDirectoryFromProcess() {
+        guard hasLiveProcess, isOrdinaryShellTerminal, let shellPID = shellProcessID,
+            let path = processInspector.currentDirectory(processID: shellPID)
+        else { return }
+        if currentDirectoryPath != path { currentDirectoryPath = path }
     }
 
     /// 16-entry ANSI palette derived from theme tokens. Black/white anchor on

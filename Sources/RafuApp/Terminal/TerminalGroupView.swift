@@ -70,8 +70,20 @@ nonisolated enum TerminalPanePresentation {
         }
     }
 
+    /// The folder a start uses: the last working folder, else the starting
+    /// folder.
     static func folderLabel(for pane: TerminalPaneSnapshot) -> String? {
-        pane.launchProfile?.startingFolder.rawValue
+        pane.launchProfile?.preferredStartFolder.rawValue
+    }
+
+    /// The stopped-pane text, naming the folder Start Shell uses.
+    static func stoppedDescription(for pane: TerminalPaneSnapshot) -> String {
+        guard let folder = folderLabel(for: pane) else {
+            return "Start this pane when you are ready."
+        }
+        let place =
+            folder == "." ? "the workspace folder" : CanvasCardPresentation.folderName(folder)
+        return "Start this pane when you are ready. It starts in \(place)."
     }
 
     static func themeColor(
@@ -355,7 +367,7 @@ private struct TerminalGroupPaneView: View {
             ContentUnavailableView {
                 Label("Terminal Pane Stopped", systemImage: "stop.circle")
             } description: {
-                Text("Start this pane when you are ready.")
+                Text(TerminalPanePresentation.stoppedDescription(for: pane))
             } actions: {
                 if pane.startAvailability == .available {
                     Button("Start Shell") {

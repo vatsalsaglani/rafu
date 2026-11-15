@@ -44,15 +44,23 @@ nonisolated struct TerminalGroupDecodedSnapshot: Equatable, Sendable {
 nonisolated struct TerminalGroupRestorationCodec: Sendable {
     private let validateProfile:
         @Sendable (TerminalPaneLaunchProfile) -> TerminalGroupPaneRestoreValidation
+    /// Restoration keeps a pane's last working folder only while it is still
+    /// usable (`TerminalStartFolderResolver.revalidated`). The default keeps
+    /// the profile as decoded.
+    private let revalidateProfile:
+        @Sendable (TerminalPaneLaunchProfile) -> TerminalPaneLaunchProfile
 
     init(
         validateProfile:
             @escaping @Sendable (TerminalPaneLaunchProfile) -> TerminalGroupPaneRestoreValidation =
             {
                 _ in .available
-            }
+            },
+        revalidateProfile:
+            @escaping @Sendable (TerminalPaneLaunchProfile) -> TerminalPaneLaunchProfile = { $0 }
     ) {
         self.validateProfile = validateProfile
+        self.revalidateProfile = revalidateProfile
     }
 
     func savedRecord(
@@ -96,7 +104,9 @@ nonisolated struct TerminalGroupRestorationCodec: Sendable {
                     throw TerminalGroupPersistenceError.missingShellProfile
                 }
                 kind = .ordinaryShell
-                profile = launchProfile
+                // A named layout is a reusable template: the folder a shell
+                // was last in is not part of it, and the store refuses the key.
+                profile = launchProfile.withoutLastWorkingFolder
             case .directAgentTerminal, .unavailableAgentTerminal:
                 kind = .unavailableAgentTerminal
                 profile = nil
@@ -234,7 +244,10 @@ nonisolated struct TerminalGroupRestorationCodec: Sendable {
     ) throws -> (pane: TerminalPaneSnapshot, validation: TerminalGroupPaneRestoreValidation) {
         switch kind {
         case .ordinaryShell:
-            guard let launchProfile else { throw TerminalGroupPersistenceError.missingShellProfile }
+            guard let decodedProfile = launchProfile else {
+                throw TerminalGroupPersistenceError.missingShellProfile
+            }
+            let launchProfile = revalidateProfile(decodedProfile)
             let validation = validateProfile(launchProfile)
             return (
                 try TerminalPaneSnapshot(
