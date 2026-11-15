@@ -57,4 +57,15 @@ struct RafuDialogPolicyTests {
         #expect(!menus.contains("CanvasTextFieldPopup"))
         #expect(menus.contains("RafuTextFieldPopup("))
     }
+
+    @Test("Import Pack closes the floating Icon Library before its sheet opens")
+    func importClosesTheLibraryFirst() throws {
+        let menus = try CanvasBoardKeyMapTests.source(
+            "Sources/RafuApp/Canvas/Diagram/CanvasDiagramMenus.swift")
+        let body = try #require(
+            menus.range(of: "static func showImport()").map { String(menus[$0.upperBound...]) })
+        let close = try #require(body.range(of: "libraryHolder.panel?.close()"))
+        let sheet = try #require(body.range(of: "presentSheet("))
+        #expect(close.lowerBound < sheet.lowerBound)
+    }
 }

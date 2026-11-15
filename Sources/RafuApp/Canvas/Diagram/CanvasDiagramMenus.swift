@@ -182,6 +182,10 @@ enum CanvasDiagramPanels {
     }
 
     static func showImport() {
+        // The import sheet attaches to the workspace window, and the Icon
+        // Library is a floating panel above that window: close the library
+        // first, or the sheet opens behind it.
+        libraryHolder.panel?.close()
         presentSheet(size: NSSize(width: 480, height: 440)) { dismiss in
             CanvasIconPackImportView(dismiss: dismiss)
         }
