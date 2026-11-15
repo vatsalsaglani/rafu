@@ -624,6 +624,31 @@ nonisolated enum TabHoverPreviewContentBuilder {
     }
 }
 
+/// Where a tab's hover card sits inside the tab shelf's own space (top-left
+/// origin): BELOW the shelf, so it never covers the hovered tab, its
+/// neighbours, or the title-bar row above; centred on the hovered tab; and
+/// clamped to the shelf's width, which is the editor group's width, so it
+/// never leaves the window. The clamp uses the card's MEASURED width: a fixed
+/// half-width guess pushed a narrow card away from a tab near either edge,
+/// so it floated between two tabs.
+nonisolated enum TabHoverPreviewPlacement {
+    /// Space between the shelf's bottom edge and the card.
+    static let gap: CGFloat = RafuMetrics.space1
+    /// Smallest distance between the card and either side of the shelf.
+    static let edgeMargin: CGFloat = RafuMetrics.space2
+
+    /// The card's top-left corner for a hovered tab at `tabFrame`, a card of
+    /// `cardSize`, and a shelf of `shelfSize` (all in the shelf's space).
+    static func origin(tabFrame: CGRect, cardSize: CGSize, shelfSize: CGSize) -> CGPoint {
+        let centered = tabFrame.midX - cardSize.width / 2
+        let maximum = shelfSize.width - edgeMargin - cardSize.width
+        // A card wider than the shelf keeps its leading edge in view.
+        let x = maximum < edgeMargin ? edgeMargin : min(max(centered, edgeMargin), maximum)
+        let y = max(tabFrame.maxY, shelfSize.height) + gap
+        return CGPoint(x: x, y: y)
+    }
+}
+
 /// The floating card itself: a bold title with the status word trailing on
 /// the same line, a secondary subtitle line with the elapsed label trailing.
 /// Inert and hidden from accessibility — the tab underneath already
