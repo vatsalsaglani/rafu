@@ -184,6 +184,9 @@ private struct EditorGroupView: View {
                     terminalIdentities: terminalIdentities,
                     session: session
                 )
+                // The tab hover card hangs below the shelf, over the body.
+                // Drawing order follows siblings, so lift the shelf.
+                .zIndex(1)
                 GeometryReader { proxy in
                     VStack(spacing: 0) {
                         // An untitled document has no path; the row would only
@@ -1332,26 +1335,43 @@ private struct EditorGroupTabBar: View {
                 session: session
             )
         )
-        // Read above the shelf's own bounds (not clipped — nothing in this
-        // view tree clips, and this shelf is the first thing in its
-        // editor group's VStack, so there is no later sibling to hide
-        // behind): the card's center sits at the shelf's own top edge, which
-        // in practice floats it just above the strip regardless of which tab
-        // is hovered, since every tab sits at the same shallow row.
+        // The card draws BELOW the shelf's own bounds (nothing in this view
+        // tree clips), centred on the hovered tab and kept inside the
+        // group's width (`TabHoverPreviewPlacement`). The editor group lifts
+        // this tab bar above its body (`zIndex`), so the later body sibling
+        // does not paint over the card. Never shown while a drag is in
+        // flight: the card would sit over the drop targets below.
         .overlayPreferenceValue(TabHoverPreviewPreferenceKey.self) { anchor in
             GeometryReader { proxy in
-                if let anchor {
-                    let frame = proxy[anchor.anchor]
+                if let anchor, session.dragInFlight == nil {
+                    let tabFrame = proxy[anchor.anchor]
+                    let shelfSize = proxy.size
                     TabHoverPreviewCard(content: anchor.content)
                         .fixedSize()
-                        .position(
-                            x: min(max(frame.midX, 130), max(130, proxy.size.width - 130)),
-                            y: 0
+                        .alignmentGuide(.leading) { card in
+                            -TabHoverPreviewPlacement.origin(
+                                tabFrame: tabFrame,
+                                cardSize: CGSize(width: card.width, height: card.height),
+                                shelfSize: shelfSize
+                            ).x
+                        }
+                        .alignmentGuide(.top) { card in
+                            -TabHoverPreviewPlacement.origin(
+                                tabFrame: tabFrame,
+                                cardSize: CGSize(width: card.width, height: card.height),
+                                shelfSize: shelfSize
+                            ).y
+                        }
+                        .frame(
+                            width: shelfSize.width, height: shelfSize.height,
+                            alignment: .topLeading
                         )
                         .transition(reduceMotion ? .identity : .opacity)
                 }
             }
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: anchor != nil)
+            .animation(
+                reduceMotion ? nil : .easeOut(duration: 0.12),
+                value: anchor != nil && session.dragInFlight == nil)
         }
     }
 
