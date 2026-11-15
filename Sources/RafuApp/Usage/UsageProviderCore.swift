@@ -25,22 +25,9 @@ nonisolated enum UsageProviderID: String, CaseIterable, Codable, Sendable {
         factoryDroid, openRouter, kimi, warp, qwen, qoder
 }
 
-/// One rate-limit window inside a `UsageSnapshot` — a real percentage OR a
-/// token total, never both fabricated to fill the missing field (mirrors
-/// the shipped `AgentUsageWindow`'s discipline).
-nonisolated struct UsageWindow: Equatable, Sendable {
-    /// "5h" / "7d" / "monthly" — a human label, not a raw window size.
-    let label: String
-    let percent: Double?
-    let tokens: Int?
-    let resetsAt: Date?
-    /// The window's length in minutes (300 for a 5-hour session, 10_080 for
-    /// a weekly limit) when the provider reports or documents it. Additive:
-    /// it defaults to `nil`, so every existing
-    /// `UsageWindow(label:percent:tokens:resetsAt:)` call keeps compiling.
-    /// `UsagePace` needs it, with `resetsAt`, to find the window's start.
-    var windowMinutes: Int? = nil
-}
+// `UsageWindow` (one rate-limit window) lives in `RafuWidgetShared`
+// (`Sources/RafuWidgetShared/UsageWindow.swift`) so the WidgetKit extension
+// shares it; `RafuApp` re-exports that module (`RafuWidgetSharedExport.swift`).
 
 /// Where a snapshot's numbers came from, so a card can say "Estimated from
 /// local transcripts" instead of implying an exact percentage. Additive and

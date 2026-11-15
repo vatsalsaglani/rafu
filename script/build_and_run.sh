@@ -29,10 +29,14 @@ case "$APP_NAME" in
   "Rafu Lightning")
     BUNDLE_ID="dev.vatsalsaglani.rafu.lightning"
     SEAM_COLOR="#C0C6CE"
+    # Widget link scheme. Keep in lockstep with `RafuDeepLink` in
+    # Sources/RafuWidgetShared/RafuDeepLink.swift.
+    URL_SCHEME="rafu-lightning"
     ;;
   "Rafu")
     BUNDLE_ID="dev.vatsalsaglani.rafu"
     SEAM_COLOR="#E3A857"
+    URL_SCHEME="rafu"
     ;;
   *)
     echo "RAFU_APP_NAME must be either 'Rafu Lightning' or 'Rafu'." >&2
@@ -246,6 +250,19 @@ cat >"$INFO_PLIST" <<PLIST
   <string>$MIN_SYSTEM_VERSION</string>
   <key>NSPrincipalClass</key>
   <string>NSApplication</string>
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLName</key>
+      <string>$BUNDLE_ID.usage-link</string>
+      <key>CFBundleTypeRole</key>
+      <string>Viewer</string>
+      <key>CFBundleURLSchemes</key>
+      <array>
+        <string>$URL_SCHEME</string>
+      </array>
+    </dict>
+  </array>
   <key>CFBundleDocumentTypes</key>
   <array>
     <dict>
@@ -399,6 +416,9 @@ test "$(plutil -extract NSExtension.NSExtensionPointIdentifier raw "$WIDGET_APPE
 codesign -d --entitlements - --xml "$WIDGET_APPEX" 2>/dev/null | grep -F "com.apple.security.app-sandbox" >/dev/null
 test -s "$APP_ICON"
 test "$(plutil -extract CFBundleIconFile raw "$INFO_PLIST")" = "$APP_ICON_NAME"
+# The widget link scheme (`RafuDeepLink`): one scheme per variant, so a
+# Lightning widget never opens the release app.
+test "$(plutil -extract CFBundleURLTypes.0.CFBundleURLSchemes.0 raw "$INFO_PLIST")" = "$URL_SCHEME"
 # Keep the Info.plist-declared drag UTI identifier in lockstep with
 # `UTType.rafuEditorDrag` in EditorDragAndDrop.swift — a mismatch silently
 # breaks the SwiftUI drag pasteboard bridge (see

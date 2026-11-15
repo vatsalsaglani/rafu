@@ -412,8 +412,8 @@ nonisolated enum UsageDisplayPolicy {
     /// (agent-usage-providers.md: "up to 4 tiles the user picks and orders
     /// in Settings").
     static let frontLineCap = 4
-    static let highUsageThreshold: Double = 80
-    static let criticalUsageThreshold: Double = 95
+    static let highUsageThreshold: Double = UsageLevelThresholds.high
+    static let criticalUsageThreshold: Double = UsageLevelThresholds.critical
     /// A front-line tile's window count caps at this many
     /// (agent-usage-providers.md, "Multi-provider display in the notch",
     /// amended 2026-07-23: per-row front line). Each front-line provider

@@ -5,34 +5,34 @@ import Foundation
 /// headless-testable. `UsageCardInk.color(for:)` resolves it against the
 /// active theme (Settings) or `NotchInk` (the notch) as a STABLE hue —
 /// never recoloured by `UsageRingLevel`.
-nonisolated enum UsageRingTone: Equatable, Sendable {
+public nonisolated enum UsageRingTone: Equatable, Sendable {
     case primary, secondary, tertiary
 }
 
 /// One ring's presentation, distilled from a `UsageWindow` and its
 /// `UsagePace`. Pure: nothing here reads a clock or a theme, and every
 /// field is `Equatable`/`Sendable` so a cluster can be compared in a test.
-nonisolated struct UsageRingArc: Equatable, Sendable {
+public nonisolated struct UsageRingArc: Equatable, Sendable {
     /// `"5h"`, `"7d"` — the ring's short caption (`UsageWindowPresentation.
     /// shortLabel`).
-    let shortLabel: String
+    public let shortLabel: String
     /// `"5-hour session"`, `"Weekly"` — the spoken title
     /// (`UsageWindowPresentation.title`).
-    let title: String
+    public let title: String
     /// `0...1`, clamped; `nil` when the window carries no usable
     /// percentage (`UsageRingLevel.fraction`).
-    let fraction: Double?
+    public let fraction: Double?
     /// `"83%"` / `"—"` — derived from the SAME `fraction` above, so the
     /// centre text and the legend can never disagree with the ring.
-    let percentText: String
-    let level: UsageRingLevel
-    let tone: UsageRingTone
+    public let percentText: String
+    public let level: UsageRingLevel
+    public let tone: UsageRingTone
     /// `"↻ 2h 10m"`, `"Reset due"` (`UsageWindowPresentation.resetLabel`).
-    let resetText: String
+    public let resetText: String
     /// `"resets 4:20 PM"`, `"reset due"` (`UsageWindowPresentation.
     /// spokenReset`) — the spoken form VoiceOver reads.
-    let resetSpoken: String
-    let pace: UsagePace
+    public let resetSpoken: String
+    public let pace: UsagePace
 }
 
 /// One provider's Activity-style ring cluster: up to `maxArcs` concentric
@@ -41,39 +41,43 @@ nonisolated struct UsageRingArc: Equatable, Sendable {
 /// ring). Claude alone can emit up to six windows at once
 /// (agent-usage-providers.md), so the overflow partition is not a rare
 /// edge case.
-nonisolated struct UsageRingCluster: Equatable, Sendable {
+public nonisolated struct UsageRingCluster: Equatable, Sendable {
     /// The ring view never draws more than this many concentric rings —
     /// past this, the rings crowd into unreadable hairlines.
-    static let maxArcs = 3
+    public static let maxArcs = 3
 
     /// The arcs actually drawn as rings, outermost first.
-    let arcs: [UsageRingArc]
+    public let arcs: [UsageRingArc]
     /// Windows past `maxArcs`: legend rows only, no ring. Tone is clamped
     /// to `.tertiary` (`UsageRingClusterBuilder.tone(forIndex:maxArcs:)`).
-    let overflow: [UsageRingArc]
+    public let overflow: [UsageRingArc]
     /// The outermost ring's percent — the cluster's centre text.
-    let centerText: String
+    public let centerText: String
     /// One sentence covering every window, read as a single VoiceOver
     /// element (`UsageRingClusterView` sets `.accessibilityElement(children:
     /// .ignore)`).
-    let accessibilityLabel: String
+    public let accessibilityLabel: String
 
     /// Every row the legend renders: `arcs`, then `overflow`.
-    var legend: [UsageRingArc] { arcs + overflow }
+    public var legend: [UsageRingArc] { arcs + overflow }
 }
 
-/// Builds a `UsageRingCluster` from a snapshot. `nonisolated` and
+/// Builds a `UsageRingCluster` from a provider's windows. `nonisolated` and
 /// clock-free: callers pass `now`, `calendar`, and `locale` explicitly, so
 /// the result never depends on ambient state the caller did not choose.
-nonisolated enum UsageRingClusterBuilder {
-    /// `nil` when the snapshot has no window with a usable percentage — the
-    /// token-only and "No usage yet" card paths stay unchanged.
-    static func make(
-        snapshot: UsageSnapshot, observedAt: Date?, mode: UsageDisplayMode, displayName: String,
-        now: Date, maxArcs: Int = UsageRingCluster.maxArcs, calendar: Calendar = .current,
-        locale: Locale = .current
+/// The app's `make(snapshot:…)` (RafuApp, `UsageRingClusterBuilder+Snapshot
+/// .swift`) passes a snapshot's windows here; the widget passes the
+/// snapshot file's windows.
+public nonisolated enum UsageRingClusterBuilder {
+    /// `nil` when no window has a usable percentage — the token-only and
+    /// "No usage yet" card paths stay unchanged. Windows without a valid
+    /// percentage are skipped (`UsageCardPresentation.ringWindows`).
+    public static func make(
+        windows allWindows: [UsageWindow], observedAt: Date?, mode: UsageDisplayMode,
+        displayName: String, now: Date, maxArcs: Int = UsageRingCluster.maxArcs,
+        calendar: Calendar = .current, locale: Locale = .current
     ) -> UsageRingCluster? {
-        let windows = UsageCardPresentation.ringWindows(snapshot)
+        let windows = allWindows.filter { UsageWindowPresentation.usedPercent($0) != nil }
         guard !windows.isEmpty else { return nil }
         let arcCap = max(1, maxArcs)
 

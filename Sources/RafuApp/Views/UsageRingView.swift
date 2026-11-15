@@ -33,14 +33,16 @@ struct UsageCardInk {
     /// outermost first. Steps of roughly 0.25–0.4 keep three nested rings
     /// apart on the dark notch and in a light or dark Settings form;
     /// Increase Contrast lifts the two fainter rings, keeping the order.
+    /// The values live on `UsageRingPalette` (RafuWidgetShared) so the
+    /// widget extension draws the same steps.
     nonisolated static func monochromeOpacities(increasedContrast: Bool) -> [Double] {
-        increasedContrast ? [1.0, 0.78, 0.58] : [1.0, 0.62, 0.38]
+        UsageRingPalette.monochromeOpacities(increasedContrast: increasedContrast)
     }
 
     /// The monochrome track opacity over the same ink. It stays under the
     /// faintest ring's opacity so an unfilled track never reads as a fill.
     nonisolated static func monochromeTrackOpacity(increasedContrast: Bool) -> Double {
-        increasedContrast ? 0.24 : 0.14
+        UsageRingPalette.monochromeTrackOpacity(increasedContrast: increasedContrast)
     }
 
     /// The notch panel is always dark, so light themes use white ink there

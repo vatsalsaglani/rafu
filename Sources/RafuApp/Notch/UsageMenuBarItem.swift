@@ -162,6 +162,13 @@ final class UsageMenuBarItem: NSObject, NSPopoverDelegate {
         showPopover()
     }
 
+    /// Opens the card if it is closed (a `rafu://usage` widget link). An
+    /// open card stays open.
+    func revealCard() {
+        if popover?.isShown == true { return }
+        showPopover()
+    }
+
     private func showPopover() {
         guard let model, let button = statusItem?.button else { return }
         model.refreshUsage()

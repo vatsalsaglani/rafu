@@ -77,7 +77,17 @@ final class ExternalOpenRequests {
 final class RafuAppDelegate: NSObject, NSApplicationDelegate {
     private let terminationPersistence = WorkspaceTerminationPersistence()
 
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        // Before the launch Apple events arrive, so a widget tap that
+        // launches Rafu is not lost.
+        installGetURLHandler()
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Again after launch: SwiftUI may install its own URL handler while
+        // it finishes launching. Rafu has no other URL scheme, so its
+        // handler owns every URL event.
+        installGetURLHandler()
         CanvasDiagramPanels.registerPaletteItems()  // X9 diagrams
         GeneratedViewActions.install()  // wave 3: generated view cards
         MemoryPressureMonitor.shared.start()
@@ -102,6 +112,28 @@ final class RafuAppDelegate: NSObject, NSApplicationDelegate {
         // Watches the agent hook spool only if the person connected a
         // provider in Settings ▸ Agents. Never installs or changes hooks.
         AgentActivityStore.shared.start()
+        // After the companion activates: a usage link that arrived during
+        // launch can now show the menu bar card or the panel.
+        UsageDeepLink.launchDidFinish()
+    }
+
+    // MARK: - Widget link (`rafu://usage`, `RafuDeepLink`)
+
+    private func installGetURLHandler() {
+        NSAppleEventManager.shared().setEventHandler(
+            self, andSelector: #selector(handleGetURL(_:withReplyEvent:)),
+            forEventClass: AEEventClass(kInternetEventClass), andEventID: AEEventID(kAEGetURL))
+    }
+
+    /// The URL is the event's direct object. Anything that is not the exact
+    /// usage link is ignored (`UsageDeepLink.handle`).
+    @objc private func handleGetURL(
+        _ event: NSAppleEventDescriptor, withReplyEvent reply: NSAppleEventDescriptor
+    ) {
+        guard let text = event.paramDescriptor(forKeyword: keyDirectObject)?.stringValue,
+            let url = URL(string: text)
+        else { return }
+        UsageDeepLink.handle(url)
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
@@ -139,6 +171,13 @@ final class RafuAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
+        // A widget link never reaches the folder path: the exact usage link
+        // shows the usage surface, any other URL in Rafu's scheme is ignored.
+        for url in urls where UsageDeepLink.owns(url) {
+            UsageDeepLink.handle(url)
+        }
+        let urls = urls.filter { !UsageDeepLink.owns($0) }
+        guard !urls.isEmpty else { return }
         // `.rafuensemble` files open as board tabs (X5); `.rafuworkspace`
         // files open as saved workspaces (X10); folders as before.
         let others = CanvasEnsembleOpenRouter.shared.route(urls)
