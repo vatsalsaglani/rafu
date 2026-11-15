@@ -209,9 +209,11 @@ struct CanvasTerminalCard: View {
     private func notRunningBlock(_ pane: TerminalPaneSnapshot, id: TerminalGroupID) -> some View {
         let shell = pane.launchProfile.map { CanvasCardPresentation.shellName($0.shell) }
         // The folder Start Shell uses: the last working folder, else the
-        // starting folder (restoration already dropped a missing one).
+        // starting folder (restoration already dropped a missing one), else
+        // the workspace folder when both are gone.
+        let fallback = session.terminalPanesStartingInWorkspaceFolder.contains(pane.id)
         let folder = pane.launchProfile.map {
-            CanvasCardPresentation.folderName($0.preferredStartFolder.rawValue)
+            CanvasCardPresentation.terminalStartFolderLine($0, startsInWorkspaceFolder: fallback)
         }
         return VStack(spacing: 10) {
             Image(systemName: "apple.terminal")
@@ -223,7 +225,8 @@ struct CanvasTerminalCard: View {
             }
             if let folder {
                 Text(folder).font(.system(size: 12)).foregroundStyle(theme.palette.textSecondary)
-                    .lineLimit(1)
+                    .lineLimit(fallback ? 2 : 1)
+                    .multilineTextAlignment(.center)
             }
             if pane.status == .stopped, pane.startAvailability == .available {
                 Button("Start Shell") { startOrRestart(id) }

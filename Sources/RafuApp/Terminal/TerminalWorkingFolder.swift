@@ -79,15 +79,59 @@ nonisolated enum TerminalWorkspaceFolder {
     static func isUsable(_ folder: TerminalWorkspaceRelativePath, root: URL) -> Bool {
         relative(path: root.appending(path: folder.rawValue).path, root: root) != nil
     }
+
+    /// Whether nothing exists at `folder` below `root` any more: no file, no
+    /// folder, and no symlink (a symlink is not followed, so a link that now
+    /// points outside the workspace is not "gone" and keeps the refusal).
+    static func isMissing(_ folder: TerminalWorkspaceRelativePath, root: URL) -> Bool {
+        let path = root.appending(path: folder.rawValue).path
+        var info = stat()
+        return lstat(path, &info) != 0 && errno == ENOENT
+    }
 }
 
 /// Chooses the folder a stopped ordinary shell starts in.
 nonisolated enum TerminalStartFolderResolver {
     /// The last working folder when it is still usable, else the starting
-    /// folder when it is usable, else `nil`. `nil` keeps the existing refusal
-    /// for a missing starting folder: a start never substitutes a folder the
-    /// user did not have (ADR 0023 revalidation).
+    /// folder when it is usable, else the workspace folder (`.root`) when the
+    /// starting folder is gone (`isMissing`) and the root is usable, else
+    /// `nil`. The workspace-folder fallback is ADR 0023's 2026-11-15
+    /// amendment: a saved folder that is gone no longer blocks a start. A
+    /// starting folder that exists but is unusable (a symlink that now points
+    /// outside the workspace, a file, an unreadable folder) keeps the refusal.
+    /// A remote workspace has no local root, so its callers never reach this
+    /// resolver.
     static func resolve(
+        _ profile: TerminalPaneLaunchProfile,
+        isUsable: (TerminalWorkspaceRelativePath) -> Bool,
+        isMissing: (TerminalWorkspaceRelativePath) -> Bool
+    ) -> TerminalWorkspaceRelativePath? {
+        if let saved = savedFolder(profile, isUsable: isUsable) { return saved }
+        return fallsBack(profile, isUsable: isUsable, isMissing: isMissing) ? .root : nil
+    }
+
+    /// True when neither saved folder is usable, the starting folder is gone,
+    /// and a start falls back to the workspace folder. The stopped-pane and
+    /// Ensemble card labels say so.
+    static func fallsBackToWorkspaceFolder(
+        _ profile: TerminalPaneLaunchProfile,
+        isUsable: (TerminalWorkspaceRelativePath) -> Bool,
+        isMissing: (TerminalWorkspaceRelativePath) -> Bool
+    ) -> Bool {
+        savedFolder(profile, isUsable: isUsable) == nil
+            && fallsBack(profile, isUsable: isUsable, isMissing: isMissing)
+    }
+
+    private static func fallsBack(
+        _ profile: TerminalPaneLaunchProfile,
+        isUsable: (TerminalWorkspaceRelativePath) -> Bool,
+        isMissing: (TerminalWorkspaceRelativePath) -> Bool
+    ) -> Bool {
+        isMissing(profile.startingFolder) && isUsable(.root)
+    }
+
+    /// The last working folder, else the starting folder, when usable.
+    private static func savedFolder(
         _ profile: TerminalPaneLaunchProfile,
         isUsable: (TerminalWorkspaceRelativePath) -> Bool
     ) -> TerminalWorkspaceRelativePath? {

@@ -35,6 +35,17 @@ nonisolated enum CanvasCardPresentation {
         relativePath.isEmpty || relativePath == "." ? "Workspace folder" : relativePath
     }
 
+    /// The not-running terminal card's folder line: the folder Start Shell
+    /// uses, or, when the saved folder is gone, the workspace-folder fallback
+    /// (ADR 0023, 2026-11-15 amendment).
+    static func terminalStartFolderLine(
+        _ profile: TerminalPaneLaunchProfile, startsInWorkspaceFolder: Bool
+    ) -> String {
+        startsInWorkspaceFolder
+            ? "Saved folder is gone. Starts in the workspace folder."
+            : folderName(profile.preferredStartFolder.rawValue)
+    }
+
     /// One line for the 25-50% summary face.
     static func summaryLine(for content: CanvasCardContent, terminalTitle: String?) -> String {
         switch content {

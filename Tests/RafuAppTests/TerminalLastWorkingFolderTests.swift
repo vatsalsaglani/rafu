@@ -97,13 +97,16 @@ struct TerminalLastWorkingFolderTests {
 
     // MARK: - Resolver
 
-    @Test("A start uses the last folder, then the starting folder, then refuses")
+    @Test("A start uses the last folder, then the starting folder, then the workspace folder")
     func resolverFallbacks() throws {
         let fixture = try Fixture()
         defer { fixture.remove() }
         let root = fixture.root
         let usable = { (folder: TerminalWorkspaceRelativePath) in
             TerminalWorkspaceFolder.isUsable(folder, root: root)
+        }
+        let gone = { (folder: TerminalWorkspaceRelativePath) in
+            TerminalWorkspaceFolder.isMissing(folder, root: root)
         }
         let sub = try #require(TerminalWorkspaceRelativePath("a/b"))
         let a = try #require(TerminalWorkspaceRelativePath("a"))
@@ -112,24 +115,48 @@ struct TerminalLastWorkingFolderTests {
 
         let withLast = TerminalPaneLaunchProfile(
             shell: .preferredShell, startingFolder: a, lastWorkingFolder: sub)
-        #expect(TerminalStartFolderResolver.resolve(withLast, isUsable: usable) == sub)
+        #expect(
+            TerminalStartFolderResolver.resolve(withLast, isUsable: usable, isMissing: gone) == sub)
 
         let deleted = TerminalPaneLaunchProfile(
             shell: .preferredShell, startingFolder: a, lastWorkingFolder: missing)
-        #expect(TerminalStartFolderResolver.resolve(deleted, isUsable: usable) == a)
+        #expect(
+            TerminalStartFolderResolver.resolve(deleted, isUsable: usable, isMissing: gone) == a)
 
         let escaping = TerminalPaneLaunchProfile(
             shell: .preferredShell, startingFolder: .root, lastWorkingFolder: escape)
-        #expect(TerminalStartFolderResolver.resolve(escaping, isUsable: usable) == .root)
+        #expect(
+            TerminalStartFolderResolver.resolve(escaping, isUsable: usable, isMissing: gone)
+                == .root)
 
         let noStart = TerminalPaneLaunchProfile(
             shell: .preferredShell, startingFolder: missing, lastWorkingFolder: nil)
-        #expect(TerminalStartFolderResolver.resolve(noStart, isUsable: usable) == nil)
+        // ADR 0023, 2026-11-15 amendment: a gone saved folder falls back to
+        // the workspace folder instead of refusing the start.
+        #expect(
+            TerminalStartFolderResolver.resolve(noStart, isUsable: usable, isMissing: gone) == .root
+        )
+        #expect(
+            TerminalStartFolderResolver.fallsBackToWorkspaceFolder(
+                noStart, isUsable: usable, isMissing: gone))
+        #expect(
+            !TerminalStartFolderResolver.fallsBackToWorkspaceFolder(
+                deleted, isUsable: usable, isMissing: gone))
+        // A starting folder that exists but escapes the workspace is not
+        // "gone": the start still refuses.
+        let escapedStart = TerminalPaneLaunchProfile(
+            shell: .preferredShell, startingFolder: escape, lastWorkingFolder: nil)
+        #expect(
+            TerminalStartFolderResolver.resolve(escapedStart, isUsable: usable, isMissing: gone)
+                == nil)
 
         #expect(
-            TerminalStartFolderResolver.revalidated(deleted, isUsable: usable).lastWorkingFolder
+            TerminalStartFolderResolver.revalidated(deleted, isUsable: usable)
+                .lastWorkingFolder
                 == nil)
-        #expect(TerminalStartFolderResolver.revalidated(withLast, isUsable: usable) == withLast)
+        #expect(
+            TerminalStartFolderResolver.revalidated(withLast, isUsable: usable)
+                == withLast)
     }
 
     @Test("The persisted folder follows the observation; outside or remote clears it")

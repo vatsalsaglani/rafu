@@ -23,9 +23,14 @@ nonisolated enum TerminalGroupPersistenceError: Error, Equatable, Sendable {
 }
 
 /// The result of revalidating an ordinary shell profile during inert restore.
-/// A missing dependency does not cause substitution or process activity.
+/// A missing dependency causes no process activity. The one substitution is
+/// `workspaceFolderFallback`: both saved folders are gone, so a start uses the
+/// workspace folder (ADR 0023, 2026-11-15 amendment).
 nonisolated enum TerminalGroupPaneRestoreValidation: Equatable, Sendable {
     case available
+    /// Startable; a start uses the workspace folder because the saved folder
+    /// is gone.
+    case workspaceFolderFallback
     case missingFolder
     case unapprovedShell
     case unavailableAgentTerminal
@@ -254,7 +259,8 @@ nonisolated struct TerminalGroupRestorationCodec: Sendable {
                     id: id, sessionID: nil, explicitUserName: explicitUserName, reportedTitle: nil,
                     runtimeKind: .ordinaryShell, themeColor: themeColor, status: .stopped,
                     launchProfile: launchProfile,
-                    startAvailability: validation == .available ? .available : .unavailable),
+                    startAvailability: validation == .available
+                        || validation == .workspaceFolderFallback ? .available : .unavailable),
                 validation
             )
         case .unavailableAgentTerminal:
