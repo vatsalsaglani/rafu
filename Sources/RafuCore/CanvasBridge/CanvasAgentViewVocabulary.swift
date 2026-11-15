@@ -123,6 +123,7 @@ public nonisolated enum CanvasAgentViewVocabulary {
         - FileTree: { title?: string, entries: Array<unknown> } [accepts children]
         - Figure: { src?: string, caption?: string, title?: string }
         CHARTS (props: see the json-render-swift-use skill): BarChart, LineChart, AreaChart, PieChart, Gauge, Sparkline, ScatterChart, Heatmap, Histogram, ComboChart, Waterfall, Funnel, BoxPlot, Candlestick, Treemap
+        ITEM SHAPES (Array<unknown> props): rafu-view skill, references/components.md
         ACTIONS (on.<event>: {action, params}): setState, pushState, removeState, validateForm, toggleState, incrementState, open_file, focus_node, open_url
         VISIBILITY (visible on the element, never in props): true, false, {"$state": "/path"} truthy, add one of eq, neq, gt, gte, lt, lte, or "not": true; an array is AND; {"$and": […]}, {"$or": […]}.
         DYNAMIC PROPS: {"$state": "/path"} reads, {"$bindState": "/path"} binds an input, {"$item": "field"}, {"$index": true} and {"$bindItem": "field"} inside repeat, {"$cond": …, "$then": …, "$else": …}, {"$template": "Hi ${/name}"}, {"$computed": name, "args": {…}} with groupSum, countBy, topN, bucket.

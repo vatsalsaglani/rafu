@@ -48,6 +48,8 @@ nonisolated enum CanvasAgentViewVocabularyGenerator {
                         + charts.joined(separator: ", "))
             }
             text.append(
+                "ITEM SHAPES (Array<unknown> props): rafu-view skill, references/components.md")
+            text.append(
                 "ACTIONS (on.<event>: {action, params}): " + actions.joined(separator: ", "))
             text.append(
                 "VISIBILITY (visible on the element, never in props): true, false, "

@@ -1506,7 +1506,10 @@ public nonisolated enum CanvasAgentToolCatalog {
                     + "stats, file links, checklists) described as JSON. Put data in state and bind "
                     + "it. At most \(CanvasAgentToolCall.maximumViewBytes / 1_024) KiB of spec per "
                     + "call; add more with view_update patches. Asks the user unless Agent control "
-                    + "is Allow. " + CanvasAgentViewVocabulary.text,
+                    + "is Allow. Spec language and charts: the json-render-swift-use skill. Rafu "
+                    + "item shapes: the rafu-view skill, references/components.md. Do not read "
+                    + "Rafu's source code; if a prop is unclear, render a small spec and read the "
+                    + "validator error. " + CanvasAgentViewVocabulary.text,
                 schema(
                     [
                         "title": title, "near": near, "x": x, "y": y,

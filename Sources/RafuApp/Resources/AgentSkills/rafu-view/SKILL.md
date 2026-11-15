@@ -1,11 +1,13 @@
 ---
 name: rafu-view
-description: Show native views (tables, charts, stats, checklists, file links) on a Rafu Ensemble with the view_render and view_update tools, or by voice with show_view. Use with the json-render-swift-use skill for the spec language.
+description: Show native views (tables, charts, stats, checklists, file links) on a Rafu Ensemble with the view_render and view_update tools, or by voice with show_view. Use with the json-render-swift-use skill for the spec language and charts.
 ---
 
 # Views on a Rafu Ensemble
 
-Read the `json-render-swift-use` skill for the spec language, the standard components and the charts. This file adds only what is Rafu-specific. The `view_render` tool description lists the exact component vocabulary of this Rafu version.
+Read the installed `json-render-swift-use` skill for the spec language, the standard components and the charts. This file adds only what is Rafu-specific. The `view_render` tool description lists the exact component vocabulary of this Rafu version. [references/components.md](references/components.md) gives the exact props and item shapes of every Rafu component below.
+
+Do not read Rafu's source code. Use these skills and the tool description. If a prop is unclear, render a small spec and read the validator error.
 
 ## Tools
 
@@ -17,9 +19,9 @@ Read the `json-render-swift-use` skill for the spec language, the standard compo
 
 ## Rafu components
 
-FileLink{path,line?,label?} · CardLink{node,label?} · TerminalStatus{node} · AgentStatus{node} · DiffSummary{files} · IconLibraryIcon{pack,icon,size?} · KeyValue{items} · Timeline{events} · Stat{label,value,delta?,unit?,intent?} · Markdown{text} · Mermaid{source} · Code{text,language?} · Callout{kind,title?,text} · Checklist{items} · Questions · FileTree · Figure
+FileLink{path,line?,label?} · CardLink{node,label?} · TerminalStatus{node} · AgentStatus{node} · DiffSummary{files} · IconLibraryIcon{pack,icon,size?} · KeyValue{items} · Timeline{events} · Stat{label,value,delta?,unit?,intent?} · Markdown{text} · Mermaid{source} · Code{text,language?} · Callout{kind?,title?,text?} · Checklist{title?,items} · Questions{title?,items} · FileTree{title?,entries} · Figure{src?,caption?,title?}
 
-`path` is relative to the workspace root. `node` is a node id or title from `ensemble_describe`.
+`path` is relative to the workspace root. `node` is a node id or title from `ensemble_describe`. Item shapes (`items`, `events`, `files`, `entries`) are in [references/components.md](references/components.md).
 
 ## Actions you may name in `on`
 

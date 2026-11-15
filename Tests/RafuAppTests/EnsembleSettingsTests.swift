@@ -43,7 +43,7 @@ func ensembleSettingsInstallResultState() async throws {
     #expect(!model.isInstalling)
     #expect(
         model.operationMessage
-            == "Installed at \(expected.path) and 1 more beside it: 6 written, 0 replaced, 0 skipped."
+            == "Installed at \(expected.path) and 2 more beside it: 17 written, 0 replaced, 0 skipped."
     )
     #expect(
         FileManager.default.fileExists(
@@ -69,6 +69,9 @@ func ensembleSettingsInstallsForCodex() async throws {
     #expect(
         FileManager.default.fileExists(
             atPath: home.appending(path: ".codex/skills/rafu-view/references/examples.md").path))
+    #expect(
+        FileManager.default.fileExists(
+            atPath: home.appending(path: ".codex/skills/json-render-swift-use/SKILL.md").path))
     #expect(!FileManager.default.fileExists(atPath: home.appending(path: ".claude").path))
     #expect(model.errorMessage == nil)
 }
@@ -77,6 +80,7 @@ func ensembleSettingsInstallsForCodex() async throws {
 func ensembleSkillCopyNamesVerifiedFolders() {
     #expect(EnsembleSkillCopy.footer.contains("~/.claude/skills/rafu-ensemble"))
     #expect(EnsembleSkillCopy.footer.contains("~/.codex/skills/rafu-ensemble"))
+    #expect(EnsembleSkillCopy.footer.contains("~/.claude/skills/json-render-swift-use"))
     #expect(!EnsembleSkillCopy.summary.contains("Conductor"))
 }
 
@@ -92,7 +96,7 @@ func ensembleSettingsAsksBeforeAnySkillIsWritten() async throws {
     let model = EnsembleSettingsModel()
 
     await model.load()
-    #expect(model.skillNames == ["rafu-ensemble", "rafu-view"])
+    #expect(model.skillNames == ["rafu-ensemble", "rafu-view", "json-render-swift-use"])
     await model.install(at: .custom(destination))
     #expect(model.pendingReplacement?.conflicts == ["rafu-view/SKILL.md"])
     #expect(

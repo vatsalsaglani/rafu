@@ -66,7 +66,24 @@ nonisolated struct ConductorBundledSkillCatalog: Sendable {
             identifier: "rafu-view",
             files: [
                 .init(pathComponents: ["SKILL.md"]),
+                .init(pathComponents: ["references", "components.md"]),
                 .init(pathComponents: ["references", "examples.md"]),
+            ]),
+        // The upstream spec-language skill (Apache-2.0). `rafu-view` and the
+        // `view_render` tool description point at it, so Rafu installs it.
+        ConductorBundledSkill(
+            identifier: "json-render-swift-use",
+            files: [
+                .init(pathComponents: ["SKILL.md"]),
+                .init(pathComponents: ["LICENSE"]),
+                .init(pathComponents: ["NOTICE"]),
+                .init(pathComponents: ["references", "spec.md"]),
+                .init(pathComponents: ["references", "actions.md"]),
+                .init(pathComponents: ["references", "streaming.md"]),
+                .init(pathComponents: ["references", "components.md"]),
+                .init(pathComponents: ["references", "charts.md"]),
+                .init(pathComponents: ["references", "choosing.md"]),
+                .init(pathComponents: ["references", "security.md"]),
             ]),
     ]
 
@@ -192,7 +209,7 @@ nonisolated enum ConductorSkillDestination: Equatable, Sendable {
     /// (verified in this repository's planning notes, 2026-10-17).
     case codex
     /// A user-selected skills directory. Rafu creates one folder per skill
-    /// (`rafu-ensemble/`, `rafu-view/`) inside it.
+    /// (`rafu-ensemble/`, `rafu-view/`, `json-render-swift-use/`) inside it.
     case custom(URL)
 }
 
