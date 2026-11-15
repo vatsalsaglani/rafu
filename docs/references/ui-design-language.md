@@ -93,6 +93,18 @@ and implemented, this note describes the verified current UI.
   control is a SwiftUI-drawn control, `.tint` themes it; if it is
   AppKit segmented-control chrome, it must be replaced.
 
+- **Commit composer (2026-11-15, Option B; supersedes the GX5 composer card).**
+  The Source Control composer has no card: no surface, one top hairline
+  (`borderSubtle`, `borderStrong` under Increase Contrast), and one opaque
+  `fieldBackground` field through `rafuField`, the same chrome as Search (no new
+  ADR 0038 rule). The drafting border sits on the field with `radiusField`. One
+  full-width button names the next step. Details, states and the ⌘Return rule:
+  [`git-commit-composer.md`](git-commit-composer.md).
+- **`RafuProminentButtonStyle(quietWhenDisabled:)`:** opt-in (default `false`, so
+  sheets keep their look). A disabled button draws the neutral chip fill, a
+  hairline and a `textMuted` label instead of the accent at 40 %, so "disabled"
+  never reads as "attention". Used by the Commit button.
+
 - **Custom ButtonStyle and sheet keyboard shortcuts:** SwiftUI's `ButtonStyle` modifier does **not** confer window default/cancel semantics that `.defaultAction`/`.cancelAction` keyboard shortcuts require. Sheets must apply `.keyboardShortcut(.defaultAction)` to the prominent button and `.keyboardShortcut(.cancelAction)` to the secondary/cancel button **independently** of any button style. This ensures sheets respond to Return/Escape correctly.
 
 - **Unified titlebar (superseded):** the original `.toolbarBackground(.hidden, for: .windowToolbar)` treatment predates dropping the `NSToolbar` entirely. The current recipe — `FlatWindowChrome` + `.ignoresSafeArea(.top)` content merge, the `_NSTitlebarDecorationView` scrub, and the since-superseded traffic-light hover-reveal — is documented in [`flat-window-chrome-titlebar-merge.md`](flat-window-chrome-titlebar-merge.md).

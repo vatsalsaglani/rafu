@@ -75,6 +75,10 @@ searches, no Search button, Recent Searches and Replace
 (`arrow.left.arrow.right`) in the header, no divider. History: no divider, a
 leading glyph.
 
+The Source Control commit composer (2026-11-15) follows the same sidebar rule:
+no card, a hairline, one opaque field. See
+[`git-commit-composer.md`](git-commit-composer.md).
+
 ### Terminals row naming
 
 Naming is pure, in `TerminalNaming` and `TerminalsPanelModel.hierarchyRows`.

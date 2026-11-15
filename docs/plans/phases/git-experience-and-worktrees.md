@@ -81,6 +81,13 @@ DONE (9971888). New collapsible section in Source Control.
 
 DONE (6b46423). Composer card per the design language.
 
+**Update 2026-11-15 (G7, merge 0977337):** the composer card is replaced by the
+Option B composer: no card, a summary line and a description in one field, and
+one full-width button that names the next step. It also adds the Stop control
+(the "no Stop button" remark below is historical; Stop shipped with the
+2026-07-19 follow-up), Commit / Stage All / Draft Message menu items, and a
+focus-gated ⌘Return. See [`git-commit-composer.md`](../../references/git-commit-composer.md).
+
 - Message field on `fieldBackground`, header shows a scope chip ("12 staged files", "3 summarized — too large" truncation). Generation shows the existing `ProgressView` affordance; **no Stop button was added** — `WorkspaceSession` exposes no cancel API for AI generation, so a Stop control would be a behavior change out of this presentation-only scope. Generate/Commit split stays explicit (never auto-commit). Presentation only.
 
 ### GX6 — Deferred: activity visualizations

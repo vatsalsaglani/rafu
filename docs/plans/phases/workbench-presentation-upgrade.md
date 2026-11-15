@@ -285,6 +285,35 @@ focus and Escape inside List rows; the 8 pt chevron hit area; footer list height
 scrolls away; no sticky slab in Frosted; Full Keyboard Access; VoiceOver; a
 second window keeps its own expansion and selection; Increase Contrast.
 
+**Work log, 2026-11-15 — Source Control commit composer, Option B (merge 0977337,
+commits 9bca274 and 3a97c54).** The user chose Option B from a three-option design
+proposal (the proposal recommended A). Delivered: no card (one top hairline, an
+opaque `fieldBackground` field like Search, no new ADR 0038 rule); a summary line
+with a trimmed character count (warning above 72, never blocks) and a description
+in one field, over one message string split and joined by `GitCommitMessageParts`;
+one full-width button that names the step (Stage All N Files, Commit N Files to
+<branch>, Commit Merge to <branch>, Nothing to Commit, Drafting…); the composer is
+hidden on a clean tree unless a message, merge or draft exists; AI error with
+"Open AI Settings…"; VoiceOver announcements for draft start, finish, stop and
+failure; drafting border with `radiusField`; Stage All disabled with nothing to
+stage; a small "Stage All" in the Changes header for a partly staged tree;
+`RafuProminentButtonStyle(quietWhenDisabled:)`; menu items for Commit, Stage All
+and Draft Message with AI. Coordinator change 3a97c54: ⌘Return belongs to the
+Commit item only while a commit is possible, a commit message field has focus and
+no Ensemble note is in Edit mode, because a window-wide ⌘Return could commit from
+a terminal. No ADR change: ADR 0002 does not fix the composer layout. Rules and
+nuances: [`git-commit-composer.md`](../../references/git-commit-composer.md),
+[`ui-design-language.md`](../../references/ui-design-language.md).
+
+Evidence: suite "Git commit composer presentation" (23 tests) in
+`GitPanelPresentationTests.swift`; the `UtilityPanelPresentationTests` source scan
+is inverted to forbid the old card. Main gate (both modes) on merge 0977337: 529 tests in 40 suites and 3927 tests in 319 suites passed in parallel and `--no-parallel` (Apple Swift 6.4.2, macOS 27.2).
+No GUI check: the user asked for tests only and no app launch.
+
+Open: Return in an empty summary may not move focus to the not-yet-shown
+description; a draft started from the menu while Changes is not shown is not
+announced. GUI checks owed: the list in `git-commit-composer.md` Verification.
+
 Parallel execution is specified by
 [`workbench-presentation-upgrade/README.md`](workbench-presentation-upgrade/README.md):
 one serial shared foundation, six file-disjoint worktrees from its exact commit,
