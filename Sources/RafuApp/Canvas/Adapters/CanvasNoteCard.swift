@@ -115,7 +115,7 @@ private struct CanvasNoteSurface: View {
                 progress: model.progressText, scale: scale, titleOnly: face == .titleOnly
             )
             .contentShape(.rect)
-            .onTapGesture { board.selection = [card.id] }
+            .onTapGesture { if !Self.isSelectionClick { board.selection = [card.id] } }
         }
     }
 
@@ -131,7 +131,7 @@ private struct CanvasNoteSurface: View {
             consumeAnchor: { model.consumeExitAnchor() },
             toggleTask: toggleTask, openLink: openLink,
             edit: { line, offset in model.beginEditing(atLine: line, anchorOffset: offset) },
-            activate: { if !isActive { board.focus(card.id) } },
+            activate: { if !isActive, !Self.isSelectionClick { board.focus(card.id) } },
             copyMarkdown: copyMarkdown
         )
         .focusable()
@@ -161,6 +161,14 @@ private struct CanvasNoteSurface: View {
             return .handled
         }
         return .ignored
+    }
+
+    /// A ⌘- or ⇧-click changes the board selection through the board's
+    /// body-click monitor (`CanvasBodyClick`); the note's own tap must not
+    /// replace that selection on mouse-up.
+    private static var isSelectionClick: Bool {
+        let flags = NSEvent.modifierFlags
+        return flags.contains(.command) || flags.contains(.shift)
     }
 
     private static func isTypedText(_ characters: String) -> Bool {

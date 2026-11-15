@@ -655,18 +655,16 @@ struct CanvasCardShell: View {
         board.select(next)
     }
 
-    /// A click in a non-native body. Native terminal and web bodies take their
-    /// own first mouse-down and report focus through their callbacks.
+    /// A click in a non-native body. The board's body-click monitor
+    /// (`CanvasBodyClick`) already selected and focused the card on
+    /// mouse-down, and it owns ⌘- and ⇧-click; toggling here again on
+    /// mouse-up would undo that selection change.
     private func activateCard() {
         let flags = NSEvent.modifierFlags
-        if flags.contains(.command) || flags.contains(.shift) {
-            focusBoard()
-            toggleMembership()
-        } else {
-            raiseIfNeeded()
-            board.focus(card.id)
-            board.select([card.id])
-        }
+        guard !flags.contains(.command), !flags.contains(.shift) else { return }
+        raiseIfNeeded()
+        board.focus(card.id)
+        board.select([card.id])
     }
 
     // MARK: Header gesture: click, double-click, move
