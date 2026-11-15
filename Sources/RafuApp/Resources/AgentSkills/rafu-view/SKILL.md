@@ -49,3 +49,28 @@ The view's state is saved with the Ensemble and is reset when the spec changes. 
 - One number: `Stat`. Rows: `Table`, with `rows` bound to state so you can patch them. A series: a chart. Steps: `Timeline`. Files: `DiffSummary` or `FileLink`.
 - Keep a view under 60 elements. Put data in `state` and bind it; patch `/state/...` to update.
 - See [references/examples.md](references/examples.md) for three complete specs.
+
+## Tabs, segments and toggles do not switch content
+
+`Tabs`, `ToggleGroup` and `ButtonGroup` only show which item is selected. They do not hide or show their children. If you put one section per tab under `Tabs` and stop there, every section shows at once and a tab click changes nothing.
+
+To switch content, do both:
+
+1. Bind the control's value to state: `"value": {"$bindState": "/tab"}`, and put the first value in `state` (`"tab": "todo"`).
+2. Give each section a `visible` rule for its own value: `"visible": {"$state": "/tab", "eq": "todo"}`.
+
+```json
+{"root": "tabs",
+ "state": {"tab": "todo"},
+ "elements": {
+  "tabs": {"type": "Tabs",
+   "props": {"tabs": [{"label": "To do", "value": "todo"}, {"label": "Done", "value": "done"}],
+             "value": {"$bindState": "/tab"}, "variant": "segmented"},
+   "children": ["todo", "done"]},
+  "todo": {"type": "Checklist", "props": {"items": {"$bindState": "/todo"}},
+   "visible": {"$state": "/tab", "eq": "todo"}},
+  "done": {"type": "Checklist", "props": {"items": {"$bindState": "/done"}},
+   "visible": {"$state": "/tab", "eq": "done"}}}}
+```
+
+`defaultValue` alone selects a tab but switches nothing. Use the bound `value` and the `visible` rules.
