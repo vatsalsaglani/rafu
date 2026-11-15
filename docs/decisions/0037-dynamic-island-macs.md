@@ -208,6 +208,48 @@ Usage refresh behaviour is unchanged. Not device-verified at the time of this
 amendment: see the "Owed device checks" in
 [`terminal-notch-hud.md`](../plans/phases/terminal-notch-hud.md).
 
+## Amendment 2026-11-15: companion chrome (visuals)
+
+User request: copy Cider's gradient border, seamless open shape with rounded
+parts, and tab padding and spacing, for the NotchHUD and the menu notch. Cider's
+border is a static gradient stroke; its "animation" is the shape change as the
+panel opens. This amendment adds visuals only; decisions 1 to 8 and the section
+amendment above do not change.
+
+1. **Border.** Modifier `companionGlowBorder` with pure
+   `CompanionGlowPolicy.resolve(...)`. Shown only while the surface is open: the
+   notch panel when open and on the widened strip while attention waits; the
+   island card when open (shape unchanged); the attention drop-down while an event
+   shows; the menu bar card always while shown (inset 2, radius 12, inside the
+   `NSPopover`). Colours come from tokens (warning at low opacity, warning, accent
+   0.65, warning at low opacity); 1 pt, 2 pt during a sweep.
+2. **Motion and energy.** A 2.4 s sweep when the attention count rises (drop-down:
+   a new event). A slow sweep (8 s per turn) only while open AND an agent works.
+   Otherwise still. `TimelineView` (30 fps cap) is paused when still; one task
+   wakes at the end of a sweep; no per-second timer. Reduce Motion, hidden or
+   locked (through `rafuMotionScope`): still. Increase Contrast: one solid
+   `borderStrong` line. Reduce Transparency: no low-opacity colours.
+   `.rafuMotionScope()` is on the `NotchHUDView` root, because the drop-down
+   belongs to no scene. Budget: under 2 % CPU while sweeping; if Instruments shows
+   more, fall back to "sweep only on events".
+3. **Session colour.** Product decision: the session colour stays the drop-down
+   border; the gradient draws only when there is no session colour.
+4. **Open outline.** `CompanionOutline`: flush top edge, concave shoulders
+   `min(12, h/3)`, bottom radius `min(22, h/2)`; it animates from the closed strip
+   (no shoulders, radius 12). One path fills, clips and strokes. The same path is
+   the hit test (`NotchHUDPanel.hitOutline`), so clicks beside the shoulders pass
+   through. Shoulders exist only on the open notch/pill panel (464 pt) and on the
+   drop-down under a notch; content is inset by one shoulder each side. The
+   resting strip has none, because they would change the hit area that the macOS 27
+   overflow layering depends on.
+5. **Tabs and cards.** Pill tabs (tokens in `CompanionChromeMetrics`) with equal
+   widths for at most 3 tabs; 4 tabs cut off "Now Playing" at 440 pt. Agents
+   outside Rafu appear as `CompanionAgentCardView` cards, which show the in-memory
+   hook preview (it was voice-only before).
+
+Facts and tokens: [`notch-companion.md`](../references/notch-companion.md) rules
+13 to 17. Not device-verified; the owed checks are in the phase document.
+
 ## Related paths
 
 - `Sources/RafuApp/Terminal/NotchHUDGeometry.swift`

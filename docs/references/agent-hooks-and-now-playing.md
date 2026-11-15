@@ -109,7 +109,14 @@ build OK; 466 tests in 33 suites (parallel) and 3726 tests in 301 suites
    file at most 8 KiB; the helper stops writing at 2048 spool files; the
    assistant message preview is kept only for `Stop`/`AgentResponse` and is
    at most 600 characters; other fields 256 characters, `cwd` 2048. Control
-   characters are removed.
+   characters are removed. The preview stays in memory only. Since 2026-11-15
+   (companion chrome, commit 9827e21) the notch and menu card agent cards for
+   agents outside Rafu show it as "last message" (2 lines); before that only
+   voice used it. The card also shows "Last seen Xm ago" from the
+   `AgentActivityStore` clock (not `Text(style: .relative)`, to keep work low
+   while the panel is hidden), and an 8-character session suffix only when
+   title and provider collide. See [`notch-companion.md`](notch-companion.md)
+   rule 17. Not checked on a device.
 4. The helper keeps only identity and lifecycle: session id, turn id,
    subagent id, event name, `cwd`, tool name, notification type, tool-use id,
    the bounded preview, and its parent PID chain (at most 16 PIDs, read with

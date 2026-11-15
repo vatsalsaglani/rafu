@@ -238,8 +238,18 @@ like a visual glitch only.
   and [`agent-hooks-and-now-playing.md`](agent-hooks-and-now-playing.md). The
   final parallel run passed.
 
+**8b. Island card and menu bar card chrome (2026-11-15).** The open island card
+keeps its shape (radius 28 pt) and now draws the glow border; the menu bar card
+draws it always while shown (inset 2, radius 12, inside the `NSPopover`). The
+island pill has no shoulders. The border policy, energy rule, tab tokens (28 pt
+notch, 32 pt menu card) and agent cards are in
+[`notch-companion.md`](notch-companion.md) rules 13 to 17; decision: the visuals
+amendment of ADR 0037. Not checked on a device: the popover border inset.
+
 ## Not verified
 
+- Menu bar card border inset inside the popover, and the glow border energy on
+  the island card (Instruments; budget under 2 % CPU while sweeping).
 - Escape closing the status-item popover. A status-item click does not activate
   Rafu, so the popover may not get key focus. The code calls `makeKey()` on the
   popover window after `show` and adds `onExitCommand`; the result was not

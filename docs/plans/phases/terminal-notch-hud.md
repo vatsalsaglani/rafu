@@ -209,6 +209,35 @@ Owed device checks (not verified):
 - Sub-agent chip on real Claude Code runs; Codex 0.169.0 sub-agent events are
   unverified.
 
+### Companion chrome, step 3 (2026-11-15)
+
+Status: step 3 is done and merged to `main` ("companion chrome, Cider gradient
+border, shoulders, pill tabs", commit 9827e21). It follows the user request to
+copy Cider's border, seamless open shape with rounded parts, and tab padding and
+spacing, for the NotchHUD and the menu notch. Decision: the visuals amendment of
+[ADR 0037](../../decisions/0037-dynamic-island-macs.md). Facts:
+[`notch-companion.md`](../../references/notch-companion.md) rules 13 to 17.
+
+- Glow border (`companionGlowBorder`, `CompanionGlowPolicy`), open outline with
+  shoulders (`CompanionOutline`) and the same path for hit testing, pill tabs,
+  and `CompanionAgentCardView` for agents outside Rafu.
+- Not done: the plan's 32 pt "Open Rafu" footer; a short commit sha (no sha
+  exists for an agent outside Rafu).
+
+Verification (Swift 6.4.2, Xcode with macOS 27.2 SDK 26B118, Darwin 27.2.0,
+Mac17,13): on the branch, the parallel suite passed 3747 tests in 301 suites and
+466 in 33. Main gate: run by the coordinator. No device check yet.
+
+Owed device checks (not verified):
+
+- Shoulders on a notched Mac (464 pt open frame, x 623.5).
+- Border inset inside the menu bar popover.
+- Instruments energy while the border sweeps; budget under 2 % CPU. Fallback if
+  over budget: sweep only on events.
+- Click pass-through beside the shoulders.
+- Mismatch between the content inset and the AppKit frame animation while the
+  panel opens.
+
 ## Vision
 
 The notch stops being dead space and becomes Rafu's **always-on companion

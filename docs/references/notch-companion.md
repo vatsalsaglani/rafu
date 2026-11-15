@@ -270,6 +270,110 @@ two tiny feet.
 - Preview the SVGs without a browser: `cairosvg` does not resolve CSS `var()`,
   so replace each `var(--name, #hex)` with its fallback before you render.
 
+## Companion chrome: glow border, open outline, tabs, cards (2026-11-15)
+
+Last verified: Swift 6.4.2, Xcode with macOS 27.2 SDK (26B118), Darwin 27.2.0,
+Mac17,13. Build and the branch parallel suite passed (3747 tests in 301 suites,
+plus 466 in 33). Main gate: run by the coordinator. NOT checked on a device; the
+owed checks are in the last list below. Decision: the visuals amendment of
+[ADR 0037](../decisions/0037-dynamic-island-macs.md). Prior art: the user's own
+Cider repo (read only): `Features/Notch/NotchHUDView.swift:77-81` (border),
+`NotchOutline.swift:5-27` (shoulders), `CiderPillPicker.swift:21-59` (tabs),
+`AgentsView.swift:68-129` (cards).
+
+**13. What Cider's "animating gradient border" is.** It is a static
+`LinearGradient` stroke (orange, pink, faded orange; 1 pt, 2 pt on peek) drawn
+only while the panel is open or peeking. The animation the user saw is the SHAPE
+changing as the panel opens. Rafu copies that and adds a sweep only on events
+(rule 15).
+
+**14. Open outline: one path fills, clips and strokes.** `CompanionOutline`
+(from Cider `NotchOutline`):
+
+- Top edge flush with the screen top; concave shoulders of radius
+  `min(12, h/3)`; bottom radius `min(22, h/2)`.
+- It animates from the closed strip, which has no shoulders and radius 12.
+- The border path has no top edge. It is stroked at 2x width and clipped to the
+  outline, so the visible line sits inside the shape.
+- Shoulders exist only on the open notch/pill panel and on the drop-down under a
+  notch. `peekPanelFrame` is 440 + 2 x 12 = 464 pt wide; the open frame on a
+  notched screen is x 623.5, width 464. `NotchHUDController.panelWidth` gives the
+  drop-down width. Content is inset by one shoulder on each side, so the content
+  width is unchanged.
+- No shoulders on the resting strip: they would change the hit area that the
+  macOS 27 overflow layering depends on (rule 12).
+- Hit testing uses the same path: `NotchHUDPanel.hitOutline` feeds
+  `NotchHUDPassthroughHostingView.hitTest`. A `nil` result also stops hover, so a
+  click beside a shoulder passes through to the menu bar (rule 2 pattern). Not
+  device-verified.
+
+**15. Border policy: `companionGlowBorder` and `CompanionGlowPolicy.resolve(...)`.**
+The pure policy decides shown, width and motion; the modifier only draws.
+
+| Surface | Border shown |
+|---|---|
+| Notch panel | Open, and on the widened strip while attention waits (Cider "peek") |
+| Island card | Open (shape unchanged; the open card now has the border) |
+| Attention drop-down | While an event shows |
+| Menu bar card | Always while shown (inset 2, radius 12, inside the `NSPopover`) |
+
+- Colours come from tokens: warning at low opacity, warning, accent at 0.65,
+  warning at low opacity. 1 pt wide; 2 pt during a sweep.
+- Product decision 6: the session colour stays the drop-down border; the
+  gradient draws only when there is no session colour.
+- Motion and energy rule: a 2.4 s sweep when the attention count rises (the
+  drop-down: when a new event shows). A slow sweep (8 s per turn) only while the
+  surface is open AND an agent works. Otherwise the border is still.
+  `TimelineView` has a 30 fps cap and is paused when the border is still. One task
+  wakes at the end of a sweep; there is no per-second timer.
+- Reduce Motion, hidden or locked (through `rafuMotionScope`): still. Increase
+  Contrast: one solid `borderStrong` line. Reduce Transparency: no low-opacity
+  colours.
+- `.rafuMotionScope()` is on the `NotchHUDView` root, because the drop-down
+  belongs to no scene and would otherwise never see the motion scope.
+
+**16. Tabs and spacing.** Tokens live in `CompanionChromeMetrics`:
+
+| Token | Value |
+|---|---|
+| Pill track padding / spacing | 3 pt / 2 pt |
+| Tab height | 28 pt (notch), 32 pt (menu card) |
+| Tab inner padding | 10 pt |
+| Tab text | 12 pt, semibold when selected |
+| Selected fill | white 0.14 (Reduce Transparency: selection colour) |
+| Track fill | white 0.065 (Reduce Transparency: `elevatedBackground`) |
+| Pressed fill | accent 0.1 |
+| Increase Contrast | outline on the selected tab |
+| Pin and close buttons | 28 pt, 12 pt gap |
+| Section side padding / gap between blocks | 16 pt / 10 pt |
+
+- Tabs have equal widths up to 3 tabs. With 4 tabs, "Now Playing" with its icon
+  and count was cut off at 440 pt. Equal widths are a 3-tab limit; do not add a
+  fourth tab without a new width rule.
+
+**17. Agent cards (`CompanionAgentCardView`).** Used for agents outside Rafu in
+Other agents and Up next. Content: icon, a 2-line title, provider on the right,
+the folder with `~`, an 8-character session suffix only when title and provider
+collide, a state symbol and word, "Last seen Xm ago", the last message (2 lines)
+and the sub-agents chip. Padding 10, radius 14, fill white 0.04. A card has no
+action. "Last seen" comes from the `AgentActivityStore` clock, not from
+`Text(style: .relative)`, which would keep work running while the panel is
+hidden. The last message is the hook preview (see
+[`agent-hooks-and-now-playing.md`](agent-hooks-and-now-playing.md)).
+
+Not done: the plan's 32 pt "Open Rafu" footer, and a short commit sha (no sha
+exists for an agent outside Rafu).
+
+Owed device checks (not verified):
+
+- Shoulders on a notched Mac, including the 464 pt open frame.
+- The menu bar card border inset inside the popover.
+- Instruments energy while the border sweeps: the budget is under 2 % CPU. If it
+  is over, the fallback is "sweep only on events" (drop the slow working sweep).
+- Click pass-through beside the shoulders.
+- Mismatch between the content inset (SwiftUI) and the AppKit panel frame
+  animation while the panel opens.
+
 ## Why it matters
 
 The companion is a persistent, always-on overlay near the menu bar; any
@@ -316,6 +420,9 @@ rg -n "NotchScreenSelection|currentMetrics" Sources/RafuApp/Terminal
 
 - `Sources/RafuApp/Notch/NotchCompanionModel.swift`
 - `Sources/RafuApp/Notch/NotchHUDPolicy.swift`
+- `CompanionGlowPolicy`, `companionGlowBorder`, `CompanionOutline`,
+  `CompanionChromeMetrics`, `CompanionAgentCardView` (rules 13 to 17), and
+  `NotchHUDPanel.hitOutline` in `NotchHUDWindow.swift`
 - `Sources/RafuApp/Notch/AgentUsageProvider.swift` (and
   `CodexUsageProvider`/`ClaudeUsageProvider`)
 - `Sources/RafuApp/Terminal/NotchCompanionModel.swift`
