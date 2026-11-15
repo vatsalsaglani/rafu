@@ -11,8 +11,15 @@ struct EditorGutterStyle: Equatable {
     var deletedColor: NSColor
     var font: NSFont
 
-    init(theme: RafuTheme) {
-        backgroundColor = theme.editorGutterBackgroundColor
+    /// `backgroundAlpha` is the editor base's alpha (frosted deck). It
+    /// applies to the gutter's base only; the numbers and the Git change
+    /// strips keep their theme colours.
+    init(theme: RafuTheme, backgroundAlpha: Double = 1) {
+        let base = theme.editorGutterBackgroundColor
+        backgroundColor =
+            backgroundAlpha < 1
+            ? base.withAlphaComponent(base.alphaComponent * CGFloat(max(0, backgroundAlpha)))
+            : base
         foregroundColor = theme.editorGutterForegroundColor
         activeForegroundColor = theme.editorGutterActiveForegroundColor
         borderColor = theme.editorRulerBorderColor
@@ -205,6 +212,12 @@ final class EditorGutterRulerView: NSRulerView {
 
     @objc private func clientLayoutChanged() {
         needsDisplay = true
+    }
+
+    /// A translucent gutter base (frosted deck) must not claim to be
+    /// opaque, or its layer would composite the clear pixels as black.
+    override var isOpaque: Bool {
+        style.backgroundColor.alphaComponent < 1 ? false : super.isOpaque
     }
 
     override func draw(_ dirtyRect: NSRect) {

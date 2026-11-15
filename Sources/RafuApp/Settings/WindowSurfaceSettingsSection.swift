@@ -1,13 +1,15 @@
 import SwiftUI
 
-/// Settings ▸ Appearance ▸ Window: Window background (Solid or Frosted) and
-/// Frost strength. The rules live in `WindowSurfacePreference` (pure,
-/// tested); every workspace window reads the same two defaults.
+/// Settings ▸ Appearance ▸ Window: Window background (Solid or Frosted),
+/// Frost strength, and whether the editor and terminals are frosted too.
+/// The rules live in `WindowSurfacePreference` (pure, tested); every
+/// workspace window reads the same three defaults.
 struct WindowSurfaceSettingsSection: View {
     @AppStorage(WindowSurfacePreference.styleKey) private var style =
         WindowSurfacePreference.Style.solid.rawValue
     @AppStorage(WindowSurfacePreference.frostLevelKey) private var frostLevel =
         WindowSurfacePreference.FrostLevel.balanced.rawValue
+    @AppStorage(WindowSurfacePreference.frostContentKey) private var frostsContent = true
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var colorSchemeContrast
 
@@ -40,6 +42,11 @@ struct WindowSurfaceSettingsSection: View {
             }
             .disabled(!isFrostedSelected || forcedSolidReason != nil)
             .help("How much of the desktop shows through the frame")
+            Toggle("Frost the editor and terminals", isOn: $frostsContent)
+                .disabled(!isFrostedSelected || forcedSolidReason != nil)
+                .help(
+                    "Off keeps the editor, terminals and previews opaque while the tab shelf and Ensemble board stay frosted"
+                )
         } header: {
             Text("Window")
         } footer: {
@@ -47,7 +54,7 @@ struct WindowSurfaceSettingsSection: View {
                 Text(forcedSolidReason.explanation)
             } else {
                 Text(
-                    "Frosted applies to the window frame. The editor, terminal, and popups stay opaque."
+                    "Frosted applies to the window frame and, more lightly, to the middle of the window. Popups and sheets stay opaque."
                 )
             }
         }

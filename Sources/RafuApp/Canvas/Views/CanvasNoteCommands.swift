@@ -122,6 +122,6 @@ struct CanvasNoteFormatBar: View {
         }
         .padding(.horizontal, 8)
         .frame(height: 30)
-        .background(theme.palette.editorBackground)
+        .rafuDeckFill(theme.palette.editorBackground, .underlay)
     }
 }

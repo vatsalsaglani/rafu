@@ -25,7 +25,9 @@ struct EditorTerminalTabContent: View {
                 shellExitedOverlay
             }
         }
-        .background(theme.palette.editorBackground)
+        // Frosted: the terminal paints its own translucent background, so a
+        // fill under it would stack.
+        .rafuDeckFill(theme.palette.editorBackground, .underlay)
     }
 
     private var shellExitedOverlay: some View {
@@ -88,9 +90,11 @@ struct TerminalHostView: NSViewRepresentable {
             container.detach()
             return
         }
-        let nsView = controller.makeOrReuseView(theme: theme)
+        let alpha = WindowSurfacePreference.terminalBackgroundAlpha(
+            context.environment.rafuWindowSurface)
+        let nsView = controller.makeOrReuseView(theme: theme, backgroundAlpha: alpha)
         container.mount(nsView)
-        controller.applyTheme(theme, to: nsView)
+        controller.applyTheme(theme, backgroundAlpha: alpha, to: nsView)
         configureFocusCallback(on: nsView, coordinator: context.coordinator)
         requestFocusIfNeeded(on: nsView, coordinator: context.coordinator)
     }

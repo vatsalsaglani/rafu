@@ -571,7 +571,7 @@ private struct CanvasEdgeView: View {
                     .padding(.horizontal, 8)
                     .frame(height: 20)
             }
-            .background(theme.palette.elevatedBackground, in: Capsule())
+            .rafuDeckFill(theme.palette.elevatedBackground, .card, in: Capsule())
             .overlay(Capsule().strokeBorder(pillBorder, lineWidth: 1))
             .overlay(
                 Capsule().strokeBorder(theme.palette.textPrimary.opacity(pulse), lineWidth: 1.5)
@@ -583,7 +583,7 @@ private struct CanvasEdgeView: View {
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(pillForeground)
                 .frame(width: 16, height: 16)
-                .background(theme.palette.elevatedBackground, in: Circle())
+                .rafuDeckFill(theme.palette.elevatedBackground, .card, in: Circle())
                 .overlay(Circle().strokeBorder(pillBorder, lineWidth: 1))
                 .overlay(
                     Circle().strokeBorder(theme.palette.textPrimary.opacity(pulse), lineWidth: 1.5)

@@ -24,7 +24,7 @@ struct VideoPreviewView: View {
             }
         }
         .overlay(alignment: .bottom) { infoBar }
-        .background(theme.palette.editorBackground)
+        .rafuDeckFill(theme.palette.editorBackground, .content)
         .task(id: url) {
             player = AVPlayer(url: url)
             fileBytes = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0

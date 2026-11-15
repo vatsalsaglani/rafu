@@ -9,6 +9,7 @@ struct CanvasCardShell: View {
     @Environment(\.canvasPresentationID) private var presentationID
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.rafuWindowSurface) private var windowSurface
     @Environment(CanvasInteractionState.self) private var interaction
     /// The window's voice companion tucks away while a card is dragged over it.
     @Environment(VoiceCompanionModel.self) private var voiceCompanion: VoiceCompanionModel?
@@ -35,6 +36,9 @@ struct CanvasCardShell: View {
     @State private var isPortHovered = false
 
     private let cornerRadius: CGFloat = 8
+    /// How far the lifted shadow reaches past the card: blur 14 twice plus
+    /// its 10 pt drop (see `surface`).
+    private static let shadowReach: CGFloat = 14 * 2 + 10
     private let headerHeight: CGFloat = 32
     /// Below this on-screen header width, the agent status pill drops its
     /// elapsed-time suffix first, before the title itself has to truncate.
@@ -65,7 +69,10 @@ struct CanvasCardShell: View {
             face, live: live, scale: scale, selected: selected, contentFocused: contentFocused
         )
         .canvasCardFill()
-        .background(theme.palette.elevatedBackground)
+        // Every node kind's one card fill (ADR 0038): opaque in Solid; in
+        // Frosted, the alpha that brings the card to `cardOpacity` over the
+        // board. A kind's own face paints no second fill of this role.
+        .background(windowSurface.fill(theme.palette.elevatedBackground, .card))
         .clipShape(shape)
         .background { surface(shape) }
         .overlay { border(shape, contentFocused: contentFocused) }
@@ -480,6 +487,12 @@ struct CanvasCardShell: View {
         return shape.fill(theme.palette.elevatedBackground)
             .shadow(color: Color.black.opacity(values[0].0), radius: values[0].1, y: values[0].2)
             .shadow(color: Color.black.opacity(values[1].0), radius: values[1].1, y: values[1].2)
+            // Frosted only: a translucent card must not show its own
+            // shadow (or the shape casting it) through itself.
+            .rafuShadowOutsideOnly(
+                cornerRadius: cornerRadius, reach: Self.shadowReach,
+                isActive: windowSurface.isFrosted
+            )
             .animation(
                 reduceMotion ? nil : (isLifted ? RafuMotion.lift : RafuMotion.setDown),
                 value: isLifted)

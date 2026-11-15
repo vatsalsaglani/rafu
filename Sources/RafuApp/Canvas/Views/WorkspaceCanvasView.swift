@@ -60,7 +60,7 @@ struct WorkspaceCanvasView: View {
                     Button("Reload…") { session.requestCanvasReload(board.id) }
                 }
                 .padding(10)
-                .background(theme.palette.sidebarBackground)
+                .rafuDeckFill(theme.palette.sidebarBackground, .card)
             }
             CanvasBar(
                 board: board, session: session, interaction: interaction,
@@ -75,7 +75,8 @@ struct WorkspaceCanvasView: View {
                 }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .background(theme.palette.editorBackground)
+        // The board: a deck surface. Its dots and every card draw above it.
+        .rafuDeckFill(theme.palette.editorBackground, .deck)
         .environment(\.canvasPresentationID, presentationID)
         .environment(interaction)
         .background(
@@ -646,7 +647,7 @@ struct WorkspaceCanvasView: View {
             .accessibilityLabel("Dismiss")
         }
         .padding(.leading, 10).padding(.trailing, 4).padding(.vertical, 4)
-        .background(Capsule().fill(theme.palette.elevatedBackground))
+        .rafuDeckFill(theme.palette.elevatedBackground, .card, in: Capsule())
         .overlay(Capsule().strokeBorder(theme.palette.borderSubtle))
         .fixedSize()
         .accessibilityElement(children: .contain)
@@ -791,7 +792,7 @@ struct WorkspaceCanvasView: View {
                 .foregroundStyle(theme.palette.textPrimary)
         }
         .padding(.horizontal, 10).padding(.vertical, 5)
-        .background(Capsule().fill(theme.palette.cardBackground))
+        .rafuDeckFill(theme.palette.cardBackground, .card, in: Capsule())
         .overlay(Capsule().strokeBorder(theme.palette.borderSubtle))
         .fixedSize()
     }

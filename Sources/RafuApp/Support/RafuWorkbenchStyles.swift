@@ -165,13 +165,19 @@ struct WorkbenchDeckSurface<Content: View>: View {
 
     var body: some View {
         content
-            .background(theme.palette.editorBackground)
+            // Solid: the card's one opaque fill. Frosted: nothing — each deck
+            // region paints its own tone at its own opacity
+            // (`rafuDeckFill`), so the shelf, the board and the editor never
+            // stack two translucent fills, and the split gaps show the frame.
+            .background(windowSurface.isFrosted ? Color.clear : theme.palette.editorBackground)
             .background {
                 // The shadow is cast by a dedicated rounded shape behind the
-                // card's own flat fill, never applied to `content` itself —
-                // so it never touches the TextKit/SwiftTerm viewport or
-                // forces it offscreen. Reduce Transparency is a no-op here:
-                // a shadow is not a material.
+                // card, never applied to `content` itself — so it never
+                // touches the TextKit/SwiftTerm viewport or forces it
+                // offscreen. The shape's interior is masked away, so the
+                // shadow lies only OUTSIDE the card: a translucent deck must
+                // not show its own shadow through itself. Reduce
+                // Transparency is a no-op here: a shadow is not a material.
                 WorkbenchDeckShadowShape(fill: theme.palette.editorBackground, shadow: shadowColor)
             }
             .overlay {
@@ -226,12 +232,21 @@ struct WorkbenchDeckSurface<Content: View>: View {
     }
 }
 
-/// The deck's rounded shape and the shadow it casts on the frame. It is drawn
-/// twice from this one definition — behind the card, and again inside the
-/// corner wedges — so the two copies always match pixel for pixel.
+/// The deck's rounded shape and the shadow it casts on the frame, as a ring:
+/// the shape's interior is masked out, so only the shadow outside the outline
+/// is left. It is drawn twice from this one definition — behind the card,
+/// and again inside the corner wedges — so the two copies always match pixel
+/// for pixel. The mask shapes only this decoration, never the card's content.
 private struct WorkbenchDeckShadowShape: View {
     let fill: Color
     let shadow: Color
+
+    @Environment(\.rafuWindowSurface) private var windowSurface
+
+    /// How far the shadow can reach past the outline: its blur radius twice
+    /// (a Gaussian fades out by about 2 sigma) plus its y-offset. The mask
+    /// grows by this much on every side, so it never crops the shadow.
+    static let shadowReach = RafuMetrics.deckShadowRadius * 2 + RafuMetrics.deckShadowY
 
     var body: some View {
         RoundedRectangle(cornerRadius: RafuMetrics.radiusWorkbenchDeck, style: .continuous)
@@ -242,8 +257,67 @@ private struct WorkbenchDeckShadowShape: View {
                 x: 0,
                 y: RafuMetrics.deckShadowY
             )
+            // Frosted only: Solid's opaque card hides the interior anyway,
+            // so Solid keeps its unmasked shape (no extra pass).
+            .rafuShadowOutsideOnly(
+                cornerRadius: RafuMetrics.radiusWorkbenchDeck, reach: Self.shadowReach,
+                isActive: windowSurface.isFrosted
+            )
             .allowsHitTesting(false)
             .accessibilityHidden(true)
+    }
+}
+
+extension View {
+    /// Keeps only what this view draws OUTSIDE a continuous rounded outline
+    /// of its own frame: for a shape that casts a shadow under a translucent
+    /// surface (the deck, an Ensemble card), so the shadow never shows
+    /// through that surface. `reach` is how far the shadow can extend past
+    /// the frame; the mask grows by it on every side so it never crops the
+    /// shadow. Apply it to the shadow shape only, never to content.
+    /// `isActive` false leaves the view untouched (no mask at all).
+    func rafuShadowOutsideOnly(
+        cornerRadius: CGFloat, reach: CGFloat, isActive: Bool = true
+    ) -> some View {
+        modifier(
+            ShadowOutsideOnlyModifier(cornerRadius: cornerRadius, reach: reach, isActive: isActive))
+    }
+}
+
+private struct ShadowOutsideOnlyModifier: ViewModifier {
+    let cornerRadius: CGFloat
+    let reach: CGFloat
+    let isActive: Bool
+
+    func body(content: Content) -> some View {
+        if isActive {
+            content.mask {
+                ShadowRingMaskShape(inset: reach, radius: cornerRadius)
+                    .fill(style: FillStyle(eoFill: true))
+                    .padding(-reach)
+            }
+        } else {
+            content
+        }
+    }
+}
+
+/// Opaque everywhere in its (grown) rect except inside the card's outline,
+/// which lies `inset` in from each edge: the even-odd fill of the rect and
+/// the outline.
+private nonisolated struct ShadowRingMaskShape: Shape {
+    let inset: CGFloat
+    let radius: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.addRect(rect)
+        path.addRoundedRect(
+            in: rect.insetBy(dx: inset, dy: inset),
+            cornerSize: CGSize(width: radius, height: radius),
+            style: .continuous
+        )
+        return path
     }
 }
 
@@ -990,6 +1064,7 @@ struct EditorGroupSurface<Content: View>: View {
     @ViewBuilder let content: Content
 
     @Environment(\.rafuTheme) private var theme
+    @Environment(\.rafuWindowSurface) private var windowSurface
 
     init(
         isFocused: Bool,
@@ -1009,11 +1084,19 @@ struct EditorGroupSurface<Content: View>: View {
 
     var body: some View {
         content
-            .background(theme.palette.editorBackground)
+            // Frosted: each row and content view paints its own tone
+            // (`rafuDeckFill`), so a group base would stack under them.
+            .rafuDeckFill(theme.palette.editorBackground, .underlay)
             .overlay {
+                // Frosted: the corners show the frame tint over the blur. An
+                // inner split corner (5 pt) still shows a trace of the row
+                // fill under it; the deck's own corners use masked
+                // behind-window wedges and match exactly.
                 CornerCutoutOverlay(
                     radius: RafuMetrics.radiusEditorGroup,
-                    surrounding: theme.palette.appBackground
+                    surrounding: windowSurface.isFrosted
+                        ? theme.palette.appBackground.opacity(windowSurface.tintOpacity)
+                        : theme.palette.appBackground
                 )
             }
             .rafuTerminalSurfaceBorder(

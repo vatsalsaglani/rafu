@@ -491,9 +491,14 @@ struct CanvasNoteEditor: NSViewRepresentable {
         }
         view.mount(buffer.scrollView)
         buffer.apply(style: CanvasNoteEditStyle(palette: theme.palette, baseSize: noteFontSize))
-        buffer.textView.backgroundColor = NSColor(theme.palette.editorBackground)
+        // A note being edited is editor-like content: opaque, or clear over
+        // the card's own fill when "Frost the editor and terminals" is on.
+        let base = NSColor(
+            context.environment.rafuWindowSurface.fill(
+                theme.palette.editorBackground, .cardContent))
+        if buffer.textView.backgroundColor != base { buffer.textView.backgroundColor = base }
         buffer.textView.insertionPointColor = NSColor(theme.palette.accent)
-        buffer.scrollView.backgroundColor = NSColor(theme.palette.editorBackground)
+        if buffer.scrollView.backgroundColor != base { buffer.scrollView.backgroundColor = base }
         let active = board.contentIsActive && board.focusedCardID == card.id
         buffer.textView.isEditable = active
         buffer.textView.isSelectable = active

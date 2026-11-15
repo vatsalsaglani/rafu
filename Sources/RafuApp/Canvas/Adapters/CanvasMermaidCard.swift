@@ -91,7 +91,8 @@ struct CanvasMermaidCard: View {
             }
             .padding(.horizontal, 10).padding(.vertical, 6)
         }
-        .background(theme.palette.fieldBackground)
+        // A source editor: follows "Frost the editor and terminals".
+        .rafuDeckFill(theme.palette.fieldBackground, .cardContent)
     }
 
     private func failureView(_ reason: String) -> some View {

@@ -296,7 +296,7 @@ private struct CanvasNoteReadView: View {
             .onChange(of: blocks) { _, _ in scrollToAnchor(proxy) }
         }
         .coordinateSpace(.named(noteViewportSpaceName))
-        .background(theme.palette.editorBackground)
+        .rafuDeckFill(theme.palette.editorBackground, .underlay)
         .environment(
             \.openURL,
             OpenURLAction { url in
@@ -456,7 +456,7 @@ private struct CanvasNoteSummaryFace: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .padding(12)
-        .background(theme.palette.editorBackground)
+        .rafuDeckFill(theme.palette.editorBackground, .underlay)
         .accessibilityElement(children: .combine)
     }
 }

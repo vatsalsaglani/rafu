@@ -108,13 +108,16 @@ struct WindowFrostBackdropTests {
                 #expect(!source.contains(needle), "\(path) still contains \(needle)")
             }
         }
-        // The terminal keeps the theme's opaque background.
+        // Step 3 landed (ADR 0038): the terminal background takes the
+        // frosted content alpha, and the layer colour SwiftTerm set once in
+        // `setupOptions` is cleared only while that alpha is below 1.
         let terminal = try Self.source(
             "Sources/RafuApp/Terminal/WorkspaceTerminalController.swift")
         #expect(
             terminal.contains(
-                "view.nativeBackgroundColor = NSColor(rafuHex: theme.editor.background)"))
-        #expect(!terminal.contains("layer?.backgroundColor = NSColor.clear"))
+                "Self.terminalBackground(background, alpha: backgroundAlpha)"))
+        #expect(terminal.contains("if backgroundAlpha < 1 {"))
+        #expect(terminal.contains("view.layer?.backgroundColor = NSColor.clear.cgColor"))
     }
 
     @Test("Settings offers Window background and Frost, with the forced-Solid footnote")

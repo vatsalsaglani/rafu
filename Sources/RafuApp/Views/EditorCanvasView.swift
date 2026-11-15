@@ -12,7 +12,10 @@ struct EditorCanvasView: View {
             canvas(for: layoutRoute)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(theme.palette.editorBackground)
+        // Frosted: the empty state has no surface of its own, so the root
+        // paints it at the deck's opacity; every other route paints its own
+        // regions, so the root paints nothing under them.
+        .rafuDeckFill(theme.palette.editorBackground, rootFillLayer)
         .onChange(of: session.selectedDocumentID) { oldValue, newValue in
             if session.gitOpenBlame != nil, oldValue != newValue {
                 session.closeBlame()
@@ -40,6 +43,13 @@ struct EditorCanvasView: View {
             ) {
                 session.pendingCloseDocument = nil
             }
+        }
+    }
+
+    private var rootFillLayer: WindowSurfacePreference.DeckLayer {
+        switch layoutRoute {
+        case .welcome, .empty: .deck
+        default: .underlay
         }
     }
 
@@ -110,8 +120,9 @@ private struct EditorLayoutTreeView: View {
     @Bindable var session: WorkspaceSession
 
     var body: some View {
+        // The gaps between split groups show the frame (frosted or not).
         renderedNode
-            .background(theme.palette.appBackground)
+            .rafuFrameSurface(.app)
     }
 
     private var renderedNode: AnyView {
@@ -131,7 +142,7 @@ private struct EditorLayoutTreeView: View {
                             .padding(.trailing, compensatingInset)
                         EditorLayoutTreeView(node: second, session: session).frame(minWidth: 220)
                     }
-                    .background(theme.palette.appBackground)
+                    .rafuFrameSurface(.app)
                 )
             case .vertical:
                 return AnyView(
@@ -141,7 +152,7 @@ private struct EditorLayoutTreeView: View {
                             .padding(.bottom, compensatingInset)
                         EditorLayoutTreeView(node: second, session: session).frame(minHeight: 150)
                     }
-                    .background(theme.palette.appBackground)
+                    .rafuFrameSurface(.app)
                 )
             }
         }
@@ -223,6 +234,8 @@ private struct EditorGroupView: View {
                                         session.canvasTerminalOwners[terminalGroupID] = nil
                                     }
                                 }
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                .rafuDeckFill(theme.palette.editorBackground, .deck)
                             } else {
                                 TerminalGroupView(
                                     snapshot: snapshot,
@@ -246,6 +259,8 @@ private struct EditorGroupView: View {
                                 description: Text(
                                     "Drag a tab here or open a file from the sidebar.")
                             )
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .rafuDeckFill(theme.palette.editorBackground, .deck)
                         } else {
                             // The bounded working set: every LOADED document in
                             // this group stays mounted so TextKit keeps owning
@@ -823,7 +838,7 @@ private struct EditorTabShelf<Content: View>: View {
             // The shelf's own tone: the card tone in Indigo, one step below
             // it in Khadi, so the white selected tab and the breadcrumb row
             // under the shelf both stand apart from it.
-            .background(theme.palette.tabBarBackground)
+            .rafuDeckFill(theme.palette.tabBarBackground, .deck)
             .overlay(alignment: .bottom) {
                 if showsBottomHairline {
                     Rectangle()
@@ -1174,6 +1189,7 @@ private struct EditorGroupTabBar: View {
     private static let trailingFadeWidth: CGFloat = 48
 
     @Environment(\.rafuTheme) private var theme
+    @Environment(\.rafuWindowSurface) private var windowSurface
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var stripGeometry = TabStripGeometry()
     @State private var hoveredInsertion: TabStripInsertion?
@@ -1263,7 +1279,7 @@ private struct EditorGroupTabBar: View {
                     LinearGradient(
                         colors: [
                             theme.palette.tabBarBackground.opacity(0),
-                            theme.palette.tabBarBackground,
+                            fadeTone,
                         ],
                         startPoint: .leading,
                         endPoint: .trailing
@@ -1278,7 +1294,7 @@ private struct EditorGroupTabBar: View {
                     if isStripScrolledFromLeadingEdge {
                         LinearGradient(
                             colors: [
-                                theme.palette.tabBarBackground,
+                                fadeTone,
                                 theme.palette.tabBarBackground.opacity(0),
                             ],
                             startPoint: .leading,
@@ -1611,6 +1627,14 @@ private struct EditorGroupTabBar: View {
     /// One row of the tab list: the tab's glyph, its name, and a trailing dot
     /// when the document has unsaved changes. The selected tab keeps the check
     /// mark in place of its glyph (a menu row carries one image).
+    /// The fades' solid end. Solid: the shelf's opaque tone. Frosted: the
+    /// fade lies over the shelf's own translucent fill, so it paints at the
+    /// card layer's alpha over the deck, not a second full deck fill: tabs
+    /// under it fade out and the shelf there reaches the card opacity.
+    private var fadeTone: Color {
+        windowSurface.fill(theme.palette.tabBarBackground, .card)
+    }
+
     @ViewBuilder
     private func overflowTabMenuButton(
         title: String, glyph: String, isDirty: Bool, tab: EditorTabState
@@ -1662,19 +1686,24 @@ private struct GitStandaloneBlameCanvas: View {
                 }
             }
             .onHover { isHoveringTab = $0 }
-            blameHeader
-            Divider().overlay(theme.palette.borderSubtle)
-            if blame.lines.isEmpty {
-                ContentUnavailableView(
-                    "No blame information",
-                    systemImage: "person.text.rectangle",
-                    description: Text("Git did not report any attributable lines for this file.")
-                )
-            } else {
-                blameTable
+            VStack(spacing: 0) {
+                blameHeader
+                Divider().overlay(theme.palette.borderSubtle)
+                if blame.lines.isEmpty {
+                    ContentUnavailableView(
+                        "No blame information",
+                        systemImage: "person.text.rectangle",
+                        description: Text(
+                            "Git did not report any attributable lines for this file.")
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    blameTable
+                }
             }
+            // Below the shelf, which paints its own tone.
+            .rafuDeckFill(theme.palette.editorBackground, .content)
         }
-        .background(theme.palette.editorBackground)
     }
 
     private var blameHeader: some View {
@@ -1729,7 +1758,8 @@ private struct GitBlameTableHeader: View {
             column("Summary", width: nil)
         }
         .frame(height: 28)
-        .background(theme.palette.editorBackground)
+        // Pinned: rows scroll under it.
+        .rafuDeckFill(theme.palette.editorBackground, .pinned)
         .overlay(alignment: .bottom) { Divider().overlay(theme.palette.borderSubtle) }
     }
 
@@ -2473,7 +2503,7 @@ struct GuardBannerView: View {
         .padding(.horizontal, 10)
         .frame(height: 32)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(theme.palette.editorBackground)
+        .rafuDeckFill(theme.palette.editorBackground, .deck)
         .overlay(alignment: .bottom) { Divider().overlay(theme.palette.borderSubtle) }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(message) Enable Highlighting")
@@ -2660,6 +2690,9 @@ private struct DocumentFindBar: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
         .background(theme.palette.elevatedBackground.opacity(0.65))
+        // Solid: the group's opaque base lies under this tint. Frosted has
+        // no group base, so the bar brings its own deck tone.
+        .rafuDeckFill(theme.palette.editorBackground, .frostedBase)
         .defaultFocus($focusedField, .query)
         .onExitCommand {
             state.focusEditor()

@@ -75,11 +75,33 @@ nonisolated struct EditorColorSet: Equatable, Sendable {
     let cursor: String
     /// Picks the scroller knob style (light knob on a dark theme).
     let isDark: Bool
+    /// The editor base's alpha: 1, or the frosted deck's content opacity
+    /// (`WindowSurfacePreference.Resolved.contentOpacity`).
+    let backgroundAlpha: Double
 
-    init(theme: RafuTheme) {
+    init(theme: RafuTheme, backgroundAlpha: Double = 1) {
         background = theme.editor.background
         foreground = theme.editor.foreground
         cursor = theme.editor.cursor
         isDark = theme.isDark
+        self.backgroundAlpha = min(1, max(0, backgroundAlpha))
+    }
+
+    /// Frosted: the editor's base paints at an alpha below 1.
+    var isTranslucent: Bool { backgroundAlpha < 1 }
+
+    /// The scroll view's (clip view's) background: the one translucent base
+    /// under the whole viewport, including below the last line.
+    var scrollBackground: NSColor {
+        let color = NSColor(rafuHex: background)
+        return isTranslucent ? color.withAlphaComponent(CGFloat(backgroundAlpha)) : color
+    }
+
+    /// The text view's own background. Translucent: clear, so it does not
+    /// stack on the scroll view's base. `drawsBackground` stays on, because
+    /// the text view draws the current line, indent guides and bracket
+    /// borders in `drawBackground(in:)`; those keep their theme colours.
+    var textBackground: NSColor {
+        isTranslucent ? .clear : NSColor(rafuHex: background)
     }
 }
