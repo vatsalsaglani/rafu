@@ -461,10 +461,10 @@ actor WorkspaceSymbolIndex {
             let isFinished: Bool = withAutoreleasePool {
                 guard let url = enumerator.nextObject() as? URL else { return true }
                 guard let values = try? url.resourceValues(forKeys: keys) else { return false }
-                if values.isSymbolicLink == true {
-                    enumerator.skipDescendants()
-                    return false
-                }
+                // Never `skipDescendants()` for a symlink: the enumerator does
+                // not descend into one, so the call would apply to the NEXT
+                // directory and drop its whole subtree.
+                if values.isSymbolicLink == true { return false }
                 if values.isDirectory == true {
                     if WorkspaceFileService.excludedDirectories.contains(url.lastPathComponent) {
                         enumerator.skipDescendants()

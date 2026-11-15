@@ -100,6 +100,33 @@ func fileNameIndexEnumerationOverNestedTreeIsStable() async throws {
     #expect(all.allSatisfy { $0.isContiguousUTF8 })
 }
 
+@Test("A directory symlink listed before sibling directories does not hide the first sibling")
+func fileNameIndexSymlinkBeforeSiblingsKeepsEveryDirectory() async throws {
+    let root = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let fileManager = FileManager.default
+    var expected = Set<String>()
+    for directory in 0..<2 {
+        try fileManager.createDirectory(
+            at: root.appending(path: "Modul\(directory)"), withIntermediateDirectories: true)
+        for file in 0..<5 {
+            let path = "Modul\(directory)/Datei\(file).swift"
+            try write("x", to: root.appending(path: path))
+            expected.insert(path)
+        }
+    }
+    // `Link` sorts before `Modul0` and points at a sibling directory.
+    try fileManager.createSymbolicLink(
+        atPath: root.appending(path: "Link").path, withDestinationPath: "Modul1")
+
+    let index = WorkspaceFileNameIndex()
+    await index.build(rootURL: root)
+
+    let all = try await index.query(term: "", limit: 100)
+    #expect(Set(all) == expected)
+    #expect(all.count == expected.count)
+}
+
 @Test("The index caps enumeration and reports truncation")
 func fileNameIndexReportsTruncation() async throws {
     let root = try makeTemporaryDirectory()

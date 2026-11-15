@@ -133,8 +133,10 @@ actor WorkspaceSearchService {
                 let presentationURL = presentationRootURL.appending(path: relativePath)
 
                 if values?.isSymbolicLink == true {
+                    // Never `skipDescendants()` for a symlink: the enumerator
+                    // does not descend into one, so the call would apply to
+                    // the NEXT directory and drop its whole subtree.
                     statistics.skippedSymlinks += 1
-                    enumerator.skipDescendants()
                     return .next
                 }
                 if Self.isIgnored(
