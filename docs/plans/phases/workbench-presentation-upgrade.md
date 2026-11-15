@@ -185,8 +185,48 @@ collapsed gap (Frosted corners, collapsed gap) describe first-round values.
 Notes: [`workbench-split-handle.md`](../../references/workbench-split-handle.md),
 [`ui-design-language.md`](../../references/ui-design-language.md).
 
-Open: the per-region backdrop alternative is not measured; terminal alpha
-(step 3) is not started.
+Open: the per-region backdrop alternative is not measured. (Terminal alpha, step
+3, landed later the same day; see the next entry.)
+
+**Work log, 2026-11-15 — frosted window steps 2 and 3: deck, editor, terminals
+and Ensemble nodes (merge "frosted deck, Ensemble nodes, editor and terminals",
+commit de54821).** User requests: "if we can bring some amount of it in the
+middle part" and "the same would apply to every ensemble component/node".
+Delivered: a new switch Settings > Appearance > Window > "Frost the editor and
+terminals" (`windowSurfaceFrostContent`, default On; disabled when Solid or forced
+Solid); a per-strength opacity table; one paint per region through
+`rafuDeckFill` / `windowSurface.fill`; a Frosted-only shadow ring mask for the deck
+and Ensemble cards; every Ensemble node kind and board control on the card layer;
+SwiftTerm alpha and TextKit clear-text-view base. Contract, table and layer
+meanings: [ADR 0038 Amendment](../../decisions/0038-optional-frosted-window-base.md).
+Nuances: [`frosted-window-base.md`](../../references/frosted-window-base.md),
+[`workbench-deck-corner-wedges.md`](../../references/workbench-deck-corner-wedges.md).
+
+Evidence:
+
+- Both changes (this and the SDK stamp) are merged to `main`.
+- Serial (`--no-parallel`) suite on `main` after the SDK merge, before the frost
+  merge: passed, 466 tests in 33 suites and 3729 tests in 302 suites.
+- Serial suite on `main` after the frost merge: serial gate run by coordinator
+  (result not in the handoff).
+- On the branches, the parallel suite showed scheduler starvation (not failures)
+  in `AgentActivityStoreTests` "native directory notification..." and
+  `VoiceSessionIntegrationTests` (until-helper timeouts and `CancellationError`),
+  under machine load of 64 to 78 from parallel worktree builds. They pass alone
+  (85 tests in 8 suites). This is the existing starvation class, already recorded
+  for `AgentActivityStoreTests` in
+  [`terminal-notch-hud.md`](terminal-notch-hud.md); no code change.
+- No GUI check yet; the user tests everything at the end.
+
+GUI checks owed: Indigo and Khadi, each at Subtle, Balanced and Strong, with the
+switch On and Off; the tab shelf fade at the trailing end; inner split corners;
+the terminal bottom strip; card edges; the shadow ring edge; text antialiasing
+over clear text views; inverse (SGR 7) terminal text.
+
+Revisit trigger (open): measure Release performance in Solid and in Frosted:
+typing p95, a terminal flood (`yes | head -200000`), and a 40-card board pan.
+New Frosted-only costs: one mask pass for the deck shadow, one per visible card
+shadow, and SwiftTerm compositing a non-opaque layer.
 
 Parallel execution is specified by
 [`workbench-presentation-upgrade/README.md`](workbench-presentation-upgrade/README.md):

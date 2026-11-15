@@ -13,8 +13,12 @@
     [ADR 0031](0031-card-header-tabs-and-themed-chrome.md): the "opaque tonal
     surfaces / no material, blur" clauses and "Reduce Transparency stays a
     no-op"
-- **Retains:** theme authority, an opaque editor and terminal, the unclipped
-  deck, the two-shadow budget, and the rule that geometry is Rafu's
+- **Amended 2026-11-15:** steps 2 and 3 landed (frosted deck, Ensemble nodes,
+  editor and terminals; merge commit de54821). See "Amendment" below.
+- **Retains:** theme authority, the unclipped deck, the two-shadow budget, and
+  the rule that geometry is Rafu's. The editor and terminal are opaque only when
+  the "Frost the editor and terminals" switch is off or the base is Solid (see
+  the Amendment).
 
 ## Context
 
@@ -81,20 +85,82 @@ nothing sees no translucency.
 
 Balanced dark (0.50) is the value the user approved in the spike.
 
-**Not changed.** Popups, sheets, the welcome window, and the notch HUD. The
-editor and terminal stay opaque. Reduce Transparency and Increase Contrast keep
-their existing jobs and add this one.
+**Not changed.** Popups, sheets, the welcome window, and the notch HUD.
+Reduce Transparency and Increase Contrast keep their existing jobs and add this
+one. (Step 1 kept the editor and terminal opaque; the Amendment changes that.)
 
 **Migration.** One time, in `RafuApplication.init()`: if the spike default
 `RafuFrostSpike` is `"visualEffect"` and no style is set, the style becomes
 Frosted (Balanced). All eight `RafuFrostSpike*` keys are then deleted. An
 existing user choice is never overwritten.
 
-**Later (step 3, not done).** A translucent terminal is feasible without
-patching SwiftTerm: it uses the CoreGraphics path with RGBA layer contents.
-SwiftTerm sets `layer.backgroundColor` once in `setupOptions` from the default
-`textBackgroundColor`, so Rafu must clear `view.layer.backgroundColor` in
-`applyTheme`.
+**Later (step 3).** Done; see the Amendment. How the terminal alpha works is in
+[`frosted-window-base.md`](../references/frosted-window-base.md).
+
+## Amendment 2026-11-15: steps 2 and 3 (frosted deck, nodes, editor, terminals)
+
+User requests: "if we can bring some amount of it in the middle part" and "the
+same would apply to every ensemble component/node". Merge "frosted deck,
+Ensemble nodes, editor and terminals", commit de54821. The step 1 clause
+"Retains: an opaque editor and terminal" is removed.
+
+**Setting.** Settings > Appearance > Window > "Frost the editor and terminals",
+key `windowSurfaceFrostContent`, default On. Disabled when the base is Solid or
+forced Solid. With the switch Off, or in Solid, content is opaque as before.
+
+**Opacity table** (over the blurred desktop; the frame tint is unchanged from
+step 1). "Content" is switch On / Off.
+
+| Strength | Frame | Deck | Card | Content |
+|---|---|---|---|---|
+| Subtle dark | 0.62 | 0.90 | 0.96 | 0.90 / 1 |
+| Balanced dark | 0.50 | 0.82 | 0.94 | 0.82 / 1 |
+| Strong dark | 0.38 | 0.72 | 0.90 | 0.72 / 1 |
+| Subtle light | 0.86 | 0.94 | 0.98 | 0.94 / 1 |
+| Balanced light | 0.74 | 0.88 | 0.96 | 0.88 / 1 |
+| Strong light | 0.60 | 0.80 | 0.93 | 0.80 / 1 |
+
+**Rule: paint once.** In Frosted the deck card paints no base. Each region
+paints its colour exactly once through `rafuDeckFill(color, layer)` or
+`windowSurface.fill`, so translucent fills never stack. `DeckLayer` meanings:
+
+- `deck`: tab shelf, breadcrumb, Ensemble board, empty states, guard banner.
+- `content`: editor, terminal, Markdown preview, diff, image, video, agent
+  session pane, blame.
+- `card`: Ensemble cards and board controls. A card paints only the alpha still
+  needed over the board: `layeredOpacity a = (target - base) / (1 - base)`. For
+  example Balanced dark card is about 0.67 over the board.
+- `cardContent`: editor-like content inside a card; clear when frosted.
+- `pinned`: sticky headers.
+- `underlay`: Solid only.
+- `frostedBase`: Frosted only.
+
+Split gaps use `rafuFrameSurface(.app)`.
+
+**Shadow.** In Frosted only, the deck and Ensemble card shadow shapes are masked
+to a ring outside the card (`rafuShadowOutsideOnly`: an even-odd rect-minus-
+outline mask grown by reach = 2 x blur + y-offset). Solid has no mask.
+
+**Ensemble nodes.** Every node kind uses the card shell's one fill. Read faces
+paint nothing in Frosted (note read/compact face, Markdown file card, note
+command row, generated view card). Editor-like faces follow the switch (note
+editor `NSTextView`, Mermaid source editor, terminal claim placeholder). Board
+chrome uses the card layer (tool palette, zoom capsule, notices, minimap, edge
+labels, session links bar, silhouette, agent control capsule, restored-links and
+refusal capsules, save-failure row). Shape fills were already translucent ink
+tints. Strokes, text, selection and focus rings stay opaque. Web card chrome
+follows the card; the `WKWebView` content stays opaque.
+
+**Not changed.** Find panel, approval popover, Mermaid/diagram inner tiles,
+Markdown code-block background in note cards, terminal exited strip.
+
+**Contract for new code.** Every full-region fill in the deck or on the board
+must use `rafuDeckFill` or `windowSurface.fill`, never a direct opaque
+`.background(palette...)`. A new node kind must not paint a second card-role
+fill. `FrostedDeckContractTests` enforces the main call sites.
+
+**New Frosted-only costs (not measured).** One mask pass for the deck shadow,
+one per visible card shadow, and SwiftTerm compositing a non-opaque layer.
 
 ## Alternatives considered
 
@@ -116,15 +182,18 @@ SwiftTerm sets `layer.backgroundColor` once in `setupOptions` from the default
   window frame: they force Solid.
 - A theme's distinct `sidebarBackground` is ignored in Frosted.
 - Frame surfaces must be painted through `rafuFrameSurface`, never a direct
-  opaque fill, or the frost shows a patch of solid colour.
+  opaque fill, or the frost shows a patch of solid colour. Deck and board
+  regions follow the same rule through `rafuDeckFill` (see the Amendment).
 - AGENTS.md macOS interface rules changed to match (translucency only through
   this opt-in base).
 
 ## Revisit trigger
 
 Revisit if the Release WindowServer cost is too high, if per-region backdrops
-measure better, if a future macOS gives a glass surface that blurs the desktop
-on a window base, or if the terminal gets alpha (step 3).
+measure better, or if a future macOS gives a glass surface that blurs the
+desktop on a window base. Also revisit after a Release measurement, in Solid and
+in Frosted, of typing p95, the `yes | head -200000` terminal flood, and a 40-card
+board pan; the Amendment's Frosted-only costs have no numbers yet.
 
 ## Related
 

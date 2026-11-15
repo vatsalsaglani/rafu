@@ -46,6 +46,14 @@ second round the same day made them top 2, leading 8 open / 5 collapsed,
 trailing 8, bottom 12). Wedge behaviour at the 2 pt top and 5 pt collapsed gaps
 was accepted by the user on Rafu Lightning; it has no separate measurement.
 
+**Frosted shadow ring (2026-11-15, ADR 0038 amendment, commit de54821).** In
+Frosted the deck shadow shape is masked to a ring outside the card
+(`rafuShadowOutsideOnly`), so a translucent deck does not show its own shadow
+through itself. The ring is the even-odd rect-minus-outline mask grown by reach =
+2 x blur + y-offset. Solid has no mask. The editor-group corner wedges paint
+`appBackground` at the tint opacity; a small mismatch at inner split corners is
+possible and is on the GUI checks owed list.
+
 ## Why it matters
 
 - The defect is invisible in a dark theme with a faint shadow and obvious in a

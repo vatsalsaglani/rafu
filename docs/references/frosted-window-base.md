@@ -11,7 +11,8 @@
   suites plus 3708 tests in 301 suites (the two test targets). Rafu Lightning
   launched from `main` and the one-time migration set `windowSurfaceStyle =
   frosted`, `windowSurfaceFrost = balanced`. GUI checks of the final build are
-  not done (see the phase work log).
+  not done (see the phase work log). Steps 2 and 3 (commit de54821): Swift
+  6.4.2, same Xcode/SDK; GUI check not done.
 
 ## Rule or observed behavior
 
@@ -40,11 +41,46 @@
    .sidebar / .statusBar)` paints its token only in Solid. A direct opaque fill
    on a frame surface leaves a solid patch in Frosted, and nested paints would
    stack. A theme's distinct `sidebarBackground` is not shown in Frosted.
-9. **Terminal alpha (step 3, not done).** SwiftTerm uses the CoreGraphics path
-   with RGBA layer contents, so alpha is feasible without patching it.
-   SwiftTerm sets `layer.backgroundColor` once in `setupOptions` from the
-   default `textBackgroundColor`; Rafu must clear `view.layer.backgroundColor`
-   in `applyTheme`.
+9. **Terminal alpha (step 3, landed 2026-11-15, commit de54821).** SwiftTerm
+   uses the CoreGraphics path with RGBA layer contents, so alpha works without
+   patching it. Details are in "Terminal alpha" below.
+10. **Deck, content and board paint once (steps 2 and 3).** In Frosted the deck
+    card paints no base. Each region paints its colour once through
+    `rafuDeckFill(color, layer)` or `windowSurface.fill`, so translucent fills
+    never stack. Layer meanings, the opacity table and the shadow ring are in the
+    ADR 0038 Amendment. Split gaps use `rafuFrameSurface(.app)`.
+11. **New contract.** Every full-region fill in the deck or on the board must use
+    `rafuDeckFill` or `windowSurface.fill`, never a direct opaque
+    `.background(palette...)`. A new node kind must not paint a second card-role
+    fill. `FrostedDeckContractTests` enforces the main call sites. (This rule is
+    here and in ADR 0038 on purpose; it is not in AGENTS.md.)
+12. **Popovers and sheets** inherit `rafuWindowSurface`. `RafuCardHeaderRow` uses
+    the `pinned` layer, so a Markdown code-block header in a popover is very
+    slightly translucent.
+
+## Terminal alpha
+
+- Alpha goes in SwiftTerm `nativeBackgroundColor`. The layer background is
+  cleared after font/`installColors`, and restored at alpha 1.
+- Alpha is never 0. SwiftTerm draws inverse-video (SGR 7) text in that colour, so
+  at alpha 0 the text would vanish. Contrast of inverse text still drops at
+  Strong.
+- SwiftTerm fills cells with `NSRect.fill()` (copy mode), so the alpha is exact.
+  It leaves the strip below the last row unpainted, so Rafu adds
+  `TerminalMarginFillView` (no clicks, hidden from accessibility).
+- SwiftTerm `draw(_:)` is `public` but not `open`; Rafu cannot override it.
+
+## TextKit editor alpha
+
+- Keep `drawsBackground` on with a clear text view. Current-line highlight,
+  indent guides and bracket borders draw in `drawBackground(in:)`.
+- Put the base on the clip view. Otherwise a short text view leaves a gap below
+  it.
+- `NSRectFill` in copy mode makes the line highlight copy its translucent colour
+  instead of blending; it then composites over the clip view.
+- Views with translucent backgrounds must report `isOpaque` false.
+- The gutter base and the legacy scroller track follow the editor alpha.
+- Alpha is part of `EditorColorSet`, so AppKit writes happen only on change.
 
 ## Why it matters
 
@@ -79,10 +115,23 @@ Manual, Rafu Lightning only (never the release `Rafu` process):
 6. Footprint of `pgrep -x RafuLightning`, and WindowServer CPU with Solid and
    with Frosted in the same scene, in a Release build. The exact commands the
    spike used were not recorded in the handoff; record them here when the
-   Release measurement is made.
+   Release measurement is made. For steps 2 and 3 also measure, in Solid and in
+   Frosted: typing p95, a terminal flood (`yes | head -200000`), and a 40-card
+   board pan. New Frosted-only costs: one mask pass for the deck shadow, one per
+   visible card shadow, and SwiftTerm compositing a non-opaque layer. No numbers
+   exist yet.
+7. Steps 2 and 3 GUI checks owed (none done): Indigo and Khadi, each at Subtle,
+   Balanced and Strong, with "Frost the editor and terminals" On and Off; the tab
+   shelf fade at the trailing end; inner split corners (editor-group corner
+   wedges paint `appBackground` at the tint opacity, so a small mismatch is
+   expected there); the terminal bottom strip; card edges; the shadow ring edge;
+   text antialiasing over clear text views; inverse (SGR 7) terminal text.
 
 Automated: the pure resolver `WindowSurfacePreference` is covered by the
-`main` gates above; the test names were not supplied.
+`main` gates above; the test names were not supplied. Steps 2 and 3 add
+`FrostedDeckContractTests`, which enforces the main `rafuDeckFill` /
+`windowSurface.fill` call sites. Test counts for the steps 2 and 3 merge are in
+the phase work log.
 
 ## Related code, ADRs, and phases
 

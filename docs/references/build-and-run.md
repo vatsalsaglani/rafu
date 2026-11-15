@@ -317,6 +317,49 @@ Verify with `./script/build_and_run.sh --verify` and
 See [agent hooks and Now Playing](agent-hooks-and-now-playing.md) and
 [the Ensemble phase](../plans/phases/ensemble-canvas.md).
 
+## SDK stamp, signing identity, and the widget gallery check (2026-11-15)
+
+- **Applies to:** `script/build_and_run.sh` and the new `script/sdk_link_flags.sh`
+  and `script/check_sdk_stamp.sh` (commit 2968d3a).
+- **Last verified environment:** Swift 6.4.2, Xcode with macOS 27.2 SDK (26B118),
+  Darwin 27.2.0, Mac17,13, 2026-11-15.
+
+**SDK stamp.** SwiftPM binaries were stamped `sdk 15.0`. The script now passes
+`script/sdk_link_flags.sh <min>` to all four `swift build --product` calls
+(relink only). `script/check_sdk_stamp.sh` fails when the stamped sdk major is
+below the selected SDK major, or minos differs from `RAFU_EXPECT_MINOS`
+(`MIN_SYSTEM_VERSION`, which must equal Package.swift `.macOS(.v15)`). Its
+`--self-test` (fake `vtool`) runs in `verify.sh`. Cause, evidence and side
+effects: [`sdk-build-version-stamp.md`](sdk-build-version-stamp.md).
+
+**Signing identity.**
+
+- `RAFU_SIGN_IDENTITY` (default ad-hoc). The script signs the hook helper, then
+  the appex with its unchanged entitlements, then the MediaRemote framework, then
+  the app.
+- With a real identity, `codesign --verify --strict` on the appex and
+  `codesign --verify --deep --strict` on the app are fatal on failure.
+- `RAFU_SIGN_KEYCHAIN` (optional) adds `--keychain` to the signing calls.
+- CI needs neither variable.
+- A real Apple Development identity was **not** tested: none on the machine. A
+  throwaway self-signed identity in a private keychain was tested and deleted.
+
+**Widget gallery check** (ADR 0039; gallery visibility with ad-hoc signing is
+unconfirmed):
+
+1. `security find-identity -v -p codesigning`.
+2. `RAFU_SIGN_IDENTITY="Apple Development: Name (TEAMID)" ./script/build_and_run.sh --verify`.
+   Repeat the variable on every call: `--verify` rebuilds and re-signs.
+3. Verify with `codesign` and `vtool`.
+4. If the gallery ignores `dist`, copy the app to `/Applications` and launch it
+   once. Then `pluginkit -mv | grep rafu`.
+5. Edit Widgets, search "Rafu Lightning". If it is not listed, `killall chronod`.
+6. For sample data: `defaults write dev.vatsalsaglani.rafu.lightning
+   RafuWidgetSampleSnapshot -bool YES`.
+
+Plain `swift build` / `swift test` outside the script still stamp 15.0; only the
+staged bundle is checked.
+
 ### Stop the Now Playing helper with the app (2026-10-19)
 
 The Lightning `mediaremote-adapter.pl` helper (started through
