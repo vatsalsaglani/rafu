@@ -439,7 +439,8 @@ final class CanvasLiveBridge {
         else { return .init(error: "This terminal session is no longer available.") }
         guard
             [
-                "bind", "suspend", "release", "register", "list", "send", "receive", "unregister",
+                "bind", "suspend", "resume", "release", "register", "list", "send", "receive",
+                "unregister",
                 "tool", CanvasChannelPrompt.launchOperation,
             ].contains(request.operation)
         else {
@@ -455,7 +456,12 @@ final class CanvasLiveBridge {
             guard let reason = SuspensionReason(rawValue: request.reason ?? "sessionChanged") else {
                 return .init(error: "Unsupported suspension reason.")
             }
-            if !source.suspended { source.suspensionReason = reason }
+            // An explicit changed conversation is final, so it replaces a transport
+            // loss and a later `resume` cannot clear it. A legacy retry without a
+            // reason keeps the first cause.
+            if !source.suspended || request.reason == SuspensionReason.sessionChanged.rawValue {
+                source.suspensionReason = reason
+            }
             source.suspended = true
             source.inbox = []
             endpoints[request.token] = source
@@ -464,6 +470,23 @@ final class CanvasLiveBridge {
             revision &+= 1
             // Revoke first, then stop in-flight queue processes before the TUI can navigate.
             await cancelDeliveries(for: request.token)
+            return .init()
+        }
+        if request.operation == "resume" {
+            // The supervisor's TUI reconnected to the same server and asked for
+            // the bound thread. Only a transport loss on that route clears.
+            guard request.provider == "codex", source.provider == "codex",
+                let route = request.endpoint, source.endpoint == route,
+                let thread = request.threadID, source.threadID == thread,
+                source.suspended, source.suspensionReason == .transportLost
+            else { return .init(error: "This terminal cannot resume that Codex session.") }
+            source.suspended = false
+            source.lastSeen = now()
+            endpoints[request.token] = source
+            clearSuspensionNotice()
+            updateActivity()
+            revision &+= 1
+            scheduleFlush(for: controller.id)
             return .init()
         }
         if let provider = request.provider, let registered = source.provider,

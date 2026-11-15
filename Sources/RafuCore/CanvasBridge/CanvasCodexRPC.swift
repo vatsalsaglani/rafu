@@ -9,6 +9,7 @@ public nonisolated final class CanvasCodexRPC {
     private let deadline: UInt64
     private var pending = Data()
     private var nextID = 0
+    private var upgraded = false
     private static let maximumBytes = 256 * 1_024
 
     public init(endpoint: String, timeout: TimeInterval = 15) throws {
@@ -44,6 +45,7 @@ public nonisolated final class CanvasCodexRPC {
                 throw RPCError.transport
             }
             try upgrade()
+            upgraded = true
             _ = try request(
                 "initialize",
                 params: [
@@ -57,7 +59,17 @@ public nonisolated final class CanvasCodexRPC {
         }
     }
 
-    deinit { Darwin.close(descriptor) }
+    deinit {
+        // Best effort: a masked, empty close frame lets the server end the
+        // connection with a closing handshake. The socket is non-blocking, so
+        // a full buffer drops the frame instead of waiting.
+        if upgraded {
+            let frame: [UInt8] =
+                [0x88, 0x80] + (0..<4).map { _ in UInt8.random(in: .min ... .max) }
+            _ = frame.withUnsafeBytes { Darwin.send(descriptor, $0.baseAddress, $0.count, 0) }
+        }
+        Darwin.close(descriptor)
+    }
 
     /// Naming materializes the otherwise empty draft. Resume can then attach the TUI
     /// to this exact thread without a prompt or an inference request.

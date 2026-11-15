@@ -7,6 +7,22 @@ import Testing
 
 @Suite(.serialized)
 struct CanvasCodexSessionTests {
+    @Test func relayRemovesTheCompressionOfferFromTheUpgrade() {
+        let request =
+            "GET /rpc HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\n"
+            + "X-Codex-App-Server-Compression: zstd-stream-v1\r\n"
+            + "Sec-WebSocket-Extensions: permessage-deflate\r\n"
+            + "Sec-WebSocket-Key: abc\r\n\r\n"
+        let result = String(
+            decoding: CanvasCodexProxy.withoutCompressionOffer(Data(request.utf8)), as: UTF8.self)
+        #expect(
+            result
+                == "GET /rpc HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\n"
+                + "Sec-WebSocket-Key: abc\r\n\r\n")
+        let plain = Data("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n".utf8)
+        #expect(CanvasCodexProxy.withoutCompressionOffer(plain) == plain)
+    }
+
     @Test func terminalUsesPrivateEndpointAndServerStopsOnExit() throws {
         let fixture = try Fixture()
         defer { fixture.remove() }
@@ -308,6 +324,227 @@ struct CanvasCodexSessionTests {
         }
     }
 
+    /// A fixture server, a relay in front of it, and a record of what the relay
+    /// told the app. Python clients play the TUI, one process per phase.
+    private final class RelayHarness {
+        let backend: Fixture
+        let frontend: Fixture
+        let server: Process
+        let probe = LinkProbe()
+        let thread = UUID().uuidString
+        private(set) var proxy: CanvasCodexProxy!
+        var socket: String { frontend.root.appendingPathComponent("socket").path }
+
+        init() throws {
+            backend = try Fixture()
+            frontend = try Fixture()
+            server = Process()
+            server.executableURL = backend.executable
+            server.arguments = ["app-server", "--listen", backend.endpoint]
+            let ready = Pipe()
+            server.standardOutput = ready
+            try server.run()
+            #expect(try ready.fileHandleForReading.read(upToCount: 1) == Data("R".utf8))
+            let probe = probe
+            proxy = try CanvasCodexProxy(
+                frontend: socket, backend: backend.endpoint, threadID: thread,
+                resume: { probe.resumes.withLock { $0 += 1 } },
+                suspend: { reason in
+                    probe.suspensions.withLock { $0.append(reason) }
+                    probe.suspended.signal()
+                })
+        }
+
+        /// Runs one TUI phase. Its exit status is 0 only if every assertion held.
+        func client(_ body: String) throws -> Int32 {
+            let client = Process()
+            client.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+            client.arguments = ["-c", Self.prelude + body, socket, thread]
+            try client.run()
+            client.waitUntilExit()
+            return client.terminationStatus
+        }
+
+        /// Waits for the relay's next `suspend` call. A bounded signal wait, not a sleep.
+        func awaitSuspension() -> Bool {
+            probe.suspended.wait(timeout: .now() + 15) == .success
+        }
+
+        func tearDown() {
+            proxy.stop()
+            server.terminate()
+            server.waitUntilExit()
+            backend.remove()
+            frontend.remove()
+        }
+
+        private static let prelude = #"""
+            import json, socket, struct, sys
+            path, thread = sys.argv[1], sys.argv[2]
+            def exact(connection, count):
+                data = b''
+                while len(data) < count:
+                    part = connection.recv(count - len(data))
+                    if not part: raise EOFError()
+                    data += part
+                return data
+            def connect():
+                connection = socket.socket(socket.AF_UNIX)
+                connection.settimeout(10)
+                connection.connect(path)
+                connection.sendall(b'GET / HTTP/1.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: AAAAAAAAAAAAAAAAAAAAAA==\r\nSec-WebSocket-Version: 13\r\n\r\n')
+                header = b''
+                while not header.endswith(b'\r\n\r\n'): header += exact(connection, 1)
+                assert header.startswith(b'HTTP/1.1 101 '), header
+                return connection
+            def send(connection, value):
+                data = json.dumps(value).encode()
+                if len(data) < 126: head = bytes([129, 128 | len(data)])
+                elif len(data) < 65536: head = bytes([129, 128 | 126]) + struct.pack('!H', len(data))
+                else: head = bytes([129, 128 | 127]) + struct.pack('!Q', len(data))
+                connection.sendall(head + bytes(4) + data)
+            def receive(connection):
+                header = exact(connection, 2)
+                length = header[1] & 127
+                if length == 126: length = struct.unpack('!H', exact(connection, 2))[0]
+                elif length == 127: length = struct.unpack('!Q', exact(connection, 8))[0]
+                return json.loads(exact(connection, length))
+            def resume(connection, identifier):
+                send(connection, {'id': identifier, 'method': 'thread/resume', 'params': {'threadId': thread}})
+                assert receive(connection)['id'] == identifier
+            def closed(connection):
+                try:
+                    return connection.recv(1) == b''
+                except ConnectionResetError:
+                    return True
+
+            """#
+    }
+
+    private final class LinkProbe: Sendable {
+        let suspensions = Mutex<[CanvasCodexProxy.SuspensionReason]>([])
+        let resumes = Mutex(0)
+        let suspended = DispatchSemaphore(value: 0)
+    }
+
+    /// Regression: the relay stopped listening after its first connection, so the
+    /// TUI's automatic reconnect was refused until it timed out.
+    @Test func relayAcceptsAReconnectOnTheSamePathAfterADrop() throws {
+        let harness = try RelayHarness()
+        defer { harness.tearDown() }
+        // The TUI resumes the bound thread, then its socket drops without a close frame.
+        #expect(
+            try harness.client(
+                """
+                connection = connect()
+                resume(connection, 1)
+                connection.close()
+                """) == 0)
+        #expect(harness.awaitSuspension())
+        #expect(harness.probe.suspensions.withLock { $0 } == [.transportLost])
+        #expect(harness.probe.resumes.withLock { $0 } == 0)
+        // The automatic reconnect reaches the same path and resumes the bound thread.
+        #expect(
+            try harness.client(
+                """
+                connection = connect()
+                resume(connection, 1)
+                connection.close()
+                """) == 0)
+        #expect(harness.probe.resumes.withLock { $0 } == 1)
+        // The final close is the terminal's own way out after one restored drop.
+        #expect(harness.awaitSuspension())
+        #expect(harness.proxy.outcome == .restored(count: 1, first: .terminalClosed))
+    }
+
+    @Test func relayAcceptsAnIDThatWasPendingOnTheDroppedConnection() throws {
+        let harness = try RelayHarness()
+        defer { harness.tearDown() }
+        #expect(
+            try harness.client(
+                """
+                connection = connect()
+                send(connection, {'id': 7, 'method': 'fixture/silent', 'params': {}})
+                connection.close()
+                """) == 0)
+        #expect(harness.awaitSuspension())
+        #expect(
+            try harness.client(
+                """
+                connection = connect()
+                resume(connection, 7)
+                connection.close()
+                """) == 0)
+        #expect(harness.probe.resumes.withLock { $0 } == 1)
+    }
+
+    @Test func relayNeverResumesAChangedConversationAfterAReconnect() throws {
+        let harness = try RelayHarness()
+        defer { harness.tearDown() }
+        #expect(
+            try harness.client(
+                """
+                connection = connect()
+                send(connection, {'id': 1, 'method': 'thread/start', 'params': {}})
+                assert receive(connection)['id'] == 1
+                connection.close()
+                """) == 0)
+        #expect(harness.awaitSuspension())
+        #expect(
+            try harness.client(
+                """
+                connection = connect()
+                resume(connection, 1)
+                connection.close()
+                """) == 0)
+        #expect(harness.probe.resumes.withLock { $0 } == 0)
+        #expect(harness.probe.suspensions.withLock { $0 } == [.sessionChanged])
+        #expect(harness.proxy.outcome == .lost(.sessionChange))
+    }
+
+    @Test func relayReplacesAnActiveConnectionWithANewerOneWithoutALoss() throws {
+        let harness = try RelayHarness()
+        defer { harness.tearDown() }
+        #expect(
+            try harness.client(
+                """
+                first = connect()
+                resume(first, 1)
+                second = connect()
+                assert closed(first)
+                resume(second, 1)
+                second.close()
+                """) == 0)
+        // Only the last close suspends: the replaced connection was not a loss.
+        #expect(harness.awaitSuspension())
+        #expect(harness.probe.suspensions.withLock { $0 } == [.transportLost])
+        #expect(harness.probe.resumes.withLock { $0 } == 0)
+        #expect(harness.proxy.outcome == .intact)
+    }
+
+    /// The incident's last server frame carried exactly 65,536 bytes of command
+    /// output, the session's first frame with a 64-bit length.
+    @Test(arguments: [("plain", 70 * 1_024), ("plain", 65_536), ("mixed", 65_536)])
+    func relayForwardsLargeServerNotifications(kind: String, size: Int) throws {
+        let harness = try RelayHarness()
+        defer { harness.tearDown() }
+        #expect(
+            try harness.client(
+                """
+                connection = connect()
+                send(connection, {'id': 1, 'method': 'fixture/notify', 'params': {'threadId': thread, 'size': \(size), 'kind': '\(kind)'}})
+                note = receive(connection)
+                assert note['method'] == 'item/completed'
+                assert len(note['params']['item']['aggregatedOutput'].encode()) == \(size)
+                assert receive(connection)['id'] == 1
+                connection.close()
+                """) == 0)
+        #expect(harness.awaitSuspension())
+        // The notification itself did not end the connection.
+        #expect(harness.probe.suspensions.withLock { $0 } == [.transportLost])
+        #expect(harness.proxy.outcome == .intact)
+    }
+
     @Test func largeResponseEnvelopeRequiresCanonicalResponseAndBoundedID() {
         #expect(CanvasCodexProxy.responseID(Data(#"{ "id" : 7, "result": "#.utf8)) == "7")
         #expect(CanvasCodexProxy.responseID(Data(#"{"id":"a\"b","error":"#.utf8)) != nil)
@@ -514,6 +751,8 @@ struct CanvasCodexSessionTests {
                             assert header[1] & 128
                             mask = exact(connection, 4)
                             raw = exact(connection, length)
+                            if header[0] & 15 == 8:
+                                return
                             request = json.loads(bytes(value ^ mask[index % 4] for index, value in enumerate(raw)))
                             methods.append(request['method'])
                             with open(root + '/requests.json', 'w') as stream:
@@ -526,6 +765,21 @@ struct CanvasCodexSessionTests {
                                 continue
                             if request['method'] == 'fixture/large':
                                 result = {'padding': 'x' * 524288}
+                            if request['method'] == 'fixture/silent':
+                                continue
+                            if request['method'] == 'fixture/notify':
+                                # A command-output notification, as the server sends it after a
+                                # tool call. `size` counts the UTF-8 bytes of the output string.
+                                params = request['params']
+                                size = params['size']
+                                if params['kind'] == 'mixed':
+                                    unit = '\\x1b[31m\\u00e9\\U0001F600\\x00\\t"\\\\\\n'
+                                    count = size // len(unit.encode())
+                                    output = unit * count + 'x' * (size - count * len(unit.encode()))
+                                else:
+                                    output = 'x' * size
+                                note = json.dumps({'method': 'item/completed', 'params': {'threadId': params['threadId'], 'item': {'type': 'commandExecution', 'aggregatedOutput': output}}}, ensure_ascii=False).encode()
+                                connection.sendall(bytes([129, 127]) + struct.pack('!Q', len(note)) + note)
                             identifier = request['id'] + 99 if os.getenv('RAFU_TEST_PROXY_LARGE') == 'unknown' else request['id']
                             body = json.dumps({'id': identifier, 'result': result}).encode()
                             connection.sendall((bytes([129, 127]) + struct.pack('!Q', len(body)) if len(body) > 125 else bytes([129, len(body)])) + body)

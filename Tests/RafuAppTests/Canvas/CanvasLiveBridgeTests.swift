@@ -175,6 +175,14 @@ private struct CanvasLiveBridgeFixture {
         suspend.reason = reason
         return suspend
     }
+
+    /// The supervisor's request after its TUI reconnected to the bound thread.
+    func resume(_ index: Int = 0, route: String, thread: String) -> CanvasBridgeRequest {
+        var resume = request(index, "resume", client: UUID().uuidString, provider: "codex")
+        resume.endpoint = route
+        resume.threadID = thread
+        return resume
+    }
 }
 
 @Suite("Canvas live session capability boundary")
@@ -723,6 +731,77 @@ struct CanvasLiveBridgeTests {
         suspend.token = fixture.tokens[1]
         #expect(await fixture.bridge.handle(suspend).error != nil)
         #expect(fixture.bridge.status(for: fixture.controllers[1].id) == "Claude connected")
+    }
+
+    @Test("A reconnected Codex terminal resumes a transport loss on its own route and thread only")
+    func resumeClearsTransportLoss() async throws {
+        let fixture = try CanvasLiveBridgeFixture()
+        let route = CanvasLiveBridgeFixture.route()
+        let thread = UUID().uuidString
+        let client = UUID().uuidString
+        #expect(
+            await fixture.bridge.handle(fixture.bind(route: route, thread: thread)).error == nil)
+        #expect(
+            await fixture.bridge.handle(fixture.codexRegistration(route: route, client: client))
+                .error == nil)
+        // A live route has nothing to resume.
+        #expect(
+            await fixture.bridge.handle(fixture.resume(route: route, thread: thread)).error != nil)
+        #expect(await fixture.bridge.handle(fixture.suspend(route: route)).error == nil)
+        let lost = "Connection lost. Run codex again to reconnect."
+        #expect(fixture.bridge.status(for: fixture.controllers[0].id) == lost)
+
+        var invalid = fixture.resume(route: route, thread: UUID().uuidString)
+        #expect(await fixture.bridge.handle(invalid).error != nil)
+        invalid = fixture.resume(route: CanvasLiveBridgeFixture.route(), thread: thread)
+        #expect(await fixture.bridge.handle(invalid).error != nil)
+        invalid = fixture.resume(route: route, thread: thread)
+        invalid.provider = "claude"
+        #expect(await fixture.bridge.handle(invalid).error != nil)
+        invalid = fixture.resume(route: route, thread: thread)
+        invalid.token = "wrong-capability"
+        #expect(await fixture.bridge.handle(invalid).error != nil)
+        invalid = fixture.resume(1, route: route, thread: thread)
+        #expect(await fixture.bridge.handle(invalid).error != nil)
+        #expect(fixture.bridge.status(for: fixture.controllers[0].id) == lost)
+
+        #expect(
+            await fixture.bridge.handle(fixture.resume(route: route, thread: thread)).error == nil)
+        #expect(fixture.bridge.status(for: fixture.controllers[0].id) == "Codex connected")
+        #expect(
+            await fixture.bridge.handle(
+                fixture.request(0, "list", client: client, provider: "codex")
+            )
+            .error == nil)
+    }
+
+    @Test("A changed conversation is final: resume never clears it, even after a transport loss")
+    func resumeRefusesSessionChange() async throws {
+        for transportFirst in [false, true] {
+            let fixture = try CanvasLiveBridgeFixture()
+            let route = CanvasLiveBridgeFixture.route()
+            let thread = UUID().uuidString
+            let client = UUID().uuidString
+            #expect(
+                await fixture.bridge.handle(fixture.bind(route: route, thread: thread)).error == nil
+            )
+            #expect(
+                await fixture.bridge.handle(
+                    fixture.codexRegistration(route: route, client: client)
+                ).error == nil)
+            if transportFirst {
+                #expect(await fixture.bridge.handle(fixture.suspend(route: route)).error == nil)
+            }
+            #expect(
+                await fixture.bridge.handle(fixture.suspend(route: route, reason: "sessionChanged"))
+                    .error == nil)
+            #expect(
+                await fixture.bridge.handle(fixture.resume(route: route, thread: thread)).error
+                    != nil)
+            #expect(
+                fixture.bridge.status(for: fixture.controllers[0].id)
+                    == "Session changed. Run codex again to reconnect.")
+        }
     }
 
     @Test("Only a new terminal capability clears suspension")
