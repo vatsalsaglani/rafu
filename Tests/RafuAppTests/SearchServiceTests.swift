@@ -183,6 +183,43 @@ func workspaceSearchCancellationNeverReturnsAResult() async throws {
     }
 }
 
+@Test("Workspace search over a nested tree returns every match with native relative paths")
+func workspaceSearchOverNestedTreeIsStable() async throws {
+    let root = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    var expected: [String] = []
+    for directory in 0..<4 {
+        let relativeDirectory = "Modul\(directory)/Größe日本語"
+        try FileManager.default.createDirectory(
+            at: root.appending(path: relativeDirectory), withIntermediateDirectories: true)
+        for file in 0..<5 {
+            let path = "\(relativeDirectory)/Datei\(file).txt"
+            try Data("zeile eins\nNadel hier\nund Nadel noch\n".utf8).write(
+                to: root.appending(path: path))
+            expected.append(path)
+        }
+        try Data("keine Treffer".utf8).write(
+            to: root.appending(path: "\(relativeDirectory)/Leer.txt"))
+    }
+
+    let result = try await WorkspaceSearchService().search(
+        WorkspaceSearchRequest(rootURL: root, query: "Nadel", options: [.caseSensitive]))
+
+    #expect(
+        result.groups.map(\.relativePath)
+            == expected.sorted {
+                $0.localizedStandardCompare($1) == .orderedAscending
+            })
+    #expect(result.totalMatchCount == expected.count * 2)
+    #expect(result.statistics.visitedFiles == expected.count + 4)
+    #expect(result.statistics.searchedFiles == expected.count + 4)
+    #expect(!result.isTruncated)
+    #expect(result.groups.allSatisfy { $0.matches.map(\.line) == [2, 3] })
+    // Kept paths are native Swift strings, not bridged `NSString` values.
+    #expect(result.groups.allSatisfy { $0.relativePath.isContiguousUTF8 })
+}
+
 private func temporaryDirectory() throws -> URL {
     let url = FileManager.default.temporaryDirectory.appending(
         path: UUID().uuidString,

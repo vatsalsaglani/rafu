@@ -453,28 +453,36 @@ actor WorkspaceSymbolIndex {
 
         var paths: [String] = []
         var visited = 0
-        while let url = enumerator.nextObject() as? URL {
+        // One pool per enumerated entry (the loop has no `await`); a kept
+        // path is copied to native storage.
+        walk: while true {
             visited += 1
             if visited.isMultiple(of: 2_000) { try Task.checkCancellation() }
-            guard let values = try? url.resourceValues(forKeys: keys) else { continue }
-            if values.isSymbolicLink == true {
-                enumerator.skipDescendants()
-                continue
-            }
-            if values.isDirectory == true {
-                if WorkspaceFileService.excludedDirectories.contains(url.lastPathComponent) {
+            let isFinished: Bool = withAutoreleasePool {
+                guard let url = enumerator.nextObject() as? URL else { return true }
+                guard let values = try? url.resourceValues(forKeys: keys) else { return false }
+                if values.isSymbolicLink == true {
                     enumerator.skipDescendants()
+                    return false
                 }
-                continue
+                if values.isDirectory == true {
+                    if WorkspaceFileService.excludedDirectories.contains(url.lastPathComponent) {
+                        enumerator.skipDescendants()
+                    }
+                    return false
+                }
+                guard values.isRegularFile == true, url.lastPathComponent != ".DS_Store" else {
+                    return false
+                }
+                guard paths.count < Self.maximumFiles else { return true }
+                let resolvedURL = url.resolvingSymlinksInPath().standardizedFileURL
+                var path = String(resolvedURL.path.dropFirst(resolvedRootURL.path.count))
+                    .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+                path.makeContiguousUTF8()
+                paths.append(path)
+                return false
             }
-            guard values.isRegularFile == true, url.lastPathComponent != ".DS_Store" else {
-                continue
-            }
-            guard paths.count < Self.maximumFiles else { break }
-            let resolvedURL = url.resolvingSymlinksInPath().standardizedFileURL
-            paths.append(
-                String(resolvedURL.path.dropFirst(resolvedRootURL.path.count)).trimmingCharacters(
-                    in: CharacterSet(charactersIn: "/")))
+            if isFinished { break walk }
         }
         return paths
     }

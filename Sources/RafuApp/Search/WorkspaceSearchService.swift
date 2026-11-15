@@ -1,4 +1,5 @@
 import Foundation
+import RafuCore
 
 actor WorkspaceSearchService {
     func search(_ request: WorkspaceSearchRequest) async throws -> WorkspaceSearchResult {
@@ -24,7 +25,7 @@ actor WorkspaceSearchService {
         for file in preview.files {
             try Task.checkCancellation()
             let data = try Data(contentsOf: file.fileURL, options: [.mappedIfSafe])
-            let currentVersion = try version(for: file.fileURL, data: data)
+            let currentVersion = try Self.version(for: file.fileURL, data: data)
             guard currentVersion == file.expectedVersion else {
                 throw WorkspaceSearchError.replacementConflict(relativePath: file.relativePath)
             }
@@ -56,7 +57,8 @@ actor WorkspaceSearchService {
         for write in prepared {
             try Task.checkCancellation()
             let currentData = try Data(contentsOf: write.fileURL, options: [.mappedIfSafe])
-            guard try version(for: write.fileURL, data: currentData) == write.expectedVersion else {
+            guard try Self.version(for: write.fileURL, data: currentData) == write.expectedVersion
+            else {
                 throw WorkspaceSearchError.replacementConflict(relativePath: write.relativePath)
             }
             try write.data.write(to: write.fileURL, options: .atomic)
@@ -116,117 +118,127 @@ actor WorkspaceSearchService {
         var totalMatches = 0
         var isTruncated = false
 
-        while let url = enumerator.nextObject() as? URL {
+        // One pool per enumerated file: the mapped data, the decoded text, and
+        // the bridged preview strings are freed here, not when the whole scan
+        // ends (the loop has no `await`).
+        scanLoop: while true {
             try Task.checkCancellation()
-            let values = try? url.resourceValues(forKeys: Set(keys))
-            let relativePath = relativePath(
-                for: url.resolvingSymlinksInPath().standardizedFileURL,
-                rootURL: rootURL
-            )
-            let presentationURL = presentationRootURL.appending(path: relativePath)
-
-            if values?.isSymbolicLink == true {
-                statistics.skippedSymlinks += 1
-                enumerator.skipDescendants()
-                continue
-            }
-            if isIgnored(
-                url: url,
-                relativePath: relativePath,
-                request: request
-            ) {
-                statistics.skippedIgnoredItems += 1
-                if values?.isDirectory == true { enumerator.skipDescendants() }
-                continue
-            }
-            if excludeGlobs.contains(where: { $0.matches(relativePath: relativePath) }) {
-                statistics.skippedIgnoredItems += 1
-                if values?.isDirectory == true { enumerator.skipDescendants() }
-                continue
-            }
-            if values?.isDirectory == true { continue }
-            guard values?.isRegularFile == true else { continue }
-            // Includes never prune directories: a directory that misses an
-            // include glob can still contain files that match it.
-            if !includeGlobs.isEmpty,
-                !includeGlobs.contains(where: { $0.matches(relativePath: relativePath) })
-            {
-                statistics.skippedIgnoredItems += 1
-                continue
-            }
-
-            statistics.visitedFiles += 1
-            if statistics.visitedFiles > max(0, request.limits.maximumFiles) {
-                isTruncated = true
-                break
-            }
-            if let size = values?.fileSize, size > request.limits.maximumFileBytes {
-                statistics.skippedLargeFiles += 1
-                continue
-            }
-
-            guard let data = try? Data(contentsOf: url, options: [.mappedIfSafe]) else {
-                statistics.skippedUnreadableFiles += 1
-                continue
-            }
-            guard !isBinary(data), let text = String(data: data, encoding: .utf8) else {
-                statistics.skippedBinaryFiles += 1
-                continue
-            }
-            statistics.searchedFiles += 1
-
-            let perFileLimit = min(
-                max(0, request.limits.maximumMatchesPerFile),
-                max(0, max(0, request.limits.maximumTotalMatches) - totalMatches)
-            )
-            if perFileLimit == 0 {
-                isTruncated = true
-                break
-            }
-            let candidateMatches = try pattern.matches(in: text, limit: perFileLimit + 1)
-            let fileIsTruncated = candidateMatches.count > perFileLimit
-            let acceptedMatches = Array(candidateMatches.prefix(perFileLimit))
-            guard !acceptedMatches.isEmpty else { continue }
-
-            let version = try version(for: presentationURL, data: data)
-            let searchMatches = acceptedMatches.map {
-                searchMatch(
-                    from: $0,
-                    text: text,
-                    maximumPreviewCharacters: max(0, request.limits.maximumPreviewCharacters)
+            let step: ScanStep = try withAutoreleasePool {
+                guard let url = enumerator.nextObject() as? URL else { return .stop }
+                let values = try? url.resourceValues(forKeys: Set(keys))
+                let relativePath = Self.relativePath(
+                    for: url.resolvingSymlinksInPath().standardizedFileURL,
+                    rootURL: rootURL
                 )
-            }
-            groups.append(
-                WorkspaceSearchFileGroup(
-                    fileURL: presentationURL,
-                    relativePath: relativePath,
-                    version: version,
-                    matches: searchMatches,
-                    isTruncated: fileIsTruncated
-                ))
+                let presentationURL = presentationRootURL.appending(path: relativePath)
 
-            if replacementTemplate != nil {
-                let edits = acceptedMatches.map {
-                    replacementEdit(
+                if values?.isSymbolicLink == true {
+                    statistics.skippedSymlinks += 1
+                    enumerator.skipDescendants()
+                    return .next
+                }
+                if Self.isIgnored(
+                    url: url,
+                    relativePath: relativePath,
+                    request: request
+                ) {
+                    statistics.skippedIgnoredItems += 1
+                    if values?.isDirectory == true { enumerator.skipDescendants() }
+                    return .next
+                }
+                if excludeGlobs.contains(where: { $0.matches(relativePath: relativePath) }) {
+                    statistics.skippedIgnoredItems += 1
+                    if values?.isDirectory == true { enumerator.skipDescendants() }
+                    return .next
+                }
+                if values?.isDirectory == true { return .next }
+                guard values?.isRegularFile == true else { return .next }
+                // Includes never prune directories: a directory that misses an
+                // include glob can still contain files that match it.
+                if !includeGlobs.isEmpty,
+                    !includeGlobs.contains(where: { $0.matches(relativePath: relativePath) })
+                {
+                    statistics.skippedIgnoredItems += 1
+                    return .next
+                }
+
+                statistics.visitedFiles += 1
+                if statistics.visitedFiles > max(0, request.limits.maximumFiles) {
+                    isTruncated = true
+                    return .stop
+                }
+                if let size = values?.fileSize, size > request.limits.maximumFileBytes {
+                    statistics.skippedLargeFiles += 1
+                    return .next
+                }
+
+                guard let data = try? Data(contentsOf: url, options: [.mappedIfSafe]) else {
+                    statistics.skippedUnreadableFiles += 1
+                    return .next
+                }
+                guard !Self.isBinary(data), let text = String(data: data, encoding: .utf8) else {
+                    statistics.skippedBinaryFiles += 1
+                    return .next
+                }
+                statistics.searchedFiles += 1
+
+                let perFileLimit = min(
+                    max(0, request.limits.maximumMatchesPerFile),
+                    max(0, max(0, request.limits.maximumTotalMatches) - totalMatches)
+                )
+                if perFileLimit == 0 {
+                    isTruncated = true
+                    return .stop
+                }
+                let candidateMatches = try pattern.matches(in: text, limit: perFileLimit + 1)
+                let fileIsTruncated = candidateMatches.count > perFileLimit
+                let acceptedMatches = Array(candidateMatches.prefix(perFileLimit))
+                guard !acceptedMatches.isEmpty else { return .next }
+
+                let version = try Self.version(for: presentationURL, data: data)
+                let searchMatches = acceptedMatches.map {
+                    Self.searchMatch(
                         from: $0,
                         text: text,
-                        maximumPreviewCharacters: max(0, request.limits.maximumPreviewCharacters)
+                        maximumPreviewCharacters: max(
+                            0, request.limits.maximumPreviewCharacters)
                     )
                 }
-                replacements.append(
-                    WorkspaceReplacementFilePreview(
+                groups.append(
+                    WorkspaceSearchFileGroup(
                         fileURL: presentationURL,
                         relativePath: relativePath,
-                        expectedVersion: version,
-                        edits: edits
+                        version: version,
+                        matches: searchMatches,
+                        isTruncated: fileIsTruncated
                     ))
-            }
 
-            totalMatches += acceptedMatches.count
-            if fileIsTruncated || totalMatches >= max(0, request.limits.maximumTotalMatches) {
-                isTruncated = true
-                break
+                if replacementTemplate != nil {
+                    let edits = acceptedMatches.map {
+                        Self.replacementEdit(
+                            from: $0,
+                            text: text,
+                            maximumPreviewCharacters: max(
+                                0, request.limits.maximumPreviewCharacters)
+                        )
+                    }
+                    replacements.append(
+                        WorkspaceReplacementFilePreview(
+                            fileURL: presentationURL,
+                            relativePath: relativePath,
+                            expectedVersion: version,
+                            edits: edits
+                        ))
+                }
+
+                totalMatches += acceptedMatches.count
+                if fileIsTruncated || totalMatches >= max(0, request.limits.maximumTotalMatches) {
+                    isTruncated = true
+                    return .stop
+                }
+                return .next
             }
+            if case .stop = step { break scanLoop }
         }
 
         groups.sort {
@@ -246,7 +258,7 @@ actor WorkspaceSearchService {
         )
     }
 
-    private func isIgnored(
+    private static func isIgnored(
         url: URL,
         relativePath: String,
         request: WorkspaceSearchRequest
@@ -257,26 +269,29 @@ actor WorkspaceSearchService {
         }
     }
 
-    private func isBinary(_ data: Data) -> Bool {
+    private static func isBinary(_ data: Data) -> Bool {
         data.prefix(8_192).contains(0)
     }
 
-    private func relativePath(for url: URL, rootURL: URL) -> String {
-        String(url.path.dropFirst(rootURL.path.count)).trimmingCharacters(
+    private static func relativePath(for url: URL, rootURL: URL) -> String {
+        // Native storage: a kept bridged string pins its `NSString`.
+        var path = String(url.path.dropFirst(rootURL.path.count)).trimmingCharacters(
             in: CharacterSet(charactersIn: "/")
         )
+        path.makeContiguousUTF8()
+        return path
     }
 
-    private func version(for url: URL, data: Data) throws -> WorkspaceFileVersion {
+    private static func version(for url: URL, data: Data) throws -> WorkspaceFileVersion {
         let values = try url.resourceValues(forKeys: [.contentModificationDateKey])
         return WorkspaceFileVersion(
             byteCount: data.count,
             modificationDate: values.contentModificationDate,
-            contentFingerprint: fingerprint(data)
+            contentFingerprint: Self.fingerprint(data)
         )
     }
 
-    private func fingerprint(_ data: Data) -> UInt64 {
+    private static func fingerprint(_ data: Data) -> UInt64 {
         var hash: UInt64 = 14_695_981_039_346_656_037
         for byte in data {
             hash ^= UInt64(byte)
@@ -285,12 +300,12 @@ actor WorkspaceSearchService {
         return hash
     }
 
-    private func searchMatch(
+    private static func searchMatch(
         from match: TextSearchMatch,
         text: String,
         maximumPreviewCharacters: Int
     ) -> WorkspaceSearchMatch {
-        let details = lineDetails(
+        let details = Self.lineDetails(
             for: match.range,
             in: text,
             maximumPreviewCharacters: maximumPreviewCharacters
@@ -303,13 +318,13 @@ actor WorkspaceSearchService {
         )
     }
 
-    private func replacementEdit(
+    private static func replacementEdit(
         from match: TextSearchMatch,
         text: String,
         maximumPreviewCharacters: Int
     ) -> WorkspaceReplacementEdit {
         let source = text as NSString
-        let details = lineDetails(
+        let details = Self.lineDetails(
             for: match.range,
             in: text,
             maximumPreviewCharacters: maximumPreviewCharacters
@@ -325,11 +340,11 @@ actor WorkspaceSearchService {
             replacement: match.replacement,
             line: details.line,
             originalPreview: details.preview,
-            replacementPreview: clipped(replacedLine, maximum: maximumPreviewCharacters)
+            replacementPreview: Self.clipped(replacedLine, maximum: maximumPreviewCharacters)
         )
     }
 
-    private func lineDetails(
+    private static func lineDetails(
         for range: NSRange,
         in text: String,
         maximumPreviewCharacters: Int
@@ -351,16 +366,22 @@ actor WorkspaceSearchService {
         return LineDetails(
             line: line,
             column: column,
-            preview: clipped(fullLine, maximum: maximumPreviewCharacters),
+            preview: Self.clipped(fullLine, maximum: maximumPreviewCharacters),
             fullPreview: fullLine,
             rangeInFullPreview: rangeInLine
         )
     }
 
-    private func clipped(_ text: String, maximum: Int) -> String {
+    private static func clipped(_ text: String, maximum: Int) -> String {
         guard text.count > maximum else { return text }
         return String(text.prefix(maximum)) + "…"
     }
+}
+
+/// What the scan loop does after one pooled step.
+private enum ScanStep {
+    case next
+    case stop
 }
 
 private nonisolated struct ScanOutput: Sendable {

@@ -59,6 +59,47 @@ func fileNameIndexFallsBackForNonGitWorkspaces() async throws {
     #expect(Set(all) == ["Main.swift", "Sources/Nested.swift"])
 }
 
+@Test("The enumerator fallback returns the same paths over a nested tree, as native strings")
+func fileNameIndexEnumerationOverNestedTreeIsStable() async throws {
+    let root = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let fileManager = FileManager.default
+    var expected = Set<String>()
+    // More than 2,000 entries so the periodic cancellation check runs too.
+    for directory in 0..<9 {
+        let relativeDirectory = "Modul\(directory)/Größe日本語/unterordner"
+        try fileManager.createDirectory(
+            at: root.appending(path: relativeDirectory), withIntermediateDirectories: true)
+        for file in 0..<240 {
+            let path = "\(relativeDirectory)/LangerDateiname\(file).swift"
+            try write("x", to: root.appending(path: path))
+            expected.insert(path)
+        }
+    }
+    try write("top", to: root.appending(path: "Top.swift"))
+    expected.insert("Top.swift")
+    // An excluded directory and `.DS_Store` never appear.
+    try fileManager.createDirectory(
+        at: root.appending(path: "node_modules/pkg"), withIntermediateDirectories: true)
+    try write("junk", to: root.appending(path: "node_modules/pkg/index.js"))
+    try write("noise", to: root.appending(path: "Modul0/.DS_Store"))
+
+    let index = WorkspaceFileNameIndex()
+    await index.build(rootURL: root)
+
+    guard case .ready(let count, let isTruncated) = await index.currentState else {
+        Issue.record("Expected a ready state")
+        return
+    }
+    #expect(!isTruncated)
+    #expect(count == expected.count)
+    let all = try await index.query(term: "", limit: 5_000)
+    #expect(Set(all) == expected)
+    #expect(all.count == expected.count)
+    // Kept paths are native Swift strings, not bridged `NSString` values.
+    #expect(all.allSatisfy { $0.isContiguousUTF8 })
+}
+
 @Test("The index caps enumeration and reports truncation")
 func fileNameIndexReportsTruncation() async throws {
     let root = try makeTemporaryDirectory()
