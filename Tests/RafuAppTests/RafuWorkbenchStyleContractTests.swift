@@ -13,26 +13,34 @@ struct RafuWorkbenchStyleContractTests {
         // 4 grew it to 12 for a deeper shadow (radius 8, y 4). The window gap
         // tightening (2026-11-15) made it per edge, so the card gets more
         // room: top 12 → 6, leading 12 → 6, trailing 12 → 8, bottom 12.
-        #expect(RafuMetrics.deckInsetTop == 6)
-        #expect(RafuMetrics.deckInsetLeading == 6)
+        // Window gap tightening 2 (the user still saw the old gaps): the
+        // split handle stopped taking layout width, so top 6 → 2, leading
+        // 6 (+ handle 10) → 8, and a collapsed sidebar's rail-icon-to-card
+        // gap 13 → 5.
+        #expect(RafuMetrics.deckInsetTop == 2)
+        #expect(RafuMetrics.deckInsetLeading == 8)
         #expect(RafuMetrics.deckInsetTrailing == 8)
         #expect(RafuMetrics.deckInsetBottom == 12)
+        #expect(RafuMetrics.deckGapCollapsedRail == 5)
         #expect(RafuMetrics.editorGroupGapTarget == 4)
         #expect(RafuMetrics.radiusWorkbenchDeck == 12)
         #expect(RafuMetrics.radiusEditorGroup == 5)
         #expect(RafuMetrics.deckShadowRadius == 8)
         #expect(RafuMetrics.deckShadowY == 4)
-        // The shadow's reach on each edge must stay inside that edge's
-        // gutter, or the window edge, status bar, or rail would cut it.
+        // The shadow's reach on the bottom, trailing, and open-sidebar
+        // edges must stay inside that edge's gutter, or the status bar,
+        // window edge, or opaque sidebar would cut it.
         let shadow = RafuMetrics.deckShadowRadius
         let offset = RafuMetrics.deckShadowY
         #expect(shadow + offset <= RafuMetrics.deckInsetBottom)
-        #expect(shadow - offset <= RafuMetrics.deckInsetTop)
         #expect(shadow <= RafuMetrics.deckInsetTrailing)
-        // Leading: the split handle's hit area is always part of that gutter.
-        #expect(
-            shadow
-                <= max(RafuMetrics.deckInsetLeading, WorkbenchSplitHandle.hitAreaWidth))
+        #expect(shadow <= RafuMetrics.deckInsetLeading)
+        // Top: the shadow spills under the titlebar row (drawn earlier, so
+        // the spill paints over it), but stays below the row's 20 pt search
+        // field, which leaves (28 - 20) / 2 = 4 pt under it.
+        let topSpill = shadow - offset - RafuMetrics.deckInsetTop
+        #expect(topSpill == 2)
+        #expect(topSpill <= (WindowTitlebarRow.height - 20) / 2)
         #expect(RafuMetrics.radiusWorkbenchTab == 10)
         // Round 3 widened the selected tab's shadow (3 → 4) so it lifts off
         // the Khadi shelf; it must still fit inside the shelf's breathing
@@ -593,8 +601,11 @@ struct RafuWorkbenchStyleContractTests {
         #expect(idle.contains("Color.clear"))
         #expect(!idle.contains(".fill("))
         #expect(!seam.contains("borderSubtle"))
-        // Hit area, cursor, and VoiceOver adjustment are unchanged.
-        #expect(source.contains("static let hitAreaWidth: CGFloat = 10"))
+        // Cursor and VoiceOver adjustment are unchanged; the hit area's
+        // width now comes from `WorkbenchDeckLane.handleHitArea` (window gap
+        // tightening 2), not a fixed 10 pt.
+        #expect(source.contains(".frame(width: hitAreaWidth)"))
+        #expect(source.contains(".offset(x: -WorkbenchDeckLane.handleDeckOverlap / 2)"))
         #expect(source.contains("NSCursor.resizeLeftRight.push()"))
         #expect(source.contains(".accessibilityAdjustableAction(handleAccessibilityAdjustment)"))
     }

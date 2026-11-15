@@ -20,22 +20,31 @@ nonisolated enum RafuMetrics {
     // redesign). These values describe structure, not theme color, and
     // deliberately leave radiusPanel intact.
     /// The frame gutter round the deck card, per edge (`WorkbenchDeckLane`).
-    /// History: 8 → 10 (round 2) → 12 on every side (round 4). The window
-    /// gap tightening (2026-11-15) gives the card more room on the edges the
-    /// user marked, keeping only what the deck shadow (radius 8, y 4) needs
-    /// on each edge:
-    /// - top 6: the shadow reaches `radius - y` = 4 above the card;
-    /// - leading 6: beside an open sidebar the split handle's 10 pt hit
-    ///   area adds to it (16 in total, shadow 8); beside a collapsed sidebar
-    ///   the handle alone is the gutter (10);
+    /// History: 8 → 10 (round 2) → 12 on every side (round 4) → per edge
+    /// 6/6/8/12 (window gap tightening, 2026-11-15) → the values below
+    /// (window gap tightening 2, same day: the user still saw the old gaps).
+    /// The deck shadow (radius 8, y 4) decides each edge:
+    /// - top 2: the shadow reaches `radius - y` = 4 above the card, so 2 pt
+    ///   of it spills under the titlebar row. The row is drawn before the
+    ///   workbench row, so the spill paints over it and is not cut; it stays
+    ///   below the row's 20 pt search field.
+    /// - leading 8 beside an open sidebar: the shadow reaches `radius` = 8
+    ///   sideways, and the opaque sidebar is drawn above the deck. The split
+    ///   handle takes no layout width; it is an overlay on the seam.
+    /// - beside a collapsed sidebar: `deckGapCollapsedRail` instead (below).
     /// - trailing 8: the shadow reaches `radius` = 8 sideways, and the window
     ///   edge would clip anything past it;
     /// - bottom 12: the shadow reaches `radius + y` = 12 below the card,
     ///   where the opaque status bar would cut it.
-    static let deckInsetTop: CGFloat = 6
-    static let deckInsetLeading: CGFloat = 6
+    static let deckInsetTop: CGFloat = 2
+    static let deckInsetLeading: CGFloat = 8
     static let deckInsetTrailing: CGFloat = 8
     static let deckInsetBottom: CGFloat = 12
+    /// Rail icon trailing edge → deck card while the sidebar is collapsed
+    /// (was 13: the rail's 3 pt deck side plus the handle's 10 pt). The
+    /// rail paints no fill of its own (the workbench row does), so the deck
+    /// shadow shows under the rail's empty strip instead of being cut.
+    static let deckGapCollapsedRail: CGFloat = 5
     static let editorGroupGapTarget: CGFloat = 4
     static let radiusWorkbenchDeck: CGFloat = 12
     static let radiusEditorGroup: CGFloat = 5

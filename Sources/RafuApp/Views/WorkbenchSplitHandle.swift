@@ -39,23 +39,25 @@ nonisolated enum WorkbenchSidebarResize {
     }
 }
 
-/// The gutter around the workbench deck card: `RafuMetrics.deckInset*` on
-/// each edge. Beside an open sidebar the split handle's hit area adds to the
-/// leading gutter, which separates the flat sidebar from the card. With the
-/// sidebar collapsed, the handle stays (so a drag can reopen the sidebar)
-/// and its hit area becomes part of the gutter: the leading padding shrinks
-/// by the handle's width, never below zero. With the 6 pt leading inset
-/// that leaves the handle's 10 pt as the whole rail-to-card gap (window gap
-/// tightening; before, 12 pt).
+/// The gutter around the workbench deck card, and where the split handle
+/// sits on the seam beside it. The handle takes no layout width (window gap
+/// tightening 2): it is an overlay across the seam, so the gutter alone sets
+/// the gap.
+/// - Open sidebar: the leading padding is `RafuMetrics.deckInsetLeading`
+///   (8; was 6 + the handle's 10 = 16).
+/// - Collapsed sidebar: the rail's empty deck-side strip plus the leading
+///   padding make `RafuMetrics.deckGapCollapsedRail` (5; was 3 + 10 = 13),
+///   so the padding is that gap less the strip, never below zero.
 nonisolated enum WorkbenchDeckLane {
     static func padding(
         isSidebarCollapsed: Bool,
-        handleWidth: CGFloat,
-        insets: EdgeInsets = WorkbenchDeckLane.insets
+        railDeckSideInset: CGFloat,
+        insets: EdgeInsets = WorkbenchDeckLane.insets,
+        collapsedGap: CGFloat = RafuMetrics.deckGapCollapsedRail
     ) -> EdgeInsets {
         var padding = insets
         if isSidebarCollapsed {
-            padding.leading = max(0, insets.leading - handleWidth)
+            padding.leading = max(0, collapsedGap - railDeckSideInset)
         }
         return padding
     }
@@ -66,14 +68,48 @@ nonisolated enum WorkbenchDeckLane {
         bottom: RafuMetrics.deckInsetBottom,
         trailing: RafuMetrics.deckInsetTrailing
     )
+
+    /// How far the handle's invisible hit area reaches into the deck card,
+    /// past the visible gap, so the seam stays easy to grab now that the
+    /// gap is narrow.
+    static let handleDeckOverlap: CGFloat = 3
+
+    /// The handle's hit area across the seam. `x` is measured from the
+    /// leading pane's trailing edge (the sidebar's, or the rail's while the
+    /// sidebar is collapsed); a negative `x` starts inside that pane.
+    struct HandleHitArea: Equatable {
+        let x: CGFloat
+        let width: CGFloat
+    }
+
+    /// Open: from the sidebar edge across the gap and `handleDeckOverlap`
+    /// into the card (it never covers the sidebar's own scroller).
+    /// Collapsed: from the rail icons' trailing edge (the rail's empty
+    /// deck-side strip) across the gap and into the card — never over an
+    /// icon.
+    static func handleHitArea(
+        isSidebarCollapsed: Bool,
+        railDeckSideInset: CGFloat,
+        insets: EdgeInsets = WorkbenchDeckLane.insets,
+        collapsedGap: CGFloat = RafuMetrics.deckGapCollapsedRail
+    ) -> HandleHitArea {
+        let lane = padding(
+            isSidebarCollapsed: isSidebarCollapsed, railDeckSideInset: railDeckSideInset,
+            insets: insets, collapsedGap: collapsedGap)
+        let strip = isSidebarCollapsed ? railDeckSideInset : 0
+        return HandleHitArea(
+            x: -strip, width: strip + lane.leading + handleDeckOverlap)
+    }
 }
 
 /// The explicit boundary between the left sidebar and the workbench deck
 /// (window redesign phase 3). It draws nothing at rest and a short grab bar
 /// on hover or drag, inside a wider hit area; it resizes `session.sidebarWidth` live while dragging, and collapses
-/// or reopens the sidebar at `WorkbenchSidebarResize`'s thresholds. It stays
-/// present at the collapsed edge (right after the Activity Rail) so a drag
-/// outward can reopen the sidebar without a separate affordance.
+/// or reopens the sidebar at `WorkbenchSidebarResize`'s thresholds. It is an
+/// overlay on the seam, not a layout child, so it adds no width to the gap
+/// (`WorkbenchDeckLane.handleHitArea`). It stays present at the collapsed
+/// edge (beside the Activity Rail) so a drag outward can reopen the sidebar
+/// without a separate affordance.
 struct WorkbenchSplitHandle: View {
     @Bindable var session: WorkspaceSession
     @Environment(\.rafuTheme) private var theme
@@ -86,16 +122,24 @@ struct WorkbenchSplitHandle: View {
     /// threshold.
     @State private var dragStartWidth: Double?
 
-    /// The hit area's full width; the hover grab bar is centred inside it.
-    static let hitAreaWidth: CGFloat = 10
+    /// The hit area's width (`WorkbenchDeckLane.handleHitArea`); the hover
+    /// grab bar is centred on the visible gap inside it.
+    let hitAreaWidth: CGFloat
     private static let grabBarSize = CGSize(width: 3, height: 28)
+
+    /// Explicit init: the private state would otherwise make the synthesized
+    /// memberwise init private.
+    init(session: WorkspaceSession, hitAreaWidth: CGFloat) {
+        self.session = session
+        self.hitAreaWidth = hitAreaWidth
+    }
 
     var body: some View {
         ZStack {
             Color.clear
             seam
         }
-        .frame(width: Self.hitAreaWidth)
+        .frame(width: hitAreaWidth)
         .frame(maxHeight: .infinity)
         .contentShape(Rectangle())
         // A window-move surface here would fight the resize drag; this
@@ -120,6 +164,9 @@ struct WorkbenchSplitHandle: View {
             RoundedRectangle(cornerRadius: 1.5, style: .continuous)
                 .fill(theme.palette.borderStrong)
                 .frame(width: Self.grabBarSize.width, height: Self.grabBarSize.height)
+                // Centred on the visible gap, not on the part of the hit
+                // area that reaches into the card.
+                .offset(x: -WorkbenchDeckLane.handleDeckOverlap / 2)
         } else {
             // Idle: nothing drawn. The deck card's own hairline is the one
             // line between the sidebar and the content; a second 1 pt seam

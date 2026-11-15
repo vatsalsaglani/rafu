@@ -26,7 +26,9 @@ struct WorkbenchDeckPresentationTests {
         // a plain HStack. The deck itself still owns no inner split: there
         // is no right panel for it to host.
         #expect(!windowContent.contains("HSplitView {"))
-        #expect(windowContent.contains("WorkbenchSplitHandle(session: session)"))
+        #expect(
+            windowContent.contains(
+                "WorkbenchSplitHandle(session: session, hitAreaWidth: hitArea.width)"))
         #expect(deckLane.contains("editorCanvas"))
         #expect(!deckLane.contains("WorkspaceUtilityPanelView"))
     }
@@ -73,46 +75,79 @@ struct WorkbenchDeckPresentationTests {
 
         // Design polish round 2: 8 → 10 so the stronger deck shadow fits;
         // round 4: 10 → 12 for the deeper shadow; window gap tightening:
-        // per edge, top 6, leading 6, trailing 8, bottom 12.
+        // per edge, top 6, leading 6, trailing 8, bottom 12; window gap
+        // tightening 2: top 2, leading 8 (the handle no longer adds 10).
         #expect(
             WorkbenchDeckLane.insets
-                == EdgeInsets(top: 6, leading: 6, bottom: 12, trailing: 8))
+                == EdgeInsets(top: 2, leading: 8, bottom: 12, trailing: 8))
         #expect(deckLane.contains("isSidebarCollapsed: session.isSidebarCollapsed"))
-        #expect(deckLane.contains("handleWidth: WorkbenchSplitHandle.hitAreaWidth"))
+        #expect(deckLane.contains("railDeckSideInset: WorkspaceActivityRail.deckSideInset"))
         #expect(Self.occurrences(of: ".padding(", in: deckLane) == 2)
         #expect(padding.lowerBound < backing.lowerBound)
     }
 
-    @Test("A collapsed sidebar leaves only the split handle between the rail and the card")
-    @MainActor
-    func collapsedGutterIsTheHandle() {
-        let handle = WorkbenchSplitHandle.hitAreaWidth
-        let insets = WorkbenchDeckLane.insets
-        let open = WorkbenchDeckLane.padding(isSidebarCollapsed: false, handleWidth: handle)
-        #expect(open == insets)
-        // Sidebar to card: handle 10 + leading 6 = 16 (was 10 + 12 = 22).
-        #expect(handle + open.leading == 16)
+    @Test("The split handle is an overlay on the seam and takes no layout width")
+    func handleIsAnOverlay() throws {
+        let source = try Self.source("Sources/RafuApp/Views/WorkspaceWindowView.swift")
+        let workbench = try Self.section(
+            in: source,
+            from: "private var workbenchContent: some View",
+            through: "private var editorCanvas: some View"
+        )
+        let flat = workbench.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        // Not an HStack child between the sidebar and the deck any more.
+        let row = try Self.section(
+            in: workbench, from: "HStack(spacing: 0) {", through: "WorkbenchDeckSurface {")
+        #expect(!row.contains("WorkbenchSplitHandle("))
+        // One `.app` frame fill under the whole row, then the handle overlay.
+        #expect(flat.contains(".overlay(alignment: .topLeading) { sidebarSplitHandle }"))
+        let fill = try #require(workbench.range(of: ".rafuFrameSurface(.app)"))
+        let overlay = try #require(workbench.range(of: "{ sidebarSplitHandle }"))
+        #expect(fill.lowerBound < overlay.lowerBound)
+        #expect(flat.contains(".offset(x: paneEdge + hitArea.x)"))
+    }
 
-        // Collapsed: the handle's hit area is part of the gutter. With a
-        // leading inset below the handle's width, the handle alone is the
-        // rail-to-card gap (10, was 12); the other edges do not change.
-        let collapsed = WorkbenchDeckLane.padding(isSidebarCollapsed: true, handleWidth: handle)
-        #expect(collapsed.leading == 0)
-        #expect(handle + collapsed.leading == 10)
+    @Test("Seam gaps: 5 pt beside a collapsed sidebar's rail, 8 pt beside an open one")
+    func seamGapMath() {
+        let strip = WorkspaceActivityRail.deckSideInset
+        let insets = WorkbenchDeckLane.insets
+
+        // Open: the gutter alone is the sidebar-to-card gap (8; was the
+        // handle's 10 + leading 6 = 16).
+        let open = WorkbenchDeckLane.padding(isSidebarCollapsed: false, railDeckSideInset: strip)
+        #expect(open == insets)
+        #expect(open.leading == 8)
+
+        // Collapsed: rail strip 3 + padding 2 = 5 from the icons' trailing
+        // edge to the card (was 3 + the handle's 10 = 13). The other edges
+        // do not change.
+        let collapsed = WorkbenchDeckLane.padding(
+            isSidebarCollapsed: true, railDeckSideInset: strip)
+        #expect(collapsed.leading == 2)
+        #expect(strip + collapsed.leading == RafuMetrics.deckGapCollapsedRail)
         #expect(collapsed.top == insets.top)
         #expect(collapsed.bottom == insets.bottom)
         #expect(collapsed.trailing == insets.trailing)
+        // A strip wider than the gap never yields negative padding.
+        #expect(
+            WorkbenchDeckLane.padding(isSidebarCollapsed: true, railDeckSideInset: 9).leading
+                == 0)
 
-        // A leading inset wider than the handle keeps the remainder.
-        let wide = WorkbenchDeckLane.padding(
-            isSidebarCollapsed: true, handleWidth: handle,
-            insets: EdgeInsets(top: 12, leading: 12, bottom: 12, trailing: 12))
-        #expect(wide.leading == 2)
-        // A handle wider than the inset never yields negative padding.
-        let narrow = WorkbenchDeckLane.padding(
-            isSidebarCollapsed: true, handleWidth: 20,
-            insets: EdgeInsets(top: 6, leading: 6, bottom: 6, trailing: 6))
-        #expect(narrow.leading == 0)
+        // Hit area, measured from the leading pane's trailing edge.
+        // Open: sidebar edge → 3 pt into the card (0…11), not over the
+        // sidebar's scroller.
+        let openHit = WorkbenchDeckLane.handleHitArea(
+            isSidebarCollapsed: false, railDeckSideInset: strip)
+        #expect(openHit == .init(x: 0, width: 11))
+        // Collapsed: rail icons' edge → 3 pt into the card (-3…5), never
+        // over an icon; still grabbable while the visible gap is 5 pt.
+        let collapsedHit = WorkbenchDeckLane.handleHitArea(
+            isSidebarCollapsed: true, railDeckSideInset: strip)
+        #expect(collapsedHit == .init(x: -3, width: 8))
+        #expect(collapsedHit.x == -strip)
+        #expect(
+            collapsedHit.x + collapsedHit.width
+                == collapsed.leading + WorkbenchDeckLane.handleDeckOverlap)
     }
 
     @Test("Native split geometry and interaction modifiers stay authoritative")
@@ -235,7 +270,7 @@ struct WorkbenchDeckPresentationTests {
         let workbench = try Self.section(
             in: window,
             from: "private var workbenchContent: some View",
-            through: "WorkbenchSplitHandle(session: session)"
+            through: "WorkbenchDeckSurface {"
         )
         let flatWorkbench = workbench.split(whereSeparator: \.isWhitespace).joined(
             separator: " ")

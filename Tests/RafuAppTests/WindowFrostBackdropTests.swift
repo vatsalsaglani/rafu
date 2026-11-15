@@ -59,7 +59,6 @@ struct WindowFrostBackdropTests {
         let expectations: [(String, String)] = [
             ("Sources/RafuApp/Views/WorkspaceTitlebarRow.swift", ".rafuFrameSurface(.app)"),
             ("Sources/RafuApp/Views/WorkspaceWindowView.swift", ".rafuFrameSurface(.app)"),
-            ("Sources/RafuApp/Views/WorkspaceNavigatorView.swift", ".rafuFrameSurface(.app)"),
             ("Sources/RafuApp/Views/WorkspaceNavigatorView.swift", ".rafuFrameSurface(.sidebar)"),
             ("Sources/RafuApp/Views/WorkspaceSidebarView.swift", ".rafuFrameSurface(.sidebar)"),
             ("Sources/RafuApp/Views/WorkspaceStatusBar.swift", ".rafuFrameSurface(.statusBar)"),
