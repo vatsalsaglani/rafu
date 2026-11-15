@@ -692,12 +692,35 @@ check below has been done by a person.
         fallback; Stat and Compare.
   - [ ] A second window shows the same view card (state is last write wins).
   - [ ] PNG export draws the card.
-  - [ ] Install for Claude Code writes `rafu-ensemble` and `rafu-view`; the
-        conflict prompt.
+  - [ ] Install for Claude Code writes `rafu-ensemble`, `rafu-view` and
+        `json-render-swift-use` (the third added 2026-11-15); the conflict prompt.
   - [ ] Memory with the 20-view fixture: under 40 MB above empty, under 2 MB per
         idle card.
   - [ ] Microphone: press "Allow Microphone…", then Rafu Lightning appears under
         Privacy ▸ Microphone.
+
+## Status (2026-11-15, agents find the view skills and the item shapes)
+
+Commit `f31d079`, merged by `6f428e6`. User report: a Codex agent could not find the
+skill that the `view_render` description named, so it read Rafu's Swift sources to
+learn prop shapes. Decision: ADR 0036 Amendment (2026-11-15). Details:
+`docs/references/view-tools-and-vocabulary.md` "Three skills, one install".
+
+- **Third bundled skill.** `json-render-swift-use` (upstream 0.22.0-alpha.3, commit
+  `a319217c950cc55de0b31f884e8c32877e2b09ee`; LICENSE and NOTICE unchanged) joins
+  `ConductorBundledSkillCatalog.skills`.
+- **Item shapes.** New `rafu-view/references/components.md`: exact props and one
+  validated example for each of the 17 components. `rafu-view` SKILL.md and the
+  `view_render` description name both skills. The vocabulary text is 6134 of 6144
+  bytes.
+- **Fix.** `examples.md` Stat intent `success` is now `good`.
+- **Tests.** New `AgentSkillBundleTests` (8 tests). Parallel mode: 523 tests in 40
+  suites and 3901 tests in 318 suites passed. No `--no-parallel` result recorded.
+- **Install is manual.** Skills install only on Install in Settings > Ensemble; no
+  refresh on launch. The coordinator copied the new files into `~/.claude/skills`
+  and `~/.codex/skills` for this user.
+- **Open check (manual, Rafu Lightning):** a fresh Codex or Claude Code agent
+  renders a view from the skills alone, without reading Rafu source.
 
 ## Status (2026-11-12, silent agent close and no Ensemble terminal limit)
 

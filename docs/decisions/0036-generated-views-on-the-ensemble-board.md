@@ -180,6 +180,26 @@ ordinary update (two honest undo steps). If the user removes the preview between
 "The view was removed before it finished." Props, bindings, state, terminal text and file contents never leave the
 app; candidate descriptions carry counts and titles only.
 
+## Amendment (2026-11-15): three bundled skills, one vendored third-party skill
+
+`ConductorBundledSkillCatalog.skills` now holds three skills: `rafu-ensemble`, `rafu-view` and
+`json-render-swift-use`. The third is the upstream `swift-json-render` skill, copied from release `0.22.0-alpha.3`,
+commit `a319217c950cc55de0b31f884e8c32877e2b09ee`, to `Sources/RafuApp/Resources/AgentSkills/json-render-swift-use/`.
+Reason: an agent in Codex could not find the skill that the `view_render` description named, so it read Rafu's Swift
+sources to learn the prop shapes (user report, 2026-11-15).
+
+- **Third-party licence handling.** The upstream `LICENSE` (Apache-2.0) and `NOTICE` are copied unchanged into the
+  skill folder. The upstream `install.md`, `upgrade.md`, `customising.md` and `examples/` are left out, because the
+  installer writes only the skill root and `references/`. The host, validate and action text in the kept files is
+  rewritten for Rafu. The copy is pinned to the commit above; a later upstream change is a manual re-copy, not a sync.
+- **Install stays explicit.** Skills install only when the user presses Install in Settings > Ensemble. There is no
+  refresh on launch, on purpose: Rafu makes no unasked write to `~/.claude` or `~/.codex`. A user who already
+  installed must press Install again to get new or changed skills.
+- **Rafu-owned item shapes.** `rafu-view/references/components.md` lists exact props and item shapes, with one
+  validated example, for each of the 17 Rafu components. The vocabulary text points to it ("ITEM SHAPES
+  (Array<unknown> props)"). The rule given to agents: do not read Rafu's source code; render a small spec and read
+  the validator error.
+
 ## Related
 
 - Code: `Sources/RafuApp/Canvas/GeneratedView/`,
