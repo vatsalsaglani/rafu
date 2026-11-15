@@ -116,14 +116,7 @@ struct GitPanelPresentationTests {
         #expect(parts.folder == "Sources/RafuApp/Views")
     }
 
-    // MARK: Composer (G7)
-
-    @Test("The commit caption counts staged files")
-    func commitCaption() {
-        #expect(GitCommitCaption.text(stagedCount: 0) == "Nothing staged")
-        #expect(GitCommitCaption.text(stagedCount: 1) == "Commits 1 file")
-        #expect(GitCommitCaption.text(stagedCount: 2) == "Commits 2 files")
-    }
+    // Composer (G7): see `GitCommitComposerPresentationTests` below.
 
     // MARK: History (G10, G11)
 
@@ -343,5 +336,317 @@ struct GitPanelPresentationTests {
             path: "Demo.swift", originalPath: nil, isBinary: false, hunks: [hunk], rawPatch: "")
         let counts = GitDiffHeaderPresentation.lineCounts(for: diff)
         #expect(counts == GitDiffLineCounts(added: 2, deleted: 2))
+    }
+}
+
+// MARK: - Commit composer (G7, Option B)
+
+@Suite("Git commit composer presentation")
+struct GitCommitComposerPresentationTests {
+    private func presentation(
+        message: String = "",
+        staged: Int = 0,
+        stageable: Int = 0,
+        branch: String? = "main",
+        merge: Bool = false,
+        drafting: Bool = false,
+        busy: Bool = false,
+        descriptionFocused: Bool = false
+    ) -> GitCommitComposerPresentation {
+        GitCommitComposerPresentation(
+            .init(
+                message: message, stagedCount: staged, stageableCount: stageable, branch: branch,
+                isMergeInProgress: merge, isDrafting: drafting, isBusy: busy,
+                isDescriptionFocused: descriptionFocused))
+    }
+
+    // MARK: Split and join
+
+    @Test("A summary and a description round-trip through one message")
+    func roundTrip() {
+        let parts = GitCommitMessageParts(summary: "Fix the border", description: "Use 8 pt.")
+        #expect(parts.message == "Fix the border\n\nUse 8 pt.")
+        #expect(GitCommitMessageParts(message: parts.message) == parts)
+        for message in ["Fix", "Fix\n\nBody", "Fix\n\nLine 1\nLine 2", "Fix\n\n\nIndented"] {
+            #expect(GitCommitMessageParts(message: message).message == message)
+        }
+    }
+
+    @Test("A summary only has an empty description and no separator")
+    func summaryOnly() {
+        let parts = GitCommitMessageParts(message: "Fix the border")
+        #expect(parts.summary == "Fix the border")
+        #expect(parts.description.isEmpty)
+        #expect(parts.message == "Fix the border")
+    }
+
+    @Test("A description only keeps an empty summary")
+    func descriptionOnly() {
+        let parts = GitCommitMessageParts(summary: "", description: "Only a body")
+        #expect(parts.message == "\n\nOnly a body")
+        #expect(GitCommitMessageParts(message: parts.message) == parts)
+        #expect(!presentation(message: parts.message, staged: 1).canCommit)
+        #expect(presentation(message: parts.message, staged: 1).showsDescription)
+    }
+
+    @Test("Trailing spaces stay in both parts")
+    func trailingSpaces() {
+        let parts = GitCommitMessageParts(message: "Fix the  \n\nBody  ")
+        #expect(parts.summary == "Fix the  ")
+        #expect(parts.description == "Body  ")
+        #expect(
+            GitCommitMessageParts.message("Fix\n\nBody", replacingSummary: "Fix ")
+                == "Fix \n\nBody")
+    }
+
+    @Test("CRLF reads as LF")
+    func crlf() {
+        let parts = GitCommitMessageParts(message: "Fix\r\n\r\nLine 1\r\nLine 2\r\n")
+        #expect(parts.summary == "Fix")
+        #expect(parts.description == "Line 1\nLine 2\n")
+    }
+
+    @Test("AI text streams into the summary, then the description")
+    func streaming() {
+        let deltas = ["Fix the", " border\n", "\nThe", " card used 12 pt."]
+        var message = ""
+        var seen: [GitCommitMessageParts] = []
+        for delta in deltas {
+            message += delta
+            seen.append(GitCommitMessageParts(message: message))
+        }
+        #expect(seen[0] == .init(summary: "Fix the", description: ""))
+        #expect(seen[1] == .init(summary: "Fix the border", description: ""))
+        #expect(seen[2] == .init(summary: "Fix the border", description: "The"))
+        #expect(seen[3] == .init(summary: "Fix the border", description: "The card used 12 pt."))
+        // A draft with no blank line still splits after the first line.
+        #expect(
+            GitCommitMessageParts(message: "Fix\nBody")
+                == .init(summary: "Fix", description: "Body"))
+    }
+
+    @Test("Editing one part keeps the other")
+    func editParts() {
+        let message = "Fix\n\nBody"
+        #expect(
+            GitCommitMessageParts.message(message, replacingSummary: "Fix it") == "Fix it\n\nBody")
+        #expect(GitCommitMessageParts.message(message, replacingDescription: "") == "Fix")
+        #expect(
+            GitCommitMessageParts.message("Fix", replacingDescription: "Body\n")
+                == "Fix\n\nBody\n")
+        // A pasted multi-line summary moves its extra lines to the description.
+        let pasted = GitCommitMessageParts.message(message, replacingSummary: "One\nTwo")
+        #expect(GitCommitMessageParts(message: pasted).summary == "One")
+    }
+
+    // MARK: Visibility
+
+    @Test("A clean tree hides the composer unless a message, a merge or a draft keeps it")
+    func visibility() {
+        #expect(!presentation().isVisible)
+        #expect(presentation(message: "WIP").isVisible)
+        #expect(presentation(merge: true).isVisible)
+        #expect(presentation(drafting: true).isVisible)
+        #expect(presentation(stageable: 1).isVisible)
+        #expect(presentation(staged: 1).isVisible)
+    }
+
+    @Test("The description shows with a summary, a description, focus or a draft")
+    func descriptionVisibility() {
+        #expect(!presentation(stageable: 2).showsDescription)
+        #expect(!presentation(message: "   ", stageable: 2).showsDescription)
+        #expect(presentation(message: "Fix", stageable: 2).showsDescription)
+        #expect(presentation(stageable: 2, descriptionFocused: true).showsDescription)
+        #expect(presentation(stageable: 2, drafting: true).showsDescription)
+    }
+
+    // MARK: Button
+
+    @Test("Nothing staged: Stage All names the file count")
+    func stageAllState() {
+        let three = presentation(stageable: 3)
+        #expect(three.action == .stageAll)
+        #expect(three.buttonTitle == "Stage All 3 Files")
+        #expect(three.buttonBranchSuffix == nil)
+        #expect(three.isButtonEnabled)
+        #expect(!three.isButtonProminent)
+        #expect(three.disabledReason == nil)
+        #expect(presentation(stageable: 1).buttonTitle == "Stage All 1 File")
+        #expect(!presentation(stageable: 3, busy: true).isButtonEnabled)
+    }
+
+    @Test("Staged files: Commit names the count and the branch")
+    func commitState() {
+        let ready = presentation(message: "Fix", staged: 2, stageable: 1)
+        #expect(ready.action == .commit)
+        #expect(ready.buttonTitle == "Commit 2 Files")
+        #expect(ready.buttonBranchSuffix == "to main")
+        #expect(ready.buttonAccessibilityLabel == "Commit 2 Files to main")
+        #expect(ready.canCommit)
+        #expect(ready.isButtonEnabled)
+        #expect(ready.isButtonProminent)
+        #expect(presentation(message: "Fix", staged: 1).buttonTitle == "Commit 1 File")
+    }
+
+    @Test("Commit without a summary is disabled and says why")
+    func commitNeedsSummary() {
+        for message in ["", "  ", "\n\nOnly a body"] {
+            let missing = presentation(message: message, staged: 2)
+            #expect(missing.action == .commit)
+            #expect(!missing.canCommit)
+            #expect(!missing.isButtonEnabled)
+            #expect(missing.disabledReason == "Write a summary to commit.")
+            #expect(missing.buttonHelp == "Write a summary to commit.")
+        }
+    }
+
+    @Test("A detached HEAD has no branch suffix")
+    func detachedHead() {
+        let detached = presentation(message: "Fix", staged: 2, branch: nil)
+        #expect(detached.buttonBranchSuffix == nil)
+        #expect(detached.buttonAccessibilityLabel == "Commit 2 Files")
+    }
+
+    @Test("A long branch name stays in the suffix; the title keeps the count")
+    func longBranch() {
+        let branch = String(repeating: "feature/very-long-name-", count: 4)
+        let long = presentation(message: "Fix", staged: 2, branch: branch)
+        #expect(long.buttonTitle == "Commit 2 Files")
+        #expect(long.buttonBranchSuffix == "to \(branch)")
+    }
+
+    @Test("Drafting disables the button and names the draft")
+    func draftingState() {
+        let drafting = presentation(message: "Fix the", staged: 2, drafting: true)
+        #expect(drafting.action == .drafting)
+        #expect(drafting.buttonTitle == "Drafting…")
+        #expect(drafting.buttonBranchSuffix == nil)
+        #expect(!drafting.isButtonEnabled)
+        #expect(!drafting.canCommit)
+        #expect(drafting.isButtonProminent)
+        #expect(drafting.disabledReason == "Wait for the draft to finish, or stop it.")
+        #expect(presentation(stageable: 3, drafting: true).buttonTitle == "Drafting…")
+    }
+
+    @Test("A merge commits as Commit Merge, also with no file changes")
+    func mergeState() {
+        let merge = presentation(message: "Merge branch 'x'", staged: 2, merge: true)
+        #expect(merge.buttonTitle == "Commit Merge")
+        #expect(merge.buttonAccessibilityLabel == "Commit Merge to main")
+        #expect(merge.canCommit)
+        let empty = presentation(message: "Merge branch 'x'", merge: true)
+        #expect(empty.buttonTitle == "Commit Merge")
+        #expect(empty.canCommit)
+        // Unstaged files and nothing staged: stage them first.
+        #expect(presentation(message: "Merge", stageable: 1, merge: true).action == .stageAll)
+    }
+
+    @Test("A clean tree with a typed message has nothing to commit")
+    func cleanTreeWithMessage() {
+        let clean = presentation(message: "WIP")
+        #expect(clean.isVisible)
+        #expect(clean.buttonTitle == "Nothing to Commit")
+        #expect(clean.buttonBranchSuffix == nil)
+        #expect(!clean.isButtonEnabled)
+        #expect(clean.disabledReason == "Stage files to commit.")
+        // D4: Stage All is not available with nothing to stage.
+        #expect(!clean.canStageAll)
+    }
+
+    @Test("A Git operation in flight disables Commit")
+    func busyState() {
+        let busy = presentation(message: "Fix", staged: 1, busy: true)
+        #expect(!busy.canCommit)
+        #expect(busy.disabledReason == "Wait for the current Git operation to finish.")
+    }
+
+    @Test("The section Stage All shows only for a partly staged tree")
+    func sectionStageAll() {
+        #expect(presentation(staged: 1, stageable: 2).showsSectionStageAll)
+        #expect(!presentation(staged: 1).showsSectionStageAll)
+        #expect(!presentation(stageable: 2).showsSectionStageAll)
+        #expect(!presentation(staged: 1, stageable: 2, drafting: true).showsSectionStageAll)
+    }
+
+    // MARK: Counter
+
+    @Test("The summary counter counts trimmed characters and warns above 72")
+    func counter() {
+        #expect(presentation(stageable: 1).summaryCount == nil)
+        #expect(presentation(stageable: 1).summaryAccessibilityValue == "Empty")
+        let short = presentation(message: "Fix  \n\nBody", stageable: 1)
+        #expect(short.summaryCount == 3)
+        #expect(!short.isSummaryTooLong)
+        #expect(short.summaryAccessibilityValue == "3 characters")
+        #expect(
+            presentation(message: "X", stageable: 1).summaryAccessibilityValue == "1 character")
+        let limit = presentation(message: String(repeating: "a", count: 72), stageable: 1)
+        #expect(!limit.isSummaryTooLong)
+        let long = presentation(message: String(repeating: "a", count: 73), stageable: 1)
+        #expect(long.isSummaryTooLong)
+        #expect(long.summaryAccessibilityValue == "73 characters, longer than 72")
+        // Too long never blocks Commit.
+        #expect(presentation(message: String(repeating: "a", count: 90), staged: 1).canCommit)
+        #expect(presentation(message: "Fix", staged: 1, drafting: true).summaryCount == nil)
+    }
+
+    // MARK: Menu
+
+    @Test("The Commit menu item is enabled only when Source Control can commit")
+    func menuCommit() {
+        #expect(!GitCommitMenuAvailability.canCommit(nil))
+        #expect(!GitCommitMenuAvailability.canCommit(presentation()))
+        #expect(!GitCommitMenuAvailability.canCommit(presentation(message: "Fix")))
+        #expect(!GitCommitMenuAvailability.canCommit(presentation(staged: 2)))
+        #expect(
+            !GitCommitMenuAvailability.canCommit(
+                presentation(message: "Fix", staged: 2, drafting: true)))
+        #expect(
+            !GitCommitMenuAvailability.canCommit(
+                presentation(message: "Fix", staged: 2, busy: true)))
+        #expect(GitCommitMenuAvailability.canCommit(presentation(message: "Fix", staged: 2)))
+    }
+
+    @Test("Command-Return stays with an Ensemble note in Edit mode")
+    func commandReturnConflict() {
+        let ready = presentation(message: "Fix", staged: 2)
+        #expect(
+            GitCommitMenuAvailability.commitOwnsShortcut(
+                ready, isComposerFocused: true, isNoteEditing: false))
+        // ⌘Return in a terminal, the editor or anywhere else never commits.
+        #expect(
+            !GitCommitMenuAvailability.commitOwnsShortcut(
+                ready, isComposerFocused: false, isNoteEditing: false))
+        // Format > Done Editing owns ⌘Return while a note is edited.
+        #expect(
+            !GitCommitMenuAvailability.commitOwnsShortcut(
+                ready, isComposerFocused: true, isNoteEditing: true))
+        // A disabled Commit item never claims ⌘Return.
+        #expect(
+            !GitCommitMenuAvailability.commitOwnsShortcut(
+                presentation(staged: 2), isComposerFocused: true, isNoteEditing: false))
+        #expect(
+            !GitCommitMenuAvailability.commitOwnsShortcut(
+                nil, isComposerFocused: true, isNoteEditing: false))
+        // The note's own text view still leaves Edit mode on ⌘Return.
+        #expect(
+            CanvasNoteShortcuts.exitsEditing(
+                keyCode: 36, command: true, shift: false, option: false, control: false))
+    }
+
+    @Test("Stage All and Draft Message menu items follow the Git state")
+    func menuStageAllAndDraft() {
+        #expect(!GitCommitMenuAvailability.canStageAll(nil, isHunkBusy: false))
+        #expect(!GitCommitMenuAvailability.canStageAll(presentation(), isHunkBusy: false))
+        #expect(
+            GitCommitMenuAvailability.canStageAll(presentation(stageable: 2), isHunkBusy: false))
+        #expect(
+            !GitCommitMenuAvailability.canStageAll(presentation(stageable: 2), isHunkBusy: true))
+        #expect(
+            !GitCommitMenuAvailability.canStageAll(
+                presentation(stageable: 2, busy: true), isHunkBusy: false))
+        #expect(GitCommitMenuAvailability.canDraft(canGenerate: true, isBusy: false))
+        #expect(!GitCommitMenuAvailability.canDraft(canGenerate: false, isBusy: false))
+        #expect(!GitCommitMenuAvailability.canDraft(canGenerate: true, isBusy: true))
     }
 }

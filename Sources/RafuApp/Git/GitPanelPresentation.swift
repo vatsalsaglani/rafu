@@ -164,14 +164,249 @@ nonisolated extension GitChangesViewMode {
     }
 }
 
-/// Caption under the commit message field (G7).
-nonisolated enum GitCommitCaption {
-    static func text(stagedCount: Int) -> String {
-        switch stagedCount {
-        case ..<1: "Nothing staged"
-        case 1: "Commits 1 file"
-        default: "Commits \(stagedCount) files"
+/// The commit message as a summary line and a description (G7).
+///
+/// The model keeps ONE string (`WorkspaceSession.gitCommitMessage`). The
+/// composer shows it as two fields through this pure split/join pair:
+/// the summary is the first line, the description is the rest after one
+/// blank line. A description with no blank line before it (as an AI draft
+/// can stream) is still the rest. CRLF reads as LF. Trailing spaces are
+/// kept, so a word gap typed at the end of the summary is not lost.
+nonisolated struct GitCommitMessageParts: Equatable, Sendable {
+    var summary: String
+    var description: String
+
+    init(summary: String, description: String) {
+        self.summary = summary
+        self.description = description
+    }
+
+    /// Splits `message` into a summary and a description.
+    init(message: String) {
+        let normalized = message.replacing("\r\n", with: "\n")
+        guard let newline = normalized.firstIndex(of: "\n") else {
+            self.init(summary: normalized, description: "")
+            return
         }
+        var rest = normalized[normalized.index(after: newline)...]
+        // One blank line is the separator; more blank lines belong to the
+        // description, so `join(split(m))` keeps them.
+        if rest.first == "\n" { rest = rest.dropFirst() }
+        self.init(summary: String(normalized[..<newline]), description: String(rest))
+    }
+
+    /// The single message string: the summary, then a blank line and the
+    /// description when the description is not empty.
+    var message: String {
+        description.isEmpty ? summary : "\(summary)\n\n\(description)"
+    }
+
+    /// The message with the summary replaced. A pasted multi-line summary
+    /// moves its extra lines into the description on the next split.
+    static func message(_ message: String, replacingSummary summary: String) -> String {
+        var parts = GitCommitMessageParts(message: message)
+        parts.summary = summary
+        return parts.message
+    }
+
+    /// The message with the description replaced.
+    static func message(_ message: String, replacingDescription description: String) -> String {
+        var parts = GitCommitMessageParts(message: message)
+        parts.description = description
+        return parts.message
+    }
+}
+
+/// Everything the Source Control commit composer (Option B: summary,
+/// description, one button that names the next step) shows, from plain
+/// inputs. Pure so that each state and title is testable without a view.
+nonisolated struct GitCommitComposerPresentation: Equatable, Sendable {
+    /// The summary length above which the counter warns (Git convention).
+    /// The warning never blocks Commit.
+    static let summaryLengthLimit = 72
+
+    /// What the one full-width button does.
+    enum Action: Equatable, Sendable {
+        case stageAll
+        case commit
+        case drafting
+    }
+
+    struct Input: Equatable, Sendable {
+        var message: String
+        var stagedCount: Int
+        /// Unstaged and untracked files, and conflicts: what Stage All adds.
+        var stageableCount: Int
+        /// The current branch, or nil for a detached HEAD.
+        var branch: String?
+        var isMergeInProgress: Bool
+        var isDrafting: Bool
+        var isBusy: Bool
+        var isDescriptionFocused: Bool = false
+    }
+
+    let input: Input
+    let parts: GitCommitMessageParts
+
+    init(_ input: Input) {
+        self.input = input
+        self.parts = GitCommitMessageParts(message: input.message)
+    }
+
+    private var hasSummary: Bool {
+        !parts.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var hasChanges: Bool { input.stagedCount > 0 || input.stageableCount > 0 }
+
+    /// Hidden on a clean tree unless a message is typed, a merge is in
+    /// progress, or a draft runs. A typed message never disappears.
+    var isVisible: Bool {
+        hasChanges || !input.message.isEmpty || input.isMergeInProgress || input.isDrafting
+    }
+
+    /// The description part shows when the summary has text, the
+    /// description has text or focus, or a draft streams into it.
+    var showsDescription: Bool {
+        hasSummary || !parts.description.isEmpty || input.isDescriptionFocused
+            || input.isDrafting
+    }
+
+    var action: Action {
+        if input.isDrafting { return .drafting }
+        if input.stagedCount == 0, input.stageableCount > 0 { return .stageAll }
+        return .commit
+    }
+
+    /// The leading, never truncated part of the button title.
+    var buttonTitle: String {
+        switch action {
+        case .drafting: "Drafting…"
+        case .stageAll: "Stage All \(Self.files(input.stageableCount))"
+        case .commit:
+            if input.isMergeInProgress {
+                "Commit Merge"
+            } else if input.stagedCount == 0 {
+                "Nothing to Commit"
+            } else {
+                "Commit \(Self.files(input.stagedCount))"
+            }
+        }
+    }
+
+    /// "to <branch>", shown after the title and truncated first.
+    var buttonBranchSuffix: String? {
+        guard action == .commit, input.isMergeInProgress || input.stagedCount > 0,
+            let branch = input.branch, !branch.isEmpty
+        else { return nil }
+        return "to \(branch)"
+    }
+
+    /// The full title, for VoiceOver.
+    var buttonAccessibilityLabel: String {
+        [buttonTitle, buttonBranchSuffix].compactMap { $0 }.joined(separator: " ")
+    }
+
+    /// Commit is possible: something to commit (or a merge), a summary, no
+    /// draft and no Git operation in flight.
+    var canCommit: Bool {
+        action == .commit && (input.stagedCount > 0 || input.isMergeInProgress) && hasSummary
+            && !input.isBusy
+    }
+
+    /// Stage All is possible: something to stage and no Git operation in
+    /// flight (D4: it was enabled with nothing to stage).
+    var canStageAll: Bool { input.stageableCount > 0 && !input.isBusy }
+
+    var isButtonEnabled: Bool {
+        switch action {
+        case .drafting: false
+        case .stageAll: canStageAll
+        case .commit: canCommit
+        }
+    }
+
+    /// Commit and "Drafting…" use the prominent style, which is the accent
+    /// only while enabled and neutral while disabled. Stage All is
+    /// secondary.
+    var isButtonProminent: Bool { action != .stageAll }
+
+    /// Why the button is disabled, for the tooltip and VoiceOver; nil when
+    /// it is enabled.
+    var disabledReason: String? {
+        guard !isButtonEnabled else { return nil }
+        if input.isDrafting { return "Wait for the draft to finish, or stop it." }
+        if input.isBusy { return "Wait for the current Git operation to finish." }
+        if action == .commit, input.stagedCount == 0, !input.isMergeInProgress {
+            return "Stage files to commit."
+        }
+        if action == .commit, !hasSummary { return "Write a summary to commit." }
+        return nil
+    }
+
+    /// The tooltip of the enabled button.
+    var buttonHelp: String {
+        if let disabledReason { return disabledReason }
+        switch action {
+        case .stageAll: return "Stage every changed file."
+        case .commit, .drafting: return "Commit the staged changes (⌘Return)."
+        }
+    }
+
+    /// A small "Stage All" in the Changes section header while files are
+    /// staged and others are not: the button names Commit then, so the
+    /// visible Stage All path moves to the list.
+    var showsSectionStageAll: Bool {
+        input.stagedCount > 0 && input.stageableCount > 0 && !input.isDrafting
+    }
+
+    /// The trimmed summary length, shown while the summary has text and no
+    /// draft runs.
+    var summaryCount: Int? {
+        guard hasSummary, !input.isDrafting else { return nil }
+        return parts.summary.trimmingCharacters(in: .whitespacesAndNewlines).count
+    }
+
+    var isSummaryTooLong: Bool { (summaryCount ?? 0) > Self.summaryLengthLimit }
+
+    /// The summary field's accessibility value ("33 characters").
+    var summaryAccessibilityValue: String {
+        guard let summaryCount else { return "Empty" }
+        let base = summaryCount == 1 ? "1 character" : "\(summaryCount) characters"
+        return isSummaryTooLong
+            ? "\(base), longer than \(Self.summaryLengthLimit)" : base
+    }
+
+    private static func files(_ count: Int) -> String {
+        count == 1 ? "1 File" : "\(count) Files"
+    }
+}
+
+/// Menu enablement for the Source Control items in the app menu. The
+/// Commit item owns ⌘Return only while a commit is possible, a commit
+/// message field has focus, and no Ensemble note is in Edit mode (the
+/// Format menu's Done Editing uses ⌘Return then). So ⌘Return typed in a
+/// terminal, the editor or a note never commits.
+nonisolated enum GitCommitMenuAvailability {
+    static func canCommit(_ presentation: GitCommitComposerPresentation?) -> Bool {
+        presentation?.canCommit == true
+    }
+
+    static func commitOwnsShortcut(
+        _ presentation: GitCommitComposerPresentation?, isComposerFocused: Bool,
+        isNoteEditing: Bool
+    ) -> Bool {
+        canCommit(presentation) && isComposerFocused && !isNoteEditing
+    }
+
+    static func canStageAll(_ presentation: GitCommitComposerPresentation?, isHunkBusy: Bool)
+        -> Bool
+    {
+        presentation?.canStageAll == true && !isHunkBusy
+    }
+
+    static func canDraft(canGenerate: Bool, isBusy: Bool) -> Bool {
+        canGenerate && !isBusy
     }
 }
 

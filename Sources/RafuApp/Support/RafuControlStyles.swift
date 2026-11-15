@@ -192,36 +192,57 @@ struct RafuRailButtonStyle: ButtonStyle {
 }
 
 /// Filled accent button (Commit, Save, primary sheet actions).
+///
+/// `quietWhenDisabled` (opt-in, the Source Control Commit button): a
+/// disabled button draws the neutral chip fill, a hairline and a muted
+/// label instead of the accent at 40 %, so "disabled" never reads as
+/// "attention". Sheets keep the default look.
 struct RafuProminentButtonStyle: ButtonStyle {
     var compact: Bool = false
+    var quietWhenDisabled: Bool = false
 
     func makeBody(configuration: Configuration) -> some View {
-        StyleBody(configuration: configuration, compact: compact)
+        StyleBody(
+            configuration: configuration, compact: compact, quietWhenDisabled: quietWhenDisabled)
     }
 
     private struct StyleBody: View {
         let configuration: Configuration
         let compact: Bool
+        let quietWhenDisabled: Bool
         @Environment(\.rafuTheme) private var theme
         @Environment(\.isEnabled) private var isEnabled
+        @Environment(\.colorSchemeContrast) private var contrast
         @State private var isHovering = false
+
+        private var isQuiet: Bool { quietWhenDisabled && !isEnabled }
 
         var body: some View {
             configuration.label
                 .font(.system(size: compact ? 11.5 : 12.5, weight: .semibold))
-                .foregroundStyle(theme.palette.onAccent)
+                .foregroundStyle(isQuiet ? theme.palette.textMuted : theme.palette.onAccent)
                 .padding(.horizontal, compact ? 10 : 14)
                 .padding(.vertical, compact ? 4 : 6)
                 .background(
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
                         .fill(fill)
                 )
+                .overlay {
+                    if isQuiet {
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .strokeBorder(
+                                contrast == .increased
+                                    ? theme.palette.borderStrong : theme.palette.borderSubtle,
+                                lineWidth: RafuMetrics.hairline)
+                    }
+                }
                 .onHover { isHovering = $0 }
                 .animation(isHovering ? RafuMotion.hoverIn : RafuMotion.hoverOut, value: isHovering)
-                .opacity(isEnabled ? 1 : 0.4)
+                .opacity(isEnabled || isQuiet ? 1 : 0.4)
         }
 
         private var fill: Color {
+            if isQuiet { return theme.palette.chipBackground }
             if configuration.isPressed { return theme.palette.accent.opacity(0.85) }
             if isHovering { return theme.palette.accentHover }
             return theme.palette.accent
