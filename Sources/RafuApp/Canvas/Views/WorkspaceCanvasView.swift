@@ -25,6 +25,8 @@ struct WorkspaceCanvasView: View {
     @State private var dragOrigin: CGPoint?
     @State private var presentationID = UUID()
     @State private var spaceIsDown = false
+    /// Overlays above the cards; a click there is not a card-body click.
+    @State private var bodyClickExclusions = CanvasBodyClickExclusions()
     /// True from a background drag's first change to its end OR cancel, one
     /// per attachment (grid, board). SwiftUI resets gesture state on cancel
     /// too (a mask flip, a view change), where `onEnded` never runs; when
@@ -374,6 +376,13 @@ struct WorkspaceCanvasView: View {
                     drop: CanvasFileDrop.target(boardID: board.id, session: session)
                 )
             )
+            // A click in any card body selects and focuses that card. It
+            // observes the mouse-down and never takes it (`CanvasBodyClick`).
+            .background(
+                CanvasBodyClickMonitor { point, modifiers in
+                    bodyMouseDown(at: point, modifiers: modifiers)
+                }
+            )
             // Space-drag and the Hand tool pan over cards too. Otherwise this
             // mask disables the gesture and leaves the grid's own pan
             // gesture in charge. A click (no movement) still reaches cards.
@@ -427,6 +436,49 @@ struct WorkspaceCanvasView: View {
             .focused($boardHasKeyboardFocus)
             .onChange(of: boardHasKeyboardFocus) { _, focused in if !focused { spaceIsDown = false }
             }
+            // The space the overlays above report their frames in. Its origin
+            // is the board surface's, like the click monitor's points.
+            .coordinateSpace(.named(CanvasBodyClick.coordinateSpaceName))
+    }
+
+    /// A mouse-down in the board. The decision uses the state before the
+    /// view under the pointer handles the event; the change applies after it,
+    /// so a terminal or web body that focuses itself on mouse-down cannot
+    /// undo a ⌘- or ⇧-click selection.
+    private func bodyMouseDown(at point: CGPoint, modifiers: CanvasBodyClick.Modifiers) {
+        let card = CanvasBodyClick.card(
+            at: point, cards: board.cards, viewport: board.viewport,
+            activeCardID: board.contentIsActive ? board.focusedCardID : nil,
+            excluded: bodyClickExclusions.rects)
+        let decision = CanvasBodyClick.decision(
+            card: card, modifiers: modifiers, selection: board.selection,
+            focusedCardID: board.focusedCardID, contentIsActive: board.contentIsActive,
+            cardsTakeClicks: toolKind == .select && !panOverridesCards
+                && connectionDrag.source == nil && !board.isFindPresented)
+        guard decision != .none else { return }
+        Task { applyBodyClick(decision) }
+    }
+
+    private func applyBodyClick(_ decision: CanvasBodyClick.Decision) {
+        switch decision {
+        case .none:
+            return
+        case .select(let ids):
+            board.backToBoard()
+            boardHasKeyboardFocus = true
+            board.select(ids.filter { id in board.cards.contains { $0.id == id } })
+        case .activate(let id):
+            guard let card = board.cards.first(where: { $0.id == id }) else { return }
+            if board.frontmostCardID != id {
+                let ids = board.cardIDsMovingTogether(with: [id])
+                session.performCanvasEdit(board) { try board.reorder(ids, toFront: true) }
+            }
+            board.focus(id)
+            board.clearConnectionSelection()
+            if case .terminal(let groupID) = card.content {
+                session.focusCanvasTerminalContent(groupID, board: board.id)
+            }
+        }
     }
 
     /// Board shortcuts apply only while no card content and no inline title
@@ -559,6 +611,7 @@ struct WorkspaceCanvasView: View {
             }
             CanvasBoardNoticeView(board: board)
         }
+        .canvasBodyClickExclusion("top", in: bodyClickExclusions)
         .padding(.top, CanvasBoardTopOverlayMetrics.topInset)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
@@ -760,6 +813,7 @@ struct WorkspaceCanvasView: View {
             CanvasZoomCapsule(board: board)
         }
         .contentShape(.rect)
+        .canvasBodyClickExclusion("zoom", in: bodyClickExclusions)
         .onHover { interaction.overviewHover = $0 }
         .background(alignment: .bottomTrailing) { voiceCompanionReserve }
         .padding(12)
