@@ -588,7 +588,8 @@ struct RafuCardHeaderRow<Leading: View, Trailing: View>: View {
         }
         .padding(.horizontal, RafuMetrics.space3)
         .frame(height: RafuMetrics.sectionHeaderHeight)
-        .background(theme.palette.cardBackground)
+        // A header over a text surface: a little more opaque than it.
+        .rafuDeckFill(theme.palette.cardBackground, .pinned)
         .overlay(alignment: .bottom) {
             Divider().overlay(theme.palette.borderSubtle)
         }

@@ -26,6 +26,50 @@ final class RafuTerminalView: LocalProcessTerminalView {
         TerminalNewlineMonitor.removeRegistration(for: self)
     }
 
+    // MARK: Frosted margin
+
+    /// Frosted deck only (ADR 0038). SwiftTerm paints whole rows, so the
+    /// strip below the last row (less than one cell high) is never painted.
+    /// With an opaque layer colour that strip was hidden; with the layer
+    /// cleared for a translucent background it would show the frame. This
+    /// view paints the strip in the same translucent colour as the cells.
+    private var marginFill: TerminalMarginFillView?
+
+    /// `nil` removes the strip (an opaque terminal).
+    func setMarginFill(_ color: NSColor?) {
+        guard let color else {
+            marginFill?.removeFromSuperview()
+            marginFill = nil
+            return
+        }
+        let fill: TerminalMarginFillView
+        if let marginFill {
+            fill = marginFill
+        } else {
+            fill = TerminalMarginFillView()
+            // Lowest subview: never above the scroller or the find bar.
+            addSubview(fill, positioned: .below, relativeTo: nil)
+            marginFill = fill
+        }
+        fill.color = color
+        layoutMarginFill()
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        layoutMarginFill()
+    }
+
+    /// Only runs once a fill exists, which `applyTheme` installs after
+    /// SwiftTerm has measured its cells, so the grid size is valid.
+    private func layoutMarginFill() {
+        guard let marginFill else { return }
+        let gridHeight = getOptimalFrameSize().height
+        let frame = TerminalMarginFillView.frame(
+            bounds: bounds, gridHeight: gridHeight)
+        if marginFill.frame != frame { marginFill.frame = frame }
+    }
+
     /// SwiftTerm's keyDown is public but not open. The local monitor calls
     /// this only for the event window's visible terminal first responder.
     func handleLegacyNewline(_ event: NSEvent) -> Bool {
@@ -208,5 +252,33 @@ final class RafuTerminalView: LocalProcessTerminalView {
             lines.append(String(text.map { $0 == "\u{0}" ? " " : $0 }))
         }
         return Array(lines.suffix(max(0, maxLines)))
+    }
+}
+
+/// The strip below a frosted terminal's last row: SwiftTerm draws rows from
+/// the top of its (unflipped) view, so the strip is at the bottom. It takes no
+/// clicks and is hidden from accessibility.
+final class TerminalMarginFillView: NSView {
+    var color: NSColor = .clear {
+        didSet {
+            guard color != oldValue else { return }
+            needsDisplay = true
+        }
+    }
+
+    /// The strip's frame: the full width, from the bottom up to the grid.
+    static func frame(bounds: NSRect, gridHeight: CGFloat) -> NSRect {
+        NSRect(
+            x: bounds.minX, y: bounds.minY,
+            width: bounds.width, height: max(0, bounds.height - gridHeight))
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func isAccessibilityElement() -> Bool { false }
+
+    override func draw(_ dirtyRect: NSRect) {
+        color.setFill()
+        dirtyRect.fill()
     }
 }

@@ -125,7 +125,7 @@ struct EditorBreadcrumbView: View {
         .background(WindowDragHandle())
         // The card's own tone: the row continues the tab shelf above it, and
         // its bottom hairline is the header's only separator.
-        .background(theme.palette.editorBackground)
+        .rafuDeckFill(theme.palette.editorBackground, .deck)
         .overlay(alignment: .bottom) { Divider().overlay(theme.palette.borderSubtle) }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("File path")

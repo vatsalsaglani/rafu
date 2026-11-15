@@ -5,8 +5,12 @@ import Foundation
 ///
 /// Frosted shows the desktop, blurred and tinted with the theme's frame
 /// colour, through the window frame (titlebar row, Activity Rail, sidebar,
-/// status bar, and the gutter round the deck). The deck card and its editor,
-/// terminal and previews stay opaque. Solid is the default.
+/// status bar, and the gutter round the deck). The deck card shows a little
+/// of it too, but less than the frame: its tab shelf, Ensemble board and
+/// rows paint their tone at `deckOpacity`, Ensemble cards at the higher
+/// `cardOpacity`, and the editor, terminals and previews at
+/// `contentOpacity` (opaque when "Frost the editor and terminals" is off).
+/// Solid is the default and paints every surface opaque.
 ///
 /// Reduce Transparency or Increase Contrast always gives Solid, whatever the
 /// stored setting. The resolver applies this itself: an
@@ -14,6 +18,9 @@ import Foundation
 nonisolated enum WindowSurfacePreference {
     static let styleKey = "windowSurfaceStyle"
     static let frostLevelKey = "windowSurfaceFrost"
+    /// Settings ▸ Appearance ▸ Window ▸ "Frost the editor and terminals".
+    /// Missing means on.
+    static let frostContentKey = "windowSurfaceFrostContent"
 
     nonisolated enum Style: String, CaseIterable, Sendable {
         case solid
@@ -41,22 +48,96 @@ nonisolated enum WindowSurfacePreference {
         }
     }
 
-    /// What a window paints. `tintOpacity` is the opacity of the theme's
-    /// `appBackground` laid over the blur: lower shows more of the desktop.
+    /// The opacities of one Frosted window. Every value is the opacity a
+    /// surface reaches over the blurred desktop, not the alpha its own fill
+    /// uses: a fill that lies over another translucent fill uses
+    /// `paintOpacity(for:)` so the two do not stack.
+    nonisolated struct Frost: Equatable, Sendable {
+        /// The frame's `appBackground` tint over the blur.
+        var tintOpacity: Double
+        /// The deck's own surfaces: tab shelf, rows, Ensemble board, empty
+        /// states. Higher than the frame, so the middle stays calmer.
+        var deckOpacity: Double
+        /// Ensemble cards and board chrome, over the board. Higher than the
+        /// deck, so text in a card stays readable.
+        var cardOpacity: Double
+        /// "Frost the editor and terminals". Off keeps text surfaces opaque.
+        var frostsContent: Bool
+
+        /// The editor, terminals, previews and diffs.
+        var contentOpacity: Double { frostsContent ? deckOpacity : 1 }
+    }
+
+    /// Where a fill sits in the deck. Picks the opacity it paints with.
+    nonisolated enum DeckLayer: Equatable, Sendable, CaseIterable {
+        /// A deck surface painted straight over the frame: tab shelf, rows,
+        /// Ensemble board, empty states.
+        case deck
+        /// A text surface painted straight over the frame: editor,
+        /// terminal, preview, diff.
+        case content
+        /// An Ensemble card or a board control, painted over the board.
+        case card
+        /// Editor-like content inside a card (a note being edited, a
+        /// code view), painted over the card's own fill: clear when frosted,
+        /// so the card's fill shows. Terminals use
+        /// `terminalBackgroundAlpha` instead (see there).
+        case cardContent
+        /// A sticky header painted over scrolled content of the same tone.
+        case pinned
+        /// A fill of the same tone as the base already under it. Needed
+        /// only in Solid; it paints nothing in Frosted.
+        case underlay
+        /// The opposite of `underlay`: a deck base needed only in Frosted,
+        /// where the opaque base Solid has under it is gone. Paints nothing
+        /// in Solid.
+        case frostedBase
+    }
+
+    /// What a window paints.
     nonisolated enum Resolved: Equatable, Sendable {
         case solid
-        case frosted(tintOpacity: Double)
+        case frosted(Frost)
 
         var isFrosted: Bool {
             if case .frosted = self { return true }
             return false
         }
 
-        /// 1 for Solid: the frame colour is fully opaque.
-        var tintOpacity: Double {
-            switch self {
-            case .solid: 1
-            case .frosted(let opacity): opacity
+        /// The frame's tint over the blur. 1 for Solid: fully opaque.
+        var tintOpacity: Double { frost?.tintOpacity ?? 1 }
+        /// 1 for Solid.
+        var deckOpacity: Double { frost?.deckOpacity ?? 1 }
+        /// 1 for Solid.
+        var cardOpacity: Double { frost?.cardOpacity ?? 1 }
+        /// 1 for Solid, and when the editor and terminals are kept opaque.
+        var contentOpacity: Double { frost?.contentOpacity ?? 1 }
+        /// False for Solid.
+        var frostsContent: Bool { frost?.frostsContent ?? false }
+
+        private var frost: Frost? {
+            if case .frosted(let frost) = self { return frost }
+            return nil
+        }
+
+        /// The alpha a fill on `layer` paints with, so the surface reaches
+        /// its target opacity over whatever lies under it. 1 in Solid
+        /// (0 for `frostedBase`).
+        func paintOpacity(for layer: DeckLayer) -> Double {
+            guard let frost else { return layer == .frostedBase ? 0 : 1 }
+            switch layer {
+            case .deck, .frostedBase: return frost.deckOpacity
+            case .content: return frost.contentOpacity
+            case .card:
+                return WindowSurfacePreference.layeredOpacity(
+                    target: frost.cardOpacity, over: frost.deckOpacity)
+            case .cardContent:
+                return frost.frostsContent ? 0 : 1
+            case .pinned:
+                return WindowSurfacePreference.layeredOpacity(
+                    target: max(frost.cardOpacity, frost.contentOpacity),
+                    over: frost.contentOpacity)
+            case .underlay: return 0
             }
         }
     }
@@ -86,10 +167,11 @@ nonisolated enum WindowSurfacePreference {
     }
 
     /// Unknown or missing `style` is Solid; unknown or missing `level` is
-    /// Balanced.
+    /// Balanced. `frostsContent` is "Frost the editor and terminals".
     static func resolve(
         style: String?,
         level: String?,
+        frostsContent: Bool = true,
         isDark: Bool,
         reduceTransparency: Bool,
         increaseContrast: Bool
@@ -99,7 +181,12 @@ nonisolated enum WindowSurfacePreference {
                 reduceTransparency: reduceTransparency, increaseContrast: increaseContrast) == nil
         else { return .solid }
         let frost = FrostLevel(rawValue: level ?? "") ?? .balanced
-        return .frosted(tintOpacity: tintOpacity(for: frost, isDark: isDark))
+        return .frosted(
+            Frost(
+                tintOpacity: tintOpacity(for: frost, isDark: isDark),
+                deckOpacity: deckOpacity(for: frost, isDark: isDark),
+                cardOpacity: cardOpacity(for: frost, isDark: isDark),
+                frostsContent: frostsContent))
     }
 
     /// Tint opacity per strength and theme appearance. A dark tint over a
@@ -115,6 +202,52 @@ nonisolated enum WindowSurfacePreference {
         case (.balanced, false): 0.74
         case (.strong, false): 0.60
         }
+    }
+
+    /// The deck's opacity: well above the frame's tint, so the deck reads
+    /// as a calm card that only hints at the desktop. Light themes need
+    /// more, for the same reason as the tint.
+    static func deckOpacity(for level: FrostLevel, isDark: Bool) -> Double {
+        switch (level, isDark) {
+        case (.subtle, true): 0.90
+        case (.balanced, true): 0.82
+        case (.strong, true): 0.72
+        case (.subtle, false): 0.94
+        case (.balanced, false): 0.88
+        case (.strong, false): 0.80
+        }
+    }
+
+    /// An Ensemble card's opacity over the desktop: above the deck, so a
+    /// card stands out from the board and its text stays readable.
+    static func cardOpacity(for level: FrostLevel, isDark: Bool) -> Double {
+        switch (level, isDark) {
+        case (.subtle, true): 0.96
+        case (.balanced, true): 0.94
+        case (.strong, true): 0.90
+        case (.subtle, false): 0.98
+        case (.balanced, false): 0.96
+        case (.strong, false): 0.93
+        }
+    }
+
+    /// The alpha a fill needs over a base of opacity `over` so the two
+    /// together reach `target` (source-over: `a + over × (1 − a)`). 0 when
+    /// the base already reaches the target; 1 when the base is opaque.
+    static func layeredOpacity(target: Double, over base: Double) -> Double {
+        guard base < 1 else { return 1 }
+        guard target > base else { return 0 }
+        return min(1, (target - base) / (1 - base))
+    }
+
+    /// The alpha of SwiftTerm's `nativeBackgroundColor`, in a terminal
+    /// tab, a Terminal Group pane and an Ensemble card alike. SwiftTerm
+    /// draws inverse-video text (SGR 7) in this same colour, so it must
+    /// never be 0 or that text vanishes: it is the content opacity (at
+    /// least 0.72), never the "clear over a base" alpha. The RGB stays the
+    /// theme's, so dim text (SGR 2) still mixes toward it.
+    static func terminalBackgroundAlpha(_ surface: Resolved) -> Double {
+        surface.contentOpacity
     }
 
     // MARK: Spike migration

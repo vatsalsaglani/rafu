@@ -28,6 +28,7 @@ nonisolated enum AgentControlPresentation {
 /// panel: it opens by itself when an agent asks, and it never blocks the board.
 struct CanvasAgentControlItem: View {
     @Environment(\.rafuTheme) private var theme
+    @Environment(\.rafuWindowSurface) private var windowSurface
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let board: CanvasBoardState
     @State private var isPresented = false
@@ -54,7 +55,8 @@ struct CanvasAgentControlItem: View {
             .frame(height: 22)
             .background(
                 pending > 0
-                    ? theme.palette.warning.opacity(0.18) : theme.palette.elevatedBackground,
+                    ? theme.palette.warning.opacity(0.18)
+                    : windowSurface.fill(theme.palette.elevatedBackground, .card),
                 in: Capsule()
             )
             .overlay(Capsule().strokeBorder(theme.palette.borderSubtle, lineWidth: 1))

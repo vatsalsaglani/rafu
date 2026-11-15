@@ -38,7 +38,7 @@ struct ImagePreviewView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .background(theme.palette.editorBackground)
+        .rafuDeckFill(theme.palette.editorBackground, .content)
         .task(id: url) {
             let result = await Self.load(url: url)
             if let result {

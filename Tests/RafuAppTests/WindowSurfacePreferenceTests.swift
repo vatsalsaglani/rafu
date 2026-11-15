@@ -30,19 +30,22 @@ struct WindowSurfacePreferenceTests {
     @Test("Frosted maps each strength to its tint, per theme appearance")
     func frostedTints() {
         // Dark: Balanced 0.50 is the value the user chose in Indigo.
-        #expect(Self.resolve("frosted", "subtle", isDark: true) == .frosted(tintOpacity: 0.62))
-        #expect(Self.resolve("frosted", "balanced", isDark: true) == .frosted(tintOpacity: 0.50))
-        #expect(Self.resolve("frosted", "strong", isDark: true) == .frosted(tintOpacity: 0.38))
-        #expect(Self.resolve("frosted", "subtle", isDark: false) == .frosted(tintOpacity: 0.86))
-        #expect(Self.resolve("frosted", "balanced", isDark: false) == .frosted(tintOpacity: 0.74))
-        #expect(Self.resolve("frosted", "strong", isDark: false) == .frosted(tintOpacity: 0.60))
+        #expect(Self.resolve("frosted", "subtle", isDark: true).tintOpacity == 0.62)
+        #expect(Self.resolve("frosted", "balanced", isDark: true).tintOpacity == 0.50)
+        #expect(Self.resolve("frosted", "strong", isDark: true).tintOpacity == 0.38)
+        #expect(Self.resolve("frosted", "subtle", isDark: false).tintOpacity == 0.86)
+        #expect(Self.resolve("frosted", "balanced", isDark: false).tintOpacity == 0.74)
+        #expect(Self.resolve("frosted", "strong", isDark: false).tintOpacity == 0.60)
         #expect(Self.resolve("frosted", "balanced").isFrosted)
     }
 
     @Test("A missing or unknown strength is Balanced")
     func unknownLevelIsBalanced() {
-        #expect(Self.resolve("frosted", nil, isDark: true) == .frosted(tintOpacity: 0.50))
-        #expect(Self.resolve("frosted", "max", isDark: false) == .frosted(tintOpacity: 0.74))
+        #expect(Self.resolve("frosted", nil, isDark: true) == Self.resolve("frosted", "balanced"))
+        #expect(
+            Self.resolve("frosted", "max", isDark: false)
+                == Self.resolve("frosted", "balanced", isDark: false))
+        #expect(Self.resolve("frosted", nil, isDark: true).tintOpacity == 0.50)
     }
 
     @Test("Stronger frost always shows more of the desktop, inside sane bounds")
@@ -112,6 +115,7 @@ struct WindowSurfacePreferenceTests {
     func persistedStrings() throws {
         #expect(WindowSurfacePreference.styleKey == "windowSurfaceStyle")
         #expect(WindowSurfacePreference.frostLevelKey == "windowSurfaceFrost")
+        #expect(WindowSurfacePreference.frostContentKey == "windowSurfaceFrostContent")
         #expect(WindowSurfacePreference.Style.allCases.map(\.rawValue) == ["solid", "frosted"])
         #expect(
             WindowSurfacePreference.FrostLevel.allCases.map(\.rawValue)
@@ -135,7 +139,8 @@ struct WindowSurfacePreferenceTests {
             style: reread.string(forKey: WindowSurfacePreference.styleKey),
             level: reread.string(forKey: WindowSurfacePreference.frostLevelKey),
             isDark: false, reduceTransparency: false, increaseContrast: false)
-        #expect(resolved == .frosted(tintOpacity: 0.60))
+        #expect(resolved.isFrosted)
+        #expect(resolved.tintOpacity == 0.60)
     }
 
     // MARK: Spike migration

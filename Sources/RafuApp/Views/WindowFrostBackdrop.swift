@@ -19,6 +19,59 @@ extension EnvironmentValues {
     @Entry var rafuWindowSurface: WindowSurfacePreference.Resolved = .solid
 }
 
+extension WindowSurfacePreference.Resolved {
+    /// `color` as a fill on `layer`: unchanged in Solid (clear for
+    /// `frostedBase`), at the layer's paint opacity in Frosted. Only backgrounds go through this; text,
+    /// icons, strokes, selection and focus rings stay at full opacity.
+    func fill(_ color: Color, _ layer: WindowSurfacePreference.DeckLayer) -> Color {
+        let opacity = paintOpacity(for: layer)
+        return opacity == 1 ? color : color.opacity(opacity)
+    }
+}
+
+/// Paints one deck fill (`rafuDeckFill`). Solid: the opaque colour, as
+/// before. Frosted: the colour at the layer's paint opacity.
+private struct DeckFillModifier: ViewModifier {
+    let color: Color
+    let layer: WindowSurfacePreference.DeckLayer
+
+    @Environment(\.rafuWindowSurface) private var windowSurface
+
+    func body(content: Content) -> some View {
+        content.background(windowSurface.fill(color, layer))
+    }
+}
+
+private struct DeckShapeFillModifier<S: Shape>: ViewModifier {
+    let color: Color
+    let layer: WindowSurfacePreference.DeckLayer
+    let shape: S
+
+    @Environment(\.rafuWindowSurface) private var windowSurface
+
+    func body(content: Content) -> some View {
+        content.background(windowSurface.fill(color, layer), in: shape)
+    }
+}
+
+extension View {
+    /// A background inside the deck card that follows the frosted window
+    /// base (ADR 0038). Use it for every full-region fill in the deck and
+    /// on the Ensemble board, so no two translucent fills stack.
+    func rafuDeckFill(
+        _ color: Color, _ layer: WindowSurfacePreference.DeckLayer
+    ) -> some View {
+        modifier(DeckFillModifier(color: color, layer: layer))
+    }
+
+    /// `rafuDeckFill` in a shape (a capsule or rounded board control).
+    func rafuDeckFill<S: Shape>(
+        _ color: Color, _ layer: WindowSurfacePreference.DeckLayer, in shape: S
+    ) -> some View {
+        modifier(DeckShapeFillModifier(color: color, layer: layer, shape: shape))
+    }
+}
+
 /// The behind-window effect settings, shared by the backdrop and the deck's
 /// corner wedges so the two match pixel for pixel.
 enum WindowFrostMaterial {

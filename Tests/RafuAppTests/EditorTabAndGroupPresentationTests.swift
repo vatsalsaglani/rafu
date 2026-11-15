@@ -89,8 +89,10 @@ struct EditorTabAndGroupPresentationTests {
         // The shelf is the deck card's header row in its own tone
         // (`tabBarBackground`: the card tone in Indigo, one step below it in
         // Khadi), and a fixed height so an overflowing strip cannot grow it.
-        #expect(shelf.contains(".background(theme.palette.tabBarBackground)"))
-        #expect(!shelf.contains(".background(theme.palette.editorBackground)"))
+        // Painted through `rafuDeckFill` (ADR 0038): opaque in Solid, at the
+        // deck opacity in Frosted.
+        #expect(shelf.contains(".rafuDeckFill(theme.palette.tabBarBackground, .deck)"))
+        #expect(!shelf.contains("theme.palette.editorBackground"))
         #expect(shelf.contains(".frame(height: WorkbenchTextHeightPolicy.tabShelfHeight("))
         #expect(!shelf.contains("minHeight:"))
         // One hairline under the whole card header: the shelf's own hairline
@@ -104,7 +106,8 @@ struct EditorTabAndGroupPresentationTests {
         #expect(bar.contains("EditorTabShelf(showsBottomHairline: !breadcrumbFollows)"))
 
         let breadcrumb = try Self.source("Sources/RafuApp/Views/EditorBreadcrumbView.swift")
-        #expect(breadcrumb.contains(".background(theme.palette.editorBackground)"))
+        // A deck row (ADR 0038): opaque in Solid, deck opacity in Frosted.
+        #expect(breadcrumb.contains(".rafuDeckFill(theme.palette.editorBackground, .deck)"))
         #expect(!breadcrumb.contains("tabBarBackground"))
         #expect(breadcrumb.contains(".frame(height: RafuMetrics.breadcrumbHeight)"))
         #expect(breadcrumb.contains("Divider().overlay(theme.palette.borderSubtle)"))
@@ -262,7 +265,10 @@ struct EditorTabAndGroupPresentationTests {
         #expect(tree.contains(".frame(minHeight: 150)"))
         #expect(tree.contains(".padding(.trailing, compensatingInset)"))
         #expect(tree.contains(".padding(.bottom, compensatingInset)"))
-        #expect(tree.contains(".background(theme.palette.appBackground)"))
+        // The gaps between groups are the frame: `appBackground` in Solid,
+        // the frost in Frosted (ADR 0038), never a direct opaque fill.
+        #expect(tree.contains(".rafuFrameSurface(.app)"))
+        #expect(!tree.contains(".background(theme.palette.appBackground)"))
         #expect(!tree.contains(".clipShape("))
         #expect(!tree.contains(".mask("))
     }

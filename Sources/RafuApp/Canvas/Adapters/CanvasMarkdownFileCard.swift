@@ -77,7 +77,7 @@ struct CanvasMarkdownFileCard: View {
         // Not `.scrollDisabled` until active: a hovered card scrolls with the
         // wheel or trackpad. The board's monitor (`CanvasScrollRouter`) passes
         // the event on only while this view can still scroll that way.
-        .background(theme.palette.editorBackground)
+        .rafuDeckFill(theme.palette.editorBackground, .underlay)
         .environment(
             \.openURL,
             OpenURLAction { url in

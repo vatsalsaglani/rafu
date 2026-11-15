@@ -25,7 +25,7 @@ struct GeneratedViewCard: View {
             GeneratedViewBody(cardID: card.id, model: model)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .background(jsonTheme.color.surface)
+        .rafuDeckFill(jsonTheme.color.surface, .underlay)
         .jsonRenderTheme(jsonTheme)
         .environment(\.generatedViewBoardContext, model.boardContext)
         // Web images: the board's provider, scoped to this card (jr-4b). Nothing is fetched

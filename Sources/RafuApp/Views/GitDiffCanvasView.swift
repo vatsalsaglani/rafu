@@ -41,7 +41,7 @@ struct GitSideBySideDiffView: View {
                 diffTable
             }
         }
-        .background(theme.palette.editorBackground)
+        .rafuDeckFill(theme.palette.editorBackground, .content)
         .task(id: openDiff.id) {
             // Guard the assignment against a superseded task: `.task(id:)`
             // cancels but does not await the prior task, and a parse that
@@ -162,7 +162,8 @@ struct GitSideBySideDiffView: View {
                             diffColumnTitle("After", symbol: "plus")
                         }
                         .frame(height: 28)
-                        .background(theme.palette.tabBarBackground)
+                        // Pinned: rows scroll under it.
+                        .rafuDeckFill(theme.palette.tabBarBackground, .pinned)
                     }
                 }
                 .frame(

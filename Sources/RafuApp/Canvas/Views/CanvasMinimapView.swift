@@ -42,9 +42,9 @@ struct CanvasMinimapView: View {
             context.stroke(frame, with: .color(frameColor), lineWidth: 1.5)
         }
         .frame(width: CanvasMinimapLayout.size.width, height: CanvasMinimapLayout.size.height)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(theme.palette.elevatedBackground)
+        .rafuDeckFill(
+            theme.palette.elevatedBackground, .card,
+            in: RoundedRectangle(cornerRadius: 8, style: .continuous)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 8, style: .continuous)

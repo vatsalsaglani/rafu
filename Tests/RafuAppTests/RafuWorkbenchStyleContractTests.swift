@@ -82,9 +82,18 @@ struct RafuWorkbenchStyleContractTests {
         #expect(source.contains("struct WorkbenchDeckSurface<Content: View>"))
         #expect(source.contains("struct EditorGroupSurface<Content: View>"))
         #expect(!source.contains(".clipShape("))
-        // Round 4: the one mask shapes the deck's corner-wedge DECORATION
-        // (frame + shadow), never the card's content.
-        #expect(Self.occurrences(of: ".mask", in: source) == 1)
+        // Round 4: one mask shapes the deck's corner-wedge DECORATION
+        // (frame + shadow). ADR 0038 step 2 adds the second: Frosted masks
+        // the deck's shadow shape to a ring outside the card
+        // (`ShadowOutsideOnlyModifier`), so a translucent deck never shows
+        // its own shadow. Neither touches the card's content.
+        #expect(Self.occurrences(of: ".mask", in: source) == 2)
+        let ring = try Self.section(
+            of: source,
+            from: "private struct ShadowOutsideOnlyModifier: ViewModifier",
+            to: "private nonisolated struct ShadowRingMaskShape: Shape"
+        )
+        #expect(ring.contains("content.mask {"))
         let wedges = try Self.section(
             of: source,
             from: "private struct WorkbenchDeckCornerWedges: View",

@@ -71,6 +71,7 @@ nonisolated enum CanvasTerminalAddStart: Equatable, Sendable {
 /// manager remains the runtime owner; no second PTY or process model is added.
 struct CanvasTerminalCard: View {
     @Environment(\.rafuTheme) private var theme
+    @Environment(\.rafuWindowSurface) private var windowSurface
     @Environment(\.canvasPresentationID) private var presentationID
     let card: CanvasCard
     let board: CanvasBoardState
@@ -114,7 +115,7 @@ struct CanvasTerminalCard: View {
                 case .claim:
                     // The claim lands in `onChange(of: block)` below; until
                     // then draw the terminal's background, not a button.
-                    theme.palette.editorBackground
+                    windowSurface.fill(theme.palette.editorBackground, .cardContent)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 case .heldElsewhere(let holder):
                     heldElsewhereBlock(holder, id: id)

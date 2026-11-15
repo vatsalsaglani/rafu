@@ -248,6 +248,7 @@ struct CodeEditorView: NSViewRepresentable {
         host.setEditorVisible(isVisible)
         (scrollView as? EditorDropForwardingScrollView)?.dropForwarding = dropForwarding
         coordinator.theme = theme
+        coordinator.backgroundAlpha = context.environment.rafuWindowSurface.contentOpacity
         coordinator.gitLineChangesProvider = gitLineChangesProvider
         coordinator.requestGitRefresh = requestGitRefresh
         coordinator.gitPeekActions = gitPeekActions
@@ -442,6 +443,9 @@ struct CodeEditorView: NSViewRepresentable {
 
         private(set) weak var document: EditorDocument?
         var theme: RafuTheme
+        /// The frosted deck's content opacity (1 when opaque), read from the
+        /// environment in `updateNSView`. Only the editor's base takes it.
+        var backgroundAlpha: Double = 1
         weak var textView: RafuTextView?
         weak var gutterRuler: EditorGutterRulerView?
         var loadTask: Task<Void, Never>?
@@ -740,14 +744,14 @@ struct CodeEditorView: NSViewRepresentable {
             to textView: RafuTextView,
             scrollView: NSScrollView
         ) -> Bool {
-            let colors = EditorColorSet(theme: theme)
+            let colors = EditorColorSet(theme: theme, backgroundAlpha: backgroundAlpha)
             guard appliedEditorColors != colors else { return false }
             appliedEditorColors = colors
-            let background = NSColor(rafuHex: colors.background)
+            let background = colors.scrollBackground
             scrollView.backgroundColor = background
             EditorThemedScroller.apply(
                 to: scrollView, background: background, isDark: colors.isDark)
-            textView.backgroundColor = background
+            textView.backgroundColor = colors.textBackground
             textView.textColor = NSColor(rafuHex: colors.foreground)
             textView.insertionPointColor = NSColor(rafuHex: colors.cursor)
             return true
@@ -880,7 +884,7 @@ struct CodeEditorView: NSViewRepresentable {
                 textView.fileBlameColor = theme.editorInlineBlameColor
                 textView.inlineCompletionGhostColor = theme.editorInlineBlameColor
             }
-            gutterRuler?.style = EditorGutterStyle(theme: theme)
+            gutterRuler?.style = EditorGutterStyle(theme: theme, backgroundAlpha: backgroundAlpha)
             if let findController {
                 let matchColor = theme.editorFindMatchBackgroundColor
                 let activeColor = theme.editorFindMatchActiveBackgroundColor

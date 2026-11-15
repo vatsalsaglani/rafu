@@ -19,6 +19,9 @@ struct WorkspaceWindowView: View {
         WindowSurfacePreference.Style.solid.rawValue
     @AppStorage(WindowSurfacePreference.frostLevelKey) private var windowSurfaceFrost =
         WindowSurfacePreference.FrostLevel.balanced.rawValue
+    /// Settings → Appearance → "Frost the editor and terminals".
+    @AppStorage(WindowSurfacePreference.frostContentKey) private var windowSurfaceFrostsContent =
+        true
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var colorSchemeContrast
 
@@ -29,6 +32,7 @@ struct WorkspaceWindowView: View {
         return WindowSurfacePreference.resolve(
             style: windowSurfaceStyle,
             level: windowSurfaceFrost,
+            frostsContent: windowSurfaceFrostsContent,
             isDark: theme.isDark,
             reduceTransparency: reduceTransparency,
             increaseContrast: colorSchemeContrast == .increased

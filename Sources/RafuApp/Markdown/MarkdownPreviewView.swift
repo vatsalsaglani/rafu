@@ -63,7 +63,7 @@ struct MarkdownPreviewView: View {
             .padding(.vertical, 30)
             .frame(maxWidth: .infinity, alignment: .center)
         }
-        .background(Color(rafuHex: theme.editor.background))
+        .rafuDeckFill(Color(rafuHex: theme.editor.background), .content)
         .task(id: "\(document.url.path)#\(document.revision)") {
             do {
                 let source = try await fileService.readText(at: document.url)

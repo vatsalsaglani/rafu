@@ -121,7 +121,8 @@ struct TerminalGroupView: View {
         rendered(snapshot.root)
             .accessibilityElement(children: .contain)
             .accessibilityLabel("Terminal Group \(snapshot.name.rawValue)")
-            .background(theme.palette.editorBackground)
+            // Frosted: each pane's header and terminal paint themselves.
+            .rafuDeckFill(theme.palette.editorBackground, .underlay)
     }
 
     private func rendered(_ node: TerminalGroupNode) -> AnyView {
@@ -182,7 +183,7 @@ private struct TerminalGroupPaneView: View {
             header
             terminalContent
         }
-        .background(theme.palette.editorBackground)
+        .rafuDeckFill(theme.palette.editorBackground, .underlay)
         .overlay {
             if isFocused {
                 Rectangle()
@@ -269,6 +270,8 @@ private struct TerminalGroupPaneView: View {
         .padding(.horizontal, 8)
         .frame(minHeight: 28)
         .background(paneTint.opacity(0.14))
+        // Solid has the pane's opaque base under the tint; Frosted does not.
+        .rafuDeckFill(theme.palette.editorBackground, .frostedBase)
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(theme.palette.borderSubtle)
@@ -363,6 +366,7 @@ private struct TerminalGroupPaneView: View {
                 "Terminal Pane Unavailable", systemImage: "terminal", description: Text(message)
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .rafuDeckFill(theme.palette.editorBackground, .frostedBase)
         } else if pane.status == .stopped {
             ContentUnavailableView {
                 Label("Terminal Pane Stopped", systemImage: "stop.circle")
@@ -379,6 +383,7 @@ private struct TerminalGroupPaneView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .rafuDeckFill(theme.palette.editorBackground, .frostedBase)
         } else {
             ContentUnavailableView(
                 "Terminal Pane Unavailable",
@@ -386,6 +391,7 @@ private struct TerminalGroupPaneView: View {
                 description: Text("The terminal controller is unavailable.")
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .rafuDeckFill(theme.palette.editorBackground, .frostedBase)
         }
     }
 

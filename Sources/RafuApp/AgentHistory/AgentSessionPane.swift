@@ -25,7 +25,7 @@ struct AgentSessionPane: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .background(theme.palette.editorBackground)
+        .rafuDeckFill(theme.palette.editorBackground, .content)
     }
 }
 

@@ -1273,10 +1273,13 @@ final class WorkspaceTerminalController: Identifiable {
     }
 
     /// Returns the live terminal view, creating it and spawning the login
-    /// shell on first use.
-    func makeOrReuseView(theme: RafuTheme) -> LocalProcessTerminalView {
+    /// shell on first use. `backgroundAlpha` is
+    /// `WindowSurfacePreference.terminalBackgroundAlpha` (1 when opaque).
+    func makeOrReuseView(
+        theme: RafuTheme, backgroundAlpha: Double = 1
+    ) -> LocalProcessTerminalView {
         if let terminalView {
-            applyTheme(theme, to: terminalView)
+            applyTheme(theme, backgroundAlpha: backgroundAlpha, to: terminalView)
             return terminalView
         }
         let view = RafuTerminalView(frame: .zero)
@@ -1307,7 +1310,7 @@ final class WorkspaceTerminalController: Identifiable {
         view.onOutputActivity = { [weak self] bytes in
             self?.noteOutputActivity(bytes: bytes)
         }
-        applyTheme(theme, to: view)
+        applyTheme(theme, backgroundAlpha: backgroundAlpha, to: view)
 
         terminalView = view
         status = .running
@@ -1459,15 +1462,48 @@ final class WorkspaceTerminalController: Identifiable {
         }
     }
 
-    func applyTheme(_ theme: RafuTheme, to view: LocalProcessTerminalView) {
-        let signature = "\(theme.name)|\(theme.editor.background)|\(theme.editorFontSize)"
+    /// Pushes the theme into SwiftTerm, only when something changed.
+    ///
+    /// `backgroundAlpha` below 1 is the frosted deck (ADR 0038): SwiftTerm
+    /// (CoreGraphics path) fills each row's default background with
+    /// `nativeBackgroundColor`, so an alpha there shows the window's blur
+    /// through the terminal while glyphs, selection and explicit cell colours
+    /// stay opaque. SwiftTerm also sets `layer.backgroundColor` once, in
+    /// `setupOptions`, from the colour it had then; that layer colour would
+    /// sit opaque under the cells, so it is cleared whenever the alpha is
+    /// below 1 and restored to the theme colour at 1.
+    func applyTheme(
+        _ theme: RafuTheme, backgroundAlpha: Double = 1, to view: LocalProcessTerminalView
+    ) {
+        let signature =
+            "\(theme.name)|\(theme.editor.background)|\(theme.editorFontSize)|\(backgroundAlpha)"
         guard signature != appliedStyleSignature else { return }
         appliedStyleSignature = signature
-        view.nativeBackgroundColor = NSColor(rafuHex: theme.editor.background)
+        let background = NSColor(rafuHex: theme.editor.background)
+        let nativeBackground = Self.terminalBackground(background, alpha: backgroundAlpha)
+        view.nativeBackgroundColor = nativeBackground
         view.nativeForegroundColor = NSColor(rafuHex: theme.editor.foreground)
         view.caretColor = NSColor(rafuHex: theme.editor.cursor)
         view.font = Self.terminalFont(for: theme)
         view.installColors(Self.ansiPalette(for: theme))
+        // After the font: the margin strip depends on the cell height.
+        if backgroundAlpha < 1 {
+            view.layer?.backgroundColor = NSColor.clear.cgColor
+            (view as? RafuTerminalView)?.setMarginFill(nativeBackground)
+        } else if let layer = view.layer, layer.backgroundColor?.alpha == 0 {
+            // Back from frosted: an opaque layer colour again (the theme's,
+            // not the system colour SwiftTerm first set).
+            layer.backgroundColor = background.cgColor
+            (view as? RafuTerminalView)?.setMarginFill(nil)
+        }
+        view.needsDisplay = true
+    }
+
+    /// The theme's terminal background at `alpha`, clamped to 0...1. The
+    /// RGB never changes, so dim text (SGR 2) still mixes toward it.
+    static func terminalBackground(_ color: NSColor, alpha: Double) -> NSColor {
+        let clamped = min(1, max(0, alpha))
+        return clamped >= 1 ? color : color.withAlphaComponent(CGFloat(clamped))
     }
 
     /// Shell prompts (powerlevel10k, starship) rely on Nerd Font glyphs the

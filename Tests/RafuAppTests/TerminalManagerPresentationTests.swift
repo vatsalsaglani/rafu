@@ -314,8 +314,10 @@ struct TerminalManagerSourceContractTests {
         #expect(!body.contains(".mask"))
         #expect(!body.contains("CornerCutoutOverlay"))
         #expect(!body.contains("EditorGroupSurface"))
-        #expect(body.contains("controller.makeOrReuseView(theme: theme)"))
-        #expect(body.contains("controller.applyTheme(theme, to: nsView)"))
+        // ADR 0038 step 3: both calls carry the frosted background alpha
+        // (1 when opaque), read once from the window surface.
+        #expect(body.contains("controller.makeOrReuseView(theme: theme, backgroundAlpha: alpha)"))
+        #expect(body.contains("controller.applyTheme(theme, backgroundAlpha: alpha, to: nsView)"))
     }
 
     private static func source(_ path: String, file: StaticString = #filePath) throws -> String {

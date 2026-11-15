@@ -30,6 +30,11 @@ final class EditorThemedScroller: NSScroller {
     /// legacy style on every Mac. This one only changes the legacy track.
     override class var isCompatibleWithOverlayScrollers: Bool { true }
 
+    /// A translucent track (frosted deck) must not claim to be opaque.
+    override var isOpaque: Bool {
+        trackColor.alphaComponent < 1 ? false : super.isOpaque
+    }
+
     override func drawKnobSlot(in slotRect: NSRect, highlight flag: Bool) {
         guard scrollerStyle == .legacy else {
             super.drawKnobSlot(in: slotRect, highlight: flag)
