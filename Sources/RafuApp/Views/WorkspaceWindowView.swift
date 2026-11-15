@@ -14,19 +14,25 @@ struct WorkspaceWindowView: View {
     @AppStorage(FileIconProvider.colouredFileIconsKey) private var colouredFileIcons = false
     /// This window's voice companion: its corner, tuck and toggles.
     @State private var voiceCompanion = VoiceCompanionModel()
-    // SPIKE (frosted window base, Step 0): debug defaults, read live.
-    @AppStorage("RafuFrostSpike") private var frostMechanism = ""
-    @AppStorage("RafuFrostSpikeMaterial") private var frostMaterial = ""
-    @AppStorage("RafuFrostSpikeState") private var frostState = "active"
-    @AppStorage("RafuFrostSpikeTint") private var frostTint = 0.74
-    @AppStorage("RafuFrostSpikeWedge") private var frostWedge = "masked"
-    @AppStorage("RafuFrostSpikeClear") private var frostClearWindow = false
+    /// Settings → Appearance → Window background and Frost.
+    @AppStorage(WindowSurfacePreference.styleKey) private var windowSurfaceStyle =
+        WindowSurfacePreference.Style.solid.rawValue
+    @AppStorage(WindowSurfacePreference.frostLevelKey) private var windowSurfaceFrost =
+        WindowSurfacePreference.FrostLevel.balanced.rawValue
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
 
-    private var frostSpike: FrostSpikeConfig? {
-        guard !showsWelcome else { return nil }
-        return FrostSpikeConfig.resolve(
-            mechanism: frostMechanism, material: frostMaterial, state: frostState,
-            tint: frostTint, wedge: frostWedge, clearWindow: frostClearWindow)
+    /// Resolved per window. The welcome window is always Solid; Reduce
+    /// Transparency and Increase Contrast force Solid live.
+    private var windowSurface: WindowSurfacePreference.Resolved {
+        guard !showsWelcome else { return .solid }
+        return WindowSurfacePreference.resolve(
+            style: windowSurfaceStyle,
+            level: windowSurfaceFrost,
+            isDark: theme.isDark,
+            reduceTransparency: reduceTransparency,
+            increaseContrast: colorSchemeContrast == .increased
+        )
     }
 
     var body: some View {
@@ -46,11 +52,9 @@ struct WorkspaceWindowView: View {
         // (see flat-window-chrome-titlebar-merge.md).
         .background(
             FlatWindowChrome(
-                titleBarColor: frostSpike?.clearWindow == true
-                    ? .clear
-                    : NSColor(
-                        showsWelcome ? theme.palette.editorBackground : theme.palette.appBackground
-                    ),
+                titleBarColor: NSColor(
+                    showsWelcome ? theme.palette.editorBackground : theme.palette.appBackground
+                ),
                 topologyToken: windowChromeTopologyToken,
                 hidesTrafficLights: false,
                 onFullScreenChange: { isFullScreen in
@@ -72,10 +76,11 @@ struct WorkspaceWindowView: View {
         .modifier(CanvasPresentations(session: session))
         // Raised from 720, then from 760 when the HSplitView divider
         // became the explicit `WorkbenchSplitHandle`, then to 774 when the
-        // deck inset grew to 10 pt: the left Activity Rail (40) + sidebar
-        // min (220) + the handle's hit area (10) + deck lane (editor min
-        // 472 + 20 pt inset) floor to 762; 774 keeps the same 12 pt margin
-        // above it. See `workbenchContent`'s comment.
+        // deck inset grew. The window gap tightening kept 774: the floor is
+        // now the Activity Rail (38) + sidebar min (220) + the handle's hit
+        // area (10) + deck lane (editor min 472 + leading 6 + trailing 8)
+        // = 754, so the deck gains 20 pt at the minimum width. See
+        // `workbenchContent`'s comment.
         .frame(minWidth: 774, minHeight: 480)
         .navigationTitle(session.windowTitle)
         .focusedSceneValue(\.workspaceSession, session)
@@ -93,8 +98,7 @@ struct WorkspaceWindowView: View {
         .environment(\.rafuColouredFileIcons, colouredFileIcons)
         // Board cards report their drags, so the orb tucks away.
         .environment(voiceCompanion)
-        .environment(\.rafuFrostSpike, frostSpike)
-        .modifier(FrostSpikeContainerBackground(config: frostSpike))
+        .environment(\.rafuWindowSurface, windowSurface)
     }
 
     private var showsWelcome: Bool {
@@ -180,11 +184,11 @@ struct WorkspaceWindowView: View {
                 // `editorCanvas` now, not a separate docked panel here.
                 WorkbenchDeckSurface {
                     editorCanvas
-                        // Resize floor: rail 40 + sidebar min 220 + the
+                        // Resize floor: rail 38 + sidebar min 220 + the
                         // handle's 10 pt hit area + deck lane (this 472 +
-                        // the 12 pt inset on both sides below, 24) = 766.
-                        // The window's own `minWidth` (below, in `body`)
-                        // is raised to 774 to clear it with a small margin.
+                        // the 6 pt leading and 8 pt trailing insets below)
+                        // = 754. The window's own `minWidth` (above, in
+                        // `body`) stays 774, clear of it.
                         // `sidebarWidth` is not window-responsive, so this
                         // floor holds only at a 220 pt sidebar. Below the
                         // true floor the deck clips at the trailing edge
@@ -194,8 +198,8 @@ struct WorkspaceWindowView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .layoutPriority(1)
                 }
-                // Equal gutter on all four sides when the sidebar is
-                // collapsed: the handle's hit area counts toward it.
+                // Per-edge gutter (`RafuMetrics.deckInset*`); a collapsed
+                // sidebar's handle hit area counts toward the leading one.
                 .padding(
                     WorkbenchDeckLane.padding(
                         isSidebarCollapsed: session.isSidebarCollapsed,
@@ -203,7 +207,7 @@ struct WorkspaceWindowView: View {
                     )
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .frostSpikeFrame(theme.palette.appBackground)
+                .rafuFrameSurface(.app)
                 .layoutPriority(1)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
@@ -219,9 +223,13 @@ struct WorkspaceWindowView: View {
             WorkspaceStatusBar(session: session)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        // Frosted: the one behind-window blur and the one frame tint, below
+        // every frame surface (which then paints nothing). Not mounted in
+        // Solid, so Solid costs nothing.
         .background {
-            if let frostSpike {
-                FrostSpikeBackdrop(config: frostSpike, tint: theme.palette.appBackground)
+            if windowSurface.isFrosted {
+                WindowFrostBackdrop(
+                    tint: theme.palette.appBackground, tintOpacity: windowSurface.tintOpacity)
             }
         }
     }

@@ -7,6 +7,13 @@ struct RafuApplication: App {
 
     @NSApplicationDelegateAdaptor(RafuAppDelegate.self) private var appDelegate
 
+    init() {
+        // Before any window reads the Window background setting: a build
+        // that ran the frosted-base spike keeps its frost as the real
+        // setting, and the spike's debug keys go away.
+        WindowSurfacePreference.migrateFrostSpike(defaults: .standard)
+    }
+
     var body: some Scene {
         WindowGroup(Self.displayName, id: "workspace") {
             WorkspaceSceneRoot()

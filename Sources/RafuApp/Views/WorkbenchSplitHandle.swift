@@ -39,24 +39,33 @@ nonisolated enum WorkbenchSidebarResize {
     }
 }
 
-/// The gutter around the workbench deck card. The card sits `inset` from the
-/// frame on its top, trailing, and bottom edges. Beside an open sidebar the
-/// split handle's hit area adds to the leading gutter, which separates the
-/// flat sidebar from the card. With the sidebar collapsed, the handle stays
-/// (so a drag can reopen the sidebar) and its hit area becomes part of the
-/// gutter: the leading padding shrinks by the handle's width, so the card
-/// sits at the same `inset` from the Activity Rail as from every other edge
-/// (design polish round 4; before, a collapsed sidebar left a gutter of
-/// handle + inset on the leading side only).
+/// The gutter around the workbench deck card: `RafuMetrics.deckInset*` on
+/// each edge. Beside an open sidebar the split handle's hit area adds to the
+/// leading gutter, which separates the flat sidebar from the card. With the
+/// sidebar collapsed, the handle stays (so a drag can reopen the sidebar)
+/// and its hit area becomes part of the gutter: the leading padding shrinks
+/// by the handle's width, never below zero. With the 6 pt leading inset
+/// that leaves the handle's 10 pt as the whole rail-to-card gap (window gap
+/// tightening; before, 12 pt).
 nonisolated enum WorkbenchDeckLane {
     static func padding(
         isSidebarCollapsed: Bool,
         handleWidth: CGFloat,
-        inset: CGFloat = RafuMetrics.workbenchInset
+        insets: EdgeInsets = WorkbenchDeckLane.insets
     ) -> EdgeInsets {
-        let leading = isSidebarCollapsed ? max(0, inset - handleWidth) : inset
-        return EdgeInsets(top: inset, leading: leading, bottom: inset, trailing: inset)
+        var padding = insets
+        if isSidebarCollapsed {
+            padding.leading = max(0, insets.leading - handleWidth)
+        }
+        return padding
     }
+
+    static let insets = EdgeInsets(
+        top: RafuMetrics.deckInsetTop,
+        leading: RafuMetrics.deckInsetLeading,
+        bottom: RafuMetrics.deckInsetBottom,
+        trailing: RafuMetrics.deckInsetTrailing
+    )
 }
 
 /// The explicit boundary between the left sidebar and the workbench deck

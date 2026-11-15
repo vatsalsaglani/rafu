@@ -79,6 +79,45 @@ nonisolated struct AttachedWorkbenchTabPresentation: Equatable, Sendable {
     }
 }
 
+/// The window frame's paint roles: the surfaces outside the deck card.
+nonisolated enum WorkbenchFrameRole: Equatable, Sendable {
+    /// Titlebar row, Activity Rail, and the deck lane's gutter.
+    case app
+    /// The sidebar pane, in every navigator mode.
+    case sidebar
+    case statusBar
+}
+
+/// Paints one frame surface. Solid: the role's opaque theme token, as
+/// before. Frosted: nothing, so the window's one backdrop and tint
+/// (`WindowFrostBackdrop`) show through. Frame surfaces use only this
+/// modifier, never a direct fill, so nested paints (the sidebar pane and the
+/// Files tree inside it) never stack a second translucent tint.
+private struct WorkbenchFrameSurface: ViewModifier {
+    let role: WorkbenchFrameRole
+
+    @Environment(\.rafuTheme) private var theme
+    @Environment(\.rafuWindowSurface) private var windowSurface
+
+    func body(content: Content) -> some View {
+        content.background(windowSurface.isFrosted ? Color.clear : fill)
+    }
+
+    private var fill: Color {
+        switch role {
+        case .app: theme.palette.appBackground
+        case .sidebar: theme.palette.sidebarBackground
+        case .statusBar: theme.palette.statusBarBackground
+        }
+    }
+}
+
+extension View {
+    func rafuFrameSurface(_ role: WorkbenchFrameRole) -> some View {
+        modifier(WorkbenchFrameSurface(role: role))
+    }
+}
+
 /// Four corner wedges that visually expose the surrounding surface without
 /// changing the decorated content's geometry, hit region, or responder chain.
 /// Flat: only for a surface that casts no shadow (an editor group). The deck
@@ -118,8 +157,7 @@ struct WorkbenchDeckSurface<Content: View>: View {
 
     @Environment(\.rafuTheme) private var theme
     @Environment(\.colorSchemeContrast) private var colorSchemeContrast
-    // SPIKE (frosted window base, Step 0).
-    @Environment(\.rafuFrostSpike) private var frostSpike
+    @Environment(\.rafuWindowSurface) private var windowSurface
 
     init(@ViewBuilder content: () -> Content) {
         self.content = content()
@@ -128,9 +166,6 @@ struct WorkbenchDeckSurface<Content: View>: View {
     var body: some View {
         content
             .background(theme.palette.editorBackground)
-            // SPIKE: the "clip" wedge mode clips the deck instead of
-            // painting wedges (breaks the no-clip rule; measured only).
-            .modifier(FrostSpikeDeckClip(isOn: frostSpike?.wedge == .clip))
             .background {
                 // The shadow is cast by a dedicated rounded shape behind the
                 // card's own flat fill, never applied to `content` itself —
@@ -146,19 +181,19 @@ struct WorkbenchDeckSurface<Content: View>: View {
                 // wedges cut the shadow off inside the card's bounding box,
                 // which left visible square points at the bottom corners in
                 // Khadi (design polish round 4).
-                if let frostSpike, frostSpike.needsMaskedWedges {
-                    FrostSpikeWedgeBackdrops(
-                        config: frostSpike, radius: RafuMetrics.radiusWorkbenchDeck)
+                // Frosted: the frame behind the corners is the blur plus the
+                // root tint, so each corner gets its own masked behind-window
+                // view and the wedge paints the tint at the same opacity.
+                if windowSurface.isFrosted {
+                    WindowFrostWedges(radius: RafuMetrics.radiusWorkbenchDeck)
                 }
-                if frostSpike?.wedge != .clip {
-                    WorkbenchDeckCornerWedges(
-                        surrounding: frostSpike?.wedge == .masked
-                            ? theme.palette.appBackground.opacity(frostSpike?.tint ?? 1)
-                            : theme.palette.appBackground,
-                        fill: theme.palette.editorBackground,
-                        shadow: shadowColor
-                    )
-                }
+                WorkbenchDeckCornerWedges(
+                    surrounding: windowSurface.isFrosted
+                        ? theme.palette.appBackground.opacity(windowSurface.tintOpacity)
+                        : theme.palette.appBackground,
+                    fill: theme.palette.editorBackground,
+                    shadow: shadowColor
+                )
                 // The card's edge hairline, in every theme. A light theme's
                 // shadow is faint, so this hairline is what separates the
                 // card from the frame there; a dark theme reads mostly from

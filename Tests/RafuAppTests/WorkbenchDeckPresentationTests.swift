@@ -17,7 +17,7 @@ struct WorkbenchDeckPresentationTests {
         let deckLane = try Self.section(
             in: windowContent,
             from: "WorkbenchDeckSurface {",
-            through: ".frostSpikeFrame(theme.palette.appBackground)"
+            through: ".rafuFrameSurface(.app)"
         )
 
         #expect(Self.occurrences(of: "WorkbenchDeckSurface {", in: windowContent) == 1)
@@ -62,44 +62,57 @@ struct WorkbenchDeckPresentationTests {
         let deckLane = try Self.section(
             in: source,
             from: "WorkbenchDeckSurface {",
-            through: ".frostSpikeFrame(theme.palette.appBackground)"
+            through: ".rafuFrameSurface(.app)"
         )
         let padding = try #require(
             deckLane.range(of: "WorkbenchDeckLane.padding(")
         )
         let backing = try #require(
-            deckLane.range(of: ".frostSpikeFrame(theme.palette.appBackground)")
+            deckLane.range(of: ".rafuFrameSurface(.app)")
         )
 
         // Design polish round 2: 8 → 10 so the stronger deck shadow fits;
-        // round 4: 10 → 12 for the deeper shadow.
-        #expect(RafuMetrics.workbenchInset == 12)
+        // round 4: 10 → 12 for the deeper shadow; window gap tightening:
+        // per edge, top 6, leading 6, trailing 8, bottom 12.
+        #expect(
+            WorkbenchDeckLane.insets
+                == EdgeInsets(top: 6, leading: 6, bottom: 12, trailing: 8))
         #expect(deckLane.contains("isSidebarCollapsed: session.isSidebarCollapsed"))
         #expect(deckLane.contains("handleWidth: WorkbenchSplitHandle.hitAreaWidth"))
         #expect(Self.occurrences(of: ".padding(", in: deckLane) == 2)
         #expect(padding.lowerBound < backing.lowerBound)
     }
 
-    @Test("A collapsed sidebar leaves the same gutter beside the card as every other edge")
+    @Test("A collapsed sidebar leaves only the split handle between the rail and the card")
     @MainActor
-    func collapsedGutterIsEqual() {
-        let inset = RafuMetrics.workbenchInset
+    func collapsedGutterIsTheHandle() {
         let handle = WorkbenchSplitHandle.hitAreaWidth
+        let insets = WorkbenchDeckLane.insets
         let open = WorkbenchDeckLane.padding(isSidebarCollapsed: false, handleWidth: handle)
-        #expect(open == EdgeInsets(top: inset, leading: inset, bottom: inset, trailing: inset))
+        #expect(open == insets)
+        // Sidebar to card: handle 10 + leading 6 = 16 (was 10 + 12 = 22).
+        #expect(handle + open.leading == 16)
 
-        // Collapsed: the handle's hit area is part of the gutter, so the
-        // rail-to-card distance equals the inset on the other three sides.
+        // Collapsed: the handle's hit area is part of the gutter. With a
+        // leading inset below the handle's width, the handle alone is the
+        // rail-to-card gap (10, was 12); the other edges do not change.
         let collapsed = WorkbenchDeckLane.padding(isSidebarCollapsed: true, handleWidth: handle)
-        #expect(collapsed.leading + handle == inset)
-        #expect(collapsed.top == inset)
-        #expect(collapsed.bottom == inset)
-        #expect(collapsed.trailing == inset)
+        #expect(collapsed.leading == 0)
+        #expect(handle + collapsed.leading == 10)
+        #expect(collapsed.top == insets.top)
+        #expect(collapsed.bottom == insets.bottom)
+        #expect(collapsed.trailing == insets.trailing)
 
-        // A handle wider than the inset never yields negative padding.
+        // A leading inset wider than the handle keeps the remainder.
         let wide = WorkbenchDeckLane.padding(
-            isSidebarCollapsed: true, handleWidth: inset + 4, inset: inset)
-        #expect(wide.leading == 0)
+            isSidebarCollapsed: true, handleWidth: handle,
+            insets: EdgeInsets(top: 12, leading: 12, bottom: 12, trailing: 12))
+        #expect(wide.leading == 2)
+        // A handle wider than the inset never yields negative padding.
+        let narrow = WorkbenchDeckLane.padding(
+            isSidebarCollapsed: true, handleWidth: 20,
+            insets: EdgeInsets(top: 6, leading: 6, bottom: 6, trailing: 6))
+        #expect(narrow.leading == 0)
     }
 
     @Test("Native split geometry and interaction modifiers stay authoritative")
@@ -140,7 +153,7 @@ struct WorkbenchDeckPresentationTests {
     func filesLeafStaysFlat() throws {
         let source = try Self.source("Sources/RafuApp/Views/WorkspaceSidebarView.swift")
 
-        #expect(source.contains(".frostSpikeFrame(theme.palette.sidebarBackground)"))
+        #expect(source.contains(".rafuFrameSurface(.sidebar)"))
         #expect(source.contains(".listStyle(.plain)"))
         #expect(
             source.contains(".environment(\\.defaultMinListRowHeight, FileTreeMetrics.rowHeight)"))

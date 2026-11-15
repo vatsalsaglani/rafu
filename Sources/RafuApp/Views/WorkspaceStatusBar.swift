@@ -125,7 +125,7 @@ struct WorkspaceStatusBar: View {
         .foregroundStyle(theme.palette.textSecondary)
         .padding(.horizontal, 12)
         .frame(height: RafuMetrics.statusBarHeight)
-        .frostSpikeFrame(theme.palette.statusBarBackground)
+        .rafuFrameSurface(.statusBar)
         .overlay(alignment: .top) { Divider().overlay(theme.palette.borderSubtle) }
         // Pauses while the screen is locked or the displays sleep; the task
         // restarts, and reads at once, when they come back.

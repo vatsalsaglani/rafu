@@ -19,24 +19,37 @@ nonisolated enum RafuMetrics {
     // Compact semantic workbench tier (ADR 0022, amended by the frame+card
     // redesign). These values describe structure, not theme color, and
     // deliberately leave radiusPanel intact.
-    /// 12 pt (design polish round 4, up from 10; round 2 raised it from 8)
-    /// so the deeper deck shadow's radius + y-offset still fits inside the
-    /// frame gutter. The card sits this far from the frame on every side,
-    /// including beside a collapsed sidebar (`WorkbenchDeckLane`).
-    static let workbenchInset: CGFloat = 12
+    /// The frame gutter round the deck card, per edge (`WorkbenchDeckLane`).
+    /// History: 8 → 10 (round 2) → 12 on every side (round 4). The window
+    /// gap tightening (2026-11-15) gives the card more room on the edges the
+    /// user marked, keeping only what the deck shadow (radius 8, y 4) needs
+    /// on each edge:
+    /// - top 6: the shadow reaches `radius - y` = 4 above the card;
+    /// - leading 6: beside an open sidebar the split handle's 10 pt hit
+    ///   area adds to it (16 in total, shadow 8); beside a collapsed sidebar
+    ///   the handle alone is the gutter (10);
+    /// - trailing 8: the shadow reaches `radius` = 8 sideways, and the window
+    ///   edge would clip anything past it;
+    /// - bottom 12: the shadow reaches `radius + y` = 12 below the card,
+    ///   where the opaque status bar would cut it.
+    static let deckInsetTop: CGFloat = 6
+    static let deckInsetLeading: CGFloat = 6
+    static let deckInsetTrailing: CGFloat = 8
+    static let deckInsetBottom: CGFloat = 12
     static let editorGroupGapTarget: CGFloat = 4
     static let radiusWorkbenchDeck: CGFloat = 12
     static let radiusEditorGroup: CGFloat = 5
     /// Soft shadow cast by the raised workbench deck onto the frame beneath
-    /// it (frame + card redesign, phase 1). Radius + vertical offset stay
-    /// inside `workbenchInset` so the deck lane's gutter never clips the
-    /// shadow. Window redesign phase 4 adds the second, lighter shadow this
+    /// it (frame + card redesign, phase 1). Its reach on each edge stays
+    /// inside that edge's `deckInset*` gutter (see there), so nothing clips
+    /// or cuts the shadow. Window redesign phase 4 adds the second, lighter shadow this
     /// comment deferred: the selected tab card below reuses
     /// `WorkbenchDeckShadowStyle`'s theme-aware color with its own, smaller
     /// radius/offset. Design polish round 2 raised the deck's reach from
     /// 6 + 2 to 7 + 3 so the card visibly lifts off the darker Indigo frame;
     /// round 4 raised it again to 8 + 4 (with the inset 10 → 12) so the card
-    /// reads clearly raised; 8 + 4 = 12 is the most the 12 pt inset holds.
+    /// reads clearly raised; 8 + 4 = 12 is the most the 12 pt bottom inset
+    /// holds.
     static let deckShadowRadius: CGFloat = 8
     static let deckShadowY: CGFloat = 4
     /// Window redesign phase 4: tabs are detached rounded cards, not attached
@@ -61,11 +74,11 @@ nonisolated enum RafuMetrics {
     static let breadcrumbHeight: CGFloat = 26
     /// Every navigator panel header (Files, Search, Source Control,
     /// Terminals, History) puts its title's centre this far below the
-    /// sidebar pane's top: the deck card's inset plus half its tab shelf,
+    /// sidebar pane's top: the deck card's top inset plus half its tab shelf,
     /// which is where the editor tab labels' centre sits. Applied only
     /// through `View.rafuNavigatorHeaderPlacement(rowHeight:)` (ADR 0031
     /// §g, round 5), so the headers cannot drift apart again.
-    static let navigatorHeaderTitleCenterY: CGFloat = workbenchInset + tabShelfHeight / 2
+    static let navigatorHeaderTitleCenterY: CGFloat = deckInsetTop + tabShelfHeight / 2
 
     /// The space above a navigator header row of `rowHeight` that puts the
     /// row's centre on `navigatorHeaderTitleCenterY`.
