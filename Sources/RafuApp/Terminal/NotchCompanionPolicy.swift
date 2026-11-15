@@ -87,12 +87,19 @@ nonisolated enum CompanionHoverPolicy {
     /// `feedAvailable` is false where the open panel has no attention feed
     /// to show (an island offers Usage only): every bell then takes the
     /// drop-down. Default `true` keeps the original table.
+    ///
+    /// `menuPopoverShown` is true while the menu bar card (the usage status
+    /// item's popover) is open: it is then the open companion surface, so a
+    /// bell lands in its Up next feed like a pinned panel. Closed, bells
+    /// take the drop-down as before. Default `false` keeps the table.
     static func companionArbitration(
         hoverState: CompanionHoverState,
         peekShowsPanel: Bool = false,
-        feedAvailable: Bool = true
+        feedAvailable: Bool = true,
+        menuPopoverShown: Bool = false
     ) -> (routeToFeed: Bool, showDropDown: Bool) {
         guard feedAvailable else { return (false, true) }
+        if menuPopoverShown { return (true, false) }
         return switch hoverState {
         case .pinned: (true, false)
         case .peeking: peekShowsPanel ? (true, false) : (false, true)
@@ -212,6 +219,29 @@ nonisolated enum UsageMenuBarItemText {
     /// ring keeps a margin.
     static func ringSize(forBarThickness thickness: CGFloat) -> CGFloat {
         min(16, max(12, (thickness * 0.6).rounded()))
+    }
+}
+
+/// The usage status item's text when the menu bar card also carries the
+/// attention queue. The attention count joins the percent as text
+/// (`"42% · 2"`), and the ring image gets a dot shape, so it never rests on
+/// colour alone. Pure.
+nonisolated enum CompanionMenuBarItemText {
+    /// `"42%"` with nothing waiting; `"42% · 2"` when two agents need the
+    /// person; `"2"` with no usage data. Counts above 99 read `"99+"`.
+    static func title(glance: NotchIslandUsageGlance?, attention: Int) -> String {
+        let usage = UsageMenuBarItemText.title(for: glance)
+        guard attention > 0 else { return usage }
+        let count = attention > 99 ? "99+" : String(attention)
+        return usage.isEmpty ? count : usage + " · " + count
+    }
+
+    /// `"Rafu usage. Usage: Claude, 5-hour session 42%. 2 agents need you"`.
+    static func accessibilityLabel(glance: NotchIslandUsageGlance?, attention: Int) -> String {
+        let usage = UsageMenuBarItemText.accessibilityLabel(for: glance)
+        guard attention > 0 else { return usage }
+        let noun = attention == 1 ? "agent needs" : "agents need"
+        return usage + ". \(attention) \(noun) you"
     }
 }
 

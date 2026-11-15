@@ -122,6 +122,13 @@ final class NotchCompanionModel: NSObject {
     /// body.
     private(set) var visibleSections: [NotchSection] = NotchSection.allCases
     private(set) var selectedSection: NotchSection = .ensembles
+    /// The menu bar card's tabs (`NotchSection.offered(_:host: .menuBar)`)
+    /// and its own selected tab, apart from the notch panel's.
+    private(set) var menuBarSections: [NotchSection] = NotchSection.offered(
+        NotchSection.allCases, host: .menuBar)
+    private(set) var menuBarSelection: NotchSection = .usage
+    /// The usage status item's popover is open. Set by `UsageMenuBarItem`.
+    private(set) var isMenuPopoverShown = false
     /// The mascot replaces the plain Rafu mark in the collapsed strip.
     private(set) var isMascotEnabled = true
     /// Hovering opens the panel (Cider's behaviour); off, hover only widens
@@ -405,9 +412,10 @@ final class NotchCompanionModel: NSObject {
         hoverState != .resting || (attentionCount > 0 && surface != .island)
     }
 
-    /// Whether a bell may route into the open panel's attention feed. An
-    /// island panel offers Usage only, so it has no feed to show.
-    var isAttentionFeedAvailable: Bool { surface != .island }
+    /// Whether a bell may route into an open attention feed. An island
+    /// panel offers Usage only, so it has no feed to show; the menu bar
+    /// card's Up next has one while the card is open.
+    var isAttentionFeedAvailable: Bool { surface != .island || isMenuPopoverShown }
 
     /// The island capsule's right-lobe figure: the most constrained
     /// front-line usage window, or `nil` with no usage data.
@@ -462,7 +470,9 @@ final class NotchCompanionModel: NSObject {
         for controller: WorkspaceTerminalController, windowID: UUID? = nil,
         boardID: UUID? = nil, cardID: UUID? = nil
     ) -> NotchTerminalInput {
-        NotchTerminalInput(
+        let store = AgentActivityStore.shared
+        let session = store.trackedSession(for: controller)
+        return NotchTerminalInput(
             id: controller.id,
             title: controller.presentedTitle,
             cli: agentIdentity(of: controller),
@@ -472,7 +482,9 @@ final class NotchCompanionModel: NSObject {
             boardID: boardID,
             cardID: cardID,
             windowID: windowID,
-            trackedPhase: AgentActivityStore.shared.notchPhase(for: controller))
+            trackedPhase: AgentTrackedPhase.terminalPhase(
+                session: session, status: controller.status, now: store.now),
+            subagents: AgentTrackedPhase.subagentEntries(session))
     }
 
     /// Every agent terminal in every registered window. Reads only the
@@ -503,9 +515,34 @@ final class NotchCompanionModel: NSObject {
         RafuMascotState.resolve(agents: allAgentRows + externalAgentRows)
     }
 
-    /// Agents that ask the person to look, most urgent first (Up next).
+    /// Agents in Rafu terminals that ask the person to look, most urgent
+    /// first.
     var upNextRows: [NotchAgentRow] {
         NotchAgentRow.byUrgency(allAgentRows.filter { $0.phase.needsAttention })
+    }
+
+    /// The host that shows outside agents that need the person
+    /// (`CompanionHost.outsideNotices`): the surface in use, never two.
+    var outsideNoticesHost: CompanionHost? {
+        CompanionHost.outsideNotices(
+            surface: surface == .pill && !allowsPill ? nil : surface,
+            position: usageGlancePosition)
+    }
+
+    /// Up next for `host`: Rafu agents that need the person, plus outside
+    /// agents that need them when `host` is the surface in use.
+    func upNextRows(for host: CompanionHost) -> [NotchAgentRow] {
+        Self.upNextRows(
+            rafu: allAgentRows,
+            outside: host == outsideNoticesHost ? externalAgentRows : [])
+    }
+
+    /// Pure core of `upNextRows(for:)`: every row that needs the person,
+    /// most urgent first; Rafu rows before outside rows of equal urgency.
+    nonisolated static func upNextRows(rafu: [NotchAgentRow], outside: [NotchAgentRow])
+        -> [NotchAgentRow]
+    {
+        NotchAgentRow.byUrgency((rafu + outside).filter { $0.phase.needsAttention })
     }
 
     /// One window's open Ensembles with their agents, plus agents outside any
@@ -612,6 +649,11 @@ final class NotchCompanionModel: NSObject {
             remembered: store.selectedSection(), visible: visibleSections)
         opensOnHover = CompanionHoverPolicy.effectiveOpensOnHover(
             preference: store.opensOnHover(), surface: surface)
+        menuBarSections = NotchSection.offered(store.visibleSections(), host: .menuBar)
+        if !menuBarSections.contains(menuBarSelection) {
+            menuBarSelection = NotchSection.selection(
+                remembered: store.menuBarSelectedSection(), visible: menuBarSections)
+        }
         if panel != nil { syncNowPlaying() }
     }
 
@@ -647,6 +689,53 @@ final class NotchCompanionModel: NSObject {
         selectedSection = section
         displayPreferences.setSelectedSection(section)
         if section == .usage { refreshUsage() }
+    }
+
+    // MARK: - Hosts (notch panel, island card, menu bar card)
+
+    /// The tabs `host` shows.
+    func sections(for host: CompanionHost) -> [NotchSection] {
+        host == .menuBar ? menuBarSections : visibleSections
+    }
+
+    /// The tab `host` shows now.
+    func selection(for host: CompanionHost) -> NotchSection {
+        host == .menuBar ? menuBarSelection : selectedSection
+    }
+
+    /// Selects a tab on `host`. The menu bar card remembers its own tab.
+    func select(_ section: NotchSection, host: CompanionHost) {
+        guard host == .menuBar else {
+            select(section)
+            return
+        }
+        guard menuBarSections.contains(section), section != menuBarSelection else { return }
+        menuBarSelection = section
+        displayPreferences.setMenuBarSelectedSection(section)
+        if section == .usage { refreshUsage() }
+    }
+
+    /// The menu bar card opens: Up next first when something waits for
+    /// the person (`CompanionMenuSelection.initial`), and bells now land
+    /// in its feed. Called by `UsageMenuBarItem` before the popover shows.
+    func menuPopoverWillShow() {
+        let store = displayPreferences
+        menuBarSections = NotchSection.offered(store.visibleSections(), host: .menuBar)
+        menuBarSelection = CompanionMenuSelection.initial(
+            remembered: store.menuBarSelectedSection(), offered: menuBarSections,
+            attention: upNextRows(for: .menuBar).count)
+        isMenuPopoverShown = true
+    }
+
+    /// The menu bar card closed. Feed cards hold a terminal snippet, which
+    /// must not outlive the surface that showed it (ADR 0016), so they are
+    /// dropped here when no notch panel shows them. The terminals keep
+    /// their attention state, so they stay in Up next as rows.
+    func menuPopoverDidClose() {
+        isMenuPopoverShown = false
+        searchQuery = ""
+        guard panel == nil, !feedItems.isEmpty else { return }
+        feedItems = []
     }
 
     /// The view's ONLY write path to `searchQuery` — per-keystroke and

@@ -14,9 +14,58 @@ public enum AgentSessionState: String, Codable, Equatable, Sendable {
     case ended
 }
 
+/// One active sub-agent of a session (ADR 0029 amendment). In memory only:
+/// the ledger persists nothing, and nothing here is logged.
+public struct TrackedSubagent: Equatable, Identifiable, Sendable {
+    /// The provider's sub-agent id (Claude `agent_id`).
+    public let id: String
+    /// The sub-agent type (`implementor`, `Explore`), when the installed
+    /// helper reports it. `nil` from a helper installed before sub-agent
+    /// names were tracked, until the person reconnects Activity tracking.
+    public internal(set) var type: String?
+    /// The model the spawn asked for; `nil` when it inherits the default.
+    public internal(set) var model: String?
+    /// The spawn's short task description (at most
+    /// `AgentHookEvent.maximumSubagentDescriptionLength` characters).
+    public internal(set) var taskDescription: String?
+    public let startedAt: Date
+    public internal(set) var lastEventAt: Date
+
+    public init(
+        id: String, type: String? = nil, model: String? = nil, taskDescription: String? = nil,
+        startedAt: Date, lastEventAt: Date? = nil
+    ) {
+        self.id = id
+        self.type = type
+        self.model = model
+        self.taskDescription = taskDescription
+        self.startedAt = startedAt
+        self.lastEventAt = lastEventAt ?? startedAt
+    }
+}
+
+/// A spawn seen in `PreToolUse` whose `SubagentStart` has not arrived yet.
+/// The start carries the id; the spawn carries the model and description.
+struct PendingSubagentSpawn: Equatable, Sendable {
+    let type: String?
+    let model: String?
+    let taskDescription: String?
+    let at: Date
+}
+
 /// One agent session, folded from its hook events. Small values only: no
 /// prompt, tool input, or transcript is ever stored.
 public struct TrackedAgentSession: Equatable, Identifiable, Sendable {
+    /// The most active sub-agents kept per session; the least recently
+    /// active one drops first.
+    public static let maximumSubagents = 16
+    /// A sub-agent without events for this long is dropped (one that
+    /// crashed without `SubagentStop`).
+    public static let subagentStaleInterval: TimeInterval = 10 * 60
+    /// A spawn waits this long for its `SubagentStart`.
+    static let pendingSpawnLifetime: TimeInterval = 2 * 60
+    static let maximumPendingSpawns = 16
+    static let maximumStoppedSubagentIDs = 32
     /// After this long without an event, a `working` session is not current.
     public static let staleInterval: TimeInterval = 10 * 60
     /// A reply counts as fresh for this long when no Rafu terminal owns it.
@@ -41,6 +90,13 @@ public struct TrackedAgentSession: Equatable, Identifiable, Sendable {
     public internal(set) var ancestorProcessIDs: [Int32]
     public let startedAt: Date
     public internal(set) var updatedAt: Date
+    /// Active sub-agents, in start order. A parent `Stop` keeps them
+    /// (background sub-agents outlive the turn); `SubagentStop`,
+    /// `SessionEnd`, and `subagentStaleInterval` of silence remove them.
+    public internal(set) var subagents: [TrackedSubagent] = []
+    var pendingSpawns: [PendingSubagentSpawn] = []
+    /// Recently stopped sub-agent ids, so a late event never revives one.
+    var stoppedSubagentIDs: [String] = []
 
     public init(
         provider: AgentHookProvider,
@@ -144,12 +200,19 @@ public struct AgentSessionLedger: Equatable, Sendable {
             ?? TrackedAgentSession(
                 provider: event.provider, sessionID: event.sessionID, cwd: event.cwd,
                 lastEventName: event.hookEventName, startedAt: event.time)
-        guard event.time >= row.updatedAt else { return false }
+        // Sub-agent bookkeeping runs before the order and turn guards: each
+        // sub-agent's helper process writes its own events, a Codex child
+        // can carry its own turn id, and a background sub-agent outlives
+        // the parent's turn. It never changes the parent's state.
+        let subagentsChanged = Self.foldSubagent(event, into: &row)
         let startsTurn = ["UserPromptSubmit", "SessionStart"].contains(event.hookEventName)
-        if let current = row.turnID, let incoming = event.turnID, current != incoming,
-            !startsTurn
-        {
-            return false
+        let isLateTurn =
+            row.turnID != nil && event.turnID != nil && row.turnID != event.turnID && !startsTurn
+        guard event.time >= row.updatedAt, !isLateTurn else {
+            guard subagentsChanged else { return false }
+            sessionsByKey[event.sessionKey] = row
+            evictOverflow()
+            return true
         }
         row.updatedAt = event.time
         row.lastEventName = event.hookEventName
@@ -158,13 +221,97 @@ public struct AgentSessionLedger: Equatable, Sendable {
         if !event.ancestorProcessIDs.isEmpty { row.ancestorProcessIDs = event.ancestorProcessIDs }
         if let tool = event.toolName { row.lastTool = tool }
         Self.fold(event, into: &row)
+        if event.hookEventName == "SessionEnd", event.subagentID == nil {
+            row.subagents = []
+            row.pendingSpawns = []
+        }
         sessionsByKey[event.sessionKey] = row
         evictOverflow()
         return true
     }
 
+    /// Updates `row`'s sub-agent list for `event`. Returns whether the row
+    /// changed. A spawn `PreToolUse` queues its type, model, and
+    /// description; the next `SubagentStart` of that type claims them.
+    private static func foldSubagent(_ event: AgentHookEvent, into row: inout TrackedAgentSession)
+        -> Bool
+    {
+        var changed = false
+        if event.isSubagentSpawn {
+            row.pendingSpawns.append(
+                PendingSubagentSpawn(
+                    type: event.subagentType, model: event.subagentModel,
+                    taskDescription: event.subagentDescription, at: event.time))
+            if row.pendingSpawns.count > TrackedAgentSession.maximumPendingSpawns {
+                row.pendingSpawns.removeFirst(
+                    row.pendingSpawns.count - TrackedAgentSession.maximumPendingSpawns)
+            }
+            changed = true
+        }
+        guard let id = event.subagentID else { return changed }
+        if event.hookEventName == "SubagentStop" {
+            if let index = row.subagents.firstIndex(where: { $0.id == id }) {
+                row.subagents.remove(at: index)
+                changed = true
+            }
+            if !row.stoppedSubagentIDs.contains(id) {
+                row.stoppedSubagentIDs.append(id)
+                let overflow =
+                    row.stoppedSubagentIDs.count - TrackedAgentSession.maximumStoppedSubagentIDs
+                if overflow > 0 { row.stoppedSubagentIDs.removeFirst(overflow) }
+            }
+            return changed
+        }
+        guard !row.stoppedSubagentIDs.contains(id) else { return changed }
+        // On a spawn from inside a sub-agent, the type names the child.
+        let type = event.isSubagentSpawn ? nil : event.subagentType
+        let starts = event.hookEventName == "SubagentStart"
+        if let index = row.subagents.firstIndex(where: { $0.id == id }) {
+            var subagent = row.subagents[index]
+            if event.time > subagent.lastEventAt { subagent.lastEventAt = event.time }
+            if subagent.type == nil, let type { subagent.type = type }
+            if starts, subagent.taskDescription == nil, subagent.model == nil {
+                claimSpawn(for: &subagent, in: &row)
+            }
+            if subagent != row.subagents[index] {
+                row.subagents[index] = subagent
+                changed = true
+            }
+            return changed
+        }
+        // Rafu may start watching mid-run: any sub-agent event adds it.
+        var subagent = TrackedSubagent(id: id, type: type, startedAt: event.time)
+        if starts { claimSpawn(for: &subagent, in: &row) }
+        row.subagents.append(subagent)
+        while row.subagents.count > TrackedAgentSession.maximumSubagents,
+            let oldest = row.subagents.indices.min(by: {
+                row.subagents[$0].lastEventAt < row.subagents[$1].lastEventAt
+            })
+        {
+            row.subagents.remove(at: oldest)
+        }
+        return true
+    }
+
+    /// Moves the oldest pending spawn of `subagent`'s type (else the oldest
+    /// spawn that named no type) onto `subagent`.
+    private static func claimSpawn(
+        for subagent: inout TrackedSubagent, in row: inout TrackedAgentSession
+    ) {
+        let index =
+            row.pendingSpawns.firstIndex(where: { $0.type != nil && $0.type == subagent.type })
+            ?? row.pendingSpawns.firstIndex(where: { $0.type == nil })
+        guard let index else { return }
+        let spawn = row.pendingSpawns.remove(at: index)
+        if subagent.type == nil { subagent.type = spawn.type }
+        subagent.model = spawn.model
+        subagent.taskDescription = spawn.taskDescription
+    }
+
     /// Drops ended sessions after `endedRetention` and every session after
     /// `idleRetention` without events. Returns whether anything was dropped.
+    /// Also drops sub-agents silent for `subagentStaleInterval` and spawns
+    /// that waited `pendingSpawnLifetime` for their start.
     @discardableResult
     public mutating func expire(now: Date) -> Bool {
         let before = sessionsByKey.count
@@ -173,7 +320,20 @@ public struct AgentSessionLedger: Equatable, Sendable {
             if row.state == .ended { return age < Self.endedRetention }
             return age < Self.idleRetention
         }
-        return sessionsByKey.count != before
+        var changed = sessionsByKey.count != before
+        for (key, row) in sessionsByKey where !row.subagents.isEmpty || !row.pendingSpawns.isEmpty {
+            var updated = row
+            updated.subagents.removeAll {
+                now.timeIntervalSince($0.lastEventAt) > TrackedAgentSession.subagentStaleInterval
+            }
+            updated.pendingSpawns.removeAll {
+                now.timeIntervalSince($0.at) > TrackedAgentSession.pendingSpawnLifetime
+            }
+            guard updated != row else { continue }
+            if updated.subagents.count != row.subagents.count { changed = true }
+            sessionsByKey[key] = updated
+        }
+        return changed
     }
 
     private static func fold(_ event: AgentHookEvent, into row: inout TrackedAgentSession) {

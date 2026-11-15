@@ -49,9 +49,21 @@ public enum AgentHookEventError: Error, Equatable, Sendable {
 /// private spool as one small JSON file; the app reads, folds, and deletes it.
 ///
 /// Only identity, lifecycle, and a bounded preview are kept. Prompts, tool
-/// inputs, tool outputs, and transcripts are discarded at the helper.
+/// inputs, tool outputs, and transcripts are discarded at the helper. The
+/// one exception is a sub-agent spawn (Claude's `Agent`/`Task` tool): its
+/// sub-agent type, model, and short task description are kept, sanitized
+/// and length-capped; its prompt is never read.
+///
+/// The sub-agent fields are optional, so the schema stays version 1: an
+/// event from an older installed helper decodes with them `nil`.
 public struct AgentHookEvent: Codable, Equatable, Identifiable, Sendable {
     public static let currentSchemaVersion = 1
+    /// The longest sub-agent type or model name kept.
+    public static let maximumSubagentLabelLength = 64
+    /// The longest sub-agent task description kept, ellipsis included.
+    public static let maximumSubagentDescriptionLength = 80
+    /// Claude Code tools that start a sub-agent (`Task` before 2.x).
+    public static let subagentSpawnToolNames: Set<String> = ["Agent", "Task"]
     /// The largest stdin payload the helper accepts.
     public static let maximumPayloadBytes = 1_048_576
     /// The largest assistant-message preview kept for `Stop`.
@@ -81,6 +93,18 @@ public struct AgentHookEvent: Codable, Equatable, Identifiable, Sendable {
     /// session to a Rafu terminal; never a command line or environment.
     public var ancestorProcessIDs: [Int32]
     public let time: Date
+    /// The sub-agent's type (`implementor`, `Explore`): from `agent_type` on
+    /// an event with `agent_id`, or from the spawn tool's `subagent_type`
+    /// on a spawn `PreToolUse` (`isSubagentSpawn`). A config name, filtered
+    /// to `[A-Za-z0-9 _.:-]`, at most `maximumSubagentLabelLength`.
+    public let subagentType: String?
+    /// The model the spawn asked for, when it named one. Spawn only.
+    public let subagentModel: String?
+    /// The spawn's short task description, on one line, at most
+    /// `maximumSubagentDescriptionLength` characters. Spawn only. Comes
+    /// from the agent's prompt-side input, so it is kept in memory only and
+    /// never logged.
+    public let subagentDescription: String?
 
     public init(
         id: UUID = UUID(),
@@ -95,8 +119,14 @@ public struct AgentHookEvent: Codable, Equatable, Identifiable, Sendable {
         toolUseID: String? = nil,
         lastAssistantMessage: String? = nil,
         ancestorProcessIDs: [Int32] = [],
-        time: Date = Date()
+        time: Date = Date(),
+        subagentType: String? = nil,
+        subagentModel: String? = nil,
+        subagentDescription: String? = nil
     ) {
+        self.subagentType = subagentType
+        self.subagentModel = subagentModel
+        self.subagentDescription = subagentDescription
         schemaVersion = Self.currentSchemaVersion
         self.id = id
         self.provider = provider
@@ -139,15 +169,25 @@ public struct AgentHookEvent: Codable, Equatable, Identifiable, Sendable {
             !session.isEmpty
         else { throw AgentHookEventError.missingSession }
         let keepsMessage = ["Stop", "AgentResponse"].contains(event)
+        let subagentID = Self.text(object["agent_id"], limit: Self.maximumFieldLength)
+        let toolName = Self.text(object["tool_name"], limit: Self.maximumFieldLength)
+        let isSpawn = Self.isSubagentSpawn(provider: provider, event: event, toolName: toolName)
+        // Only these three keys of a spawn's tool input are read; never
+        // `prompt` or any other tool input.
+        let spawn = isSpawn ? object["tool_input"] as? [String: Any] : nil
+        let subagentType =
+            isSpawn
+            ? Self.subagentLabel(spawn?["subagent_type"])
+            : (subagentID == nil ? nil : Self.subagentLabel(object["agent_type"]))
         self.init(
             id: id,
             provider: provider,
             sessionID: session,
             turnID: Self.text(object["turn_id"], limit: Self.maximumFieldLength),
-            subagentID: Self.text(object["agent_id"], limit: Self.maximumFieldLength),
+            subagentID: subagentID,
             hookEventName: event,
             cwd: Self.text(object["cwd"], limit: Self.maximumCwdLength) ?? "",
-            toolName: Self.text(object["tool_name"], limit: Self.maximumFieldLength),
+            toolName: toolName,
             notificationType: Self.text(
                 object["notification_type"], limit: Self.maximumFieldLength),
             toolUseID: Self.text(object["tool_use_id"], limit: Self.maximumFieldLength),
@@ -156,11 +196,69 @@ public struct AgentHookEvent: Codable, Equatable, Identifiable, Sendable {
                     object["last_assistant_message"], limit: Self.maximumMessageLength,
                     keepsLines: true)
                 : nil,
-            time: time)
+            time: time,
+            subagentType: subagentType,
+            subagentModel: isSpawn ? Self.subagentLabel(spawn?["model"]) : nil,
+            subagentDescription: isSpawn ? Self.subagentDescription(spawn?["description"]) : nil)
     }
 
     /// `provider:session`, the ledger key.
     public var sessionKey: String { provider.rawValue + ":" + sessionID }
+
+    /// This event is a Claude Code `PreToolUse` of a tool that starts a
+    /// sub-agent. Its sub-agent fields describe the sub-agent about to
+    /// start, not the agent that sent the event.
+    public var isSubagentSpawn: Bool {
+        Self.isSubagentSpawn(provider: provider, event: hookEventName, toolName: toolName)
+    }
+
+    static func isSubagentSpawn(provider: AgentHookProvider, event: String, toolName: String?)
+        -> Bool
+    {
+        provider == .claude && event == "PreToolUse"
+            && toolName.map(subagentSpawnToolNames.contains) == true
+    }
+
+    /// A sub-agent type or model name: a config name, not prose. Keeps
+    /// `[A-Za-z0-9 _.:-]` only, trims, caps at
+    /// `maximumSubagentLabelLength`; `nil` when nothing is left.
+    public static func subagentLabel(_ value: Any?) -> String? {
+        guard let value = value as? String else { return nil }
+        let allowed = CharacterSet(
+            charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 _.:-")
+        let kept = String(String.UnicodeScalarView(value.unicodeScalars.filter(allowed.contains)))
+        let trimmed = String(
+            kept.trimmingCharacters(in: .whitespaces).prefix(maximumSubagentLabelLength)
+        )
+        .trimmingCharacters(in: .whitespaces)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    /// A sub-agent's short task description: control characters removed,
+    /// whitespace runs folded to one space, trimmed, and capped at
+    /// `maximumSubagentDescriptionLength` characters with an ellipsis;
+    /// `nil` when nothing is left.
+    public static func subagentDescription(_ value: Any?) -> String? {
+        guard let value = value as? String else { return nil }
+        // Read at most a bounded prefix: the cap is tiny.
+        let bounded = value.prefix(maximumFieldLength * 4)
+        var scalars = String.UnicodeScalarView()
+        for scalar in bounded.unicodeScalars {
+            if CharacterSet.whitespacesAndNewlines.contains(scalar)
+                || CharacterSet.controlCharacters.contains(scalar)
+            {
+                scalars.append(" ")
+            } else {
+                scalars.append(scalar)
+            }
+        }
+        let joined = String(scalars).split(separator: " ").joined(separator: " ")
+        guard !joined.isEmpty else { return nil }
+        let limit = maximumSubagentDescriptionLength
+        guard joined.count > limit else { return joined }
+        let cut = joined.prefix(limit - 1).trimmingCharacters(in: .whitespaces)
+        return cut + "…"
+    }
 
     /// A bounded string with control characters removed. Line breaks and
     /// tabs survive only when `keepsLines` is set.

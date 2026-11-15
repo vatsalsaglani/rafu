@@ -102,6 +102,8 @@ nonisolated struct NotchTerminalInput: Equatable, Sendable {
     /// The phase from agent hooks (`AgentActivityStore`), when a hook
     /// session matches this terminal. Wins over the output-based phase.
     let trackedPhase: NotchAgentPhase?
+    /// The matched hook session's active sub-agents.
+    let subagents: [NotchSubagentEntry]
 
     init(
         id: UUID,
@@ -113,7 +115,8 @@ nonisolated struct NotchTerminalInput: Equatable, Sendable {
         boardID: UUID? = nil,
         cardID: UUID? = nil,
         windowID: UUID? = nil,
-        trackedPhase: NotchAgentPhase? = nil
+        trackedPhase: NotchAgentPhase? = nil,
+        subagents: [NotchSubagentEntry] = []
     ) {
         self.id = id
         self.title = title
@@ -125,6 +128,50 @@ nonisolated struct NotchTerminalInput: Equatable, Sendable {
         self.cardID = cardID
         self.windowID = windowID
         self.trackedPhase = trackedPhase
+        self.subagents = subagents
+    }
+}
+
+/// One active sub-agent as the notch and menu bar card list it: type,
+/// model, and short task description, each optional. In memory only.
+nonisolated struct NotchSubagentEntry: Identifiable, Equatable, Sendable {
+    let id: String
+    let type: String?
+    let model: String?
+    let taskDescription: String?
+
+    init(id: String, type: String? = nil, model: String? = nil, taskDescription: String? = nil) {
+        self.id = id
+        self.type = type
+        self.model = model
+        self.taskDescription = taskDescription
+    }
+
+    /// The type, or "Sub-agent" when the installed helper does not report
+    /// it.
+    var displayType: String { type ?? "Sub-agent" }
+
+    /// `"implementor · opus · Build the menu card"`, skipping what is
+    /// missing.
+    var line: String {
+        [displayType, model, taskDescription].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    /// `"3 sub-agents"`.
+    static func chipText(count: Int) -> String {
+        "\(count) sub-agent\(count == 1 ? "" : "s")"
+    }
+
+    /// `"3 sub-agents running: implementor, implementor, Explore"`.
+    static func spokenSummary(_ entries: [NotchSubagentEntry]) -> String {
+        chipText(count: entries.count) + " running: "
+            + entries.map(\.displayType).joined(separator: ", ")
+    }
+
+    /// Whether any entry lacks its type, so the list can say that names
+    /// appear after reconnecting Activity tracking.
+    static func needsReconnectNote(_ entries: [NotchSubagentEntry]) -> Bool {
+        entries.contains { $0.type == nil }
     }
 }
 
@@ -137,10 +184,13 @@ nonisolated struct NotchAgentRow: Identifiable, Equatable, Sendable {
     let boardID: UUID?
     let cardID: UUID?
     let windowID: UUID?
+    /// Active sub-agents from hooks, in start order.
+    let subagents: [NotchSubagentEntry]
 
     init(
         id: UUID, title: String, cli: ConductorCLIID, phase: NotchAgentPhase,
-        boardID: UUID? = nil, cardID: UUID? = nil, windowID: UUID? = nil
+        boardID: UUID? = nil, cardID: UUID? = nil, windowID: UUID? = nil,
+        subagents: [NotchSubagentEntry] = []
     ) {
         self.id = id
         self.title = title
@@ -149,6 +199,7 @@ nonisolated struct NotchAgentRow: Identifiable, Equatable, Sendable {
         self.boardID = boardID
         self.cardID = cardID
         self.windowID = windowID
+        self.subagents = subagents
     }
 
     /// Agent rows for every terminal that runs a recognised agent CLI, in the
@@ -167,7 +218,8 @@ nonisolated struct NotchAgentRow: Identifiable, Equatable, Sendable {
                         cause: terminal.cause),
                 boardID: terminal.boardID,
                 cardID: terminal.cardID,
-                windowID: terminal.windowID)
+                windowID: terminal.windowID,
+                subagents: terminal.subagents)
         }
     }
 
@@ -284,5 +336,36 @@ nonisolated struct NotchWindowAgents: Equatable, Sendable {
         }
         return NotchWindowAgents(
             ensembles: ensembles, looseAgents: NotchAgentRow.byUrgency(loose))
+    }
+}
+
+/// Up next's compact rows. Pure.
+nonisolated enum CompanionUpNextContent {
+    /// `upNext` without the sessions that already show a feed card, in the
+    /// given (urgency) order.
+    static func waitingRows(_ upNext: [NotchAgentRow], feedSessionIDs: Set<UUID>)
+        -> [NotchAgentRow]
+    {
+        upNext.filter { !feedSessionIDs.contains($0.id) }
+    }
+}
+
+/// What the Agents tab shows: the list, or one empty-state line. Pure.
+nonisolated enum CompanionAgentsContent: Equatable, Sendable {
+    case list
+    case empty(String)
+
+    /// The list when a window matches, or when agents outside Rafu run and
+    /// no filter is typed (outside agents are not filtered). Otherwise the
+    /// filter's no-match line, or the host's empty line.
+    static func resolve(editorCount: Int, outsideCount: Int, query: String, host: CompanionHost)
+        -> CompanionAgentsContent
+    {
+        let filtering = !query.trimmingCharacters(in: .whitespaces).isEmpty
+        if editorCount > 0 || (outsideCount > 0 && !filtering) { return .list }
+        if filtering { return .empty("No editors match “\(query)”") }
+        return host == .menuBar
+            ? .empty("No agents running. Start one in a terminal or an Ensemble.")
+            : .empty("No open editors")
     }
 }
