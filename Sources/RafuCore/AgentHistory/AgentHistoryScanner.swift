@@ -160,10 +160,17 @@ public actor AgentHistoryScanner {
         var result: [DiscoveredFile] = []
         while let url = enumerator.nextObject() as? URL {
             try Task.checkCancellation()
-            if enumerator.level > 4 {
+            // Rollouts sit at level 4 (`YYYY/MM/DD/rollout-*.jsonl`). Do not
+            // descend below it, but call `skipDescendants()` only for a real
+            // directory just yielded: for a file or symlink the call applies
+            // to the next directory instead and hides its whole subtree.
+            if enumerator.level >= 4,
+                (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true
+            {
                 enumerator.skipDescendants()
                 continue
             }
+            if enumerator.level > 4 { continue }
             let name = url.lastPathComponent
             guard name.hasPrefix("rollout-"), url.pathExtension == "jsonl" else { continue }
             if let file = discovered(url) { result.append(file) }

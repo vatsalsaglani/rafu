@@ -206,3 +206,25 @@ private func session(
     #expect(AgentHistoryResumeCommand.quoted("") == "''")
     #expect(AgentHistoryResumeCommand.quoted("a b;c") == "'a b;c'")
 }
+
+/// A stray folder below a day folder must not hide the next day's rollouts.
+/// Before the fix the scanner called `skipDescendants()` for a file at level
+/// 5, which applies to the next directory and dropped `2026/02/04`.
+@Test func codexScanSkipsDeepFoldersWithoutHidingTheNextDay() async throws {
+    let homes = try AgentHistoryFixtures.makeHomes()
+    defer { homes.remove() }
+    let sessions = homes.locations.codexHome.appendingPathComponent("sessions/2026/02")
+    let stray = sessions.appendingPathComponent("03/extra", isDirectory: true)
+    try FileManager.default.createDirectory(at: stray, withIntermediateDirectories: true)
+    try Data("x".utf8).write(to: stray.appendingPathComponent("a.txt"))
+    let nextDay = sessions.appendingPathComponent("04", isDirectory: true)
+    try FileManager.default.createDirectory(at: nextDay, withIntermediateDirectories: true)
+    try Data(AgentHistoryFixtures.codexEventOnlyRollout.utf8).write(
+        to: nextDay.appendingPathComponent(
+            "rollout-2026-02-04T08-00-00-66666666-6666-4666-8666-666666666666.jsonl"))
+
+    let result = try await AgentHistoryScanner().scan(options(homes))
+    let codexIDs = Set(result.index.sessions.filter { $0.provider == .codex }.map(\.key.sessionID))
+    #expect(codexIDs.contains("66666666-6666-4666-8666-666666666666"))
+    #expect(codexIDs.contains(AgentHistoryFixtures.codexSessionID))
+}
