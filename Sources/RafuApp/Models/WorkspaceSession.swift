@@ -5568,7 +5568,7 @@ final class WorkspaceSession {
     }
 
     /// Pure, per-render heuristic scan of the staged changeset — the commit
-    /// composer's advisory-only warning (`GitInspectorView.commitComposer`).
+    /// composer's advisory-only warning (`GitCommitComposerView`).
     /// Never blocks a commit; see `CommitHygieneChecker`.
     var commitHygieneFindings: [CommitHygieneFinding] {
         CommitHygieneChecker.findings(for: gitSnapshot?.stagedChanges.map(\.path) ?? [])

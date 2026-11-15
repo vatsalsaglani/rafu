@@ -108,9 +108,17 @@ struct UtilityPanelPresentationTests {
         #expect(inspector.contains("case .worktrees:"))
         #expect(inspector.contains("case .history:"))
         #expect(inspector.contains(".frame(height: GitPanelMetrics.fileRowHeight)"))
-        #expect(inspector.contains("RafuMetrics.radiusDenseCard"))
-        #expect(inspector.contains(".padding(RafuMetrics.utilityBodyInset)"))
         #expect(inspector.contains(".frame(maxWidth: .infinity, alignment: .leading)"))
+        // The commit composer (Option B) is its own view and paints no card:
+        // the field is its only fill, and the drafting border has the
+        // field's radius.
+        #expect(inspector.contains("GitCommitComposerView(session: session)"))
+        let composer = try Self.source("Sources/RafuApp/Views/GitCommitComposerView.swift")
+        #expect(!composer.contains("cardBackground"))
+        #expect(!composer.contains("RafuMetrics.radiusDenseCard"))
+        #expect(composer.contains(".rafuField(isFocused:"))
+        #expect(composer.contains("cornerRadius: RafuMetrics.radiusField"))
+        #expect(composer.contains(".padding(.horizontal, RafuMetrics.sidebarTextInset)"))
     }
 
     @Test("Source Control modes fill the utility width and expose the selected section")

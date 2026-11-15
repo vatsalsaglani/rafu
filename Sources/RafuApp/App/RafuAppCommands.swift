@@ -6,6 +6,47 @@ struct RafuAppCommands: Commands {
     @Environment(\.openWindow) private var openWindow
     @FocusedValue(\.workspaceSession) private var workspaceSession
     @FocusedValue(\.voiceCompanion) private var voiceCompanion
+    @FocusedValue(\.canvasNoteEditing) private var editingNote
+
+    /// Commit, Stage All and Draft Message with AI (G7): the menu and key
+    /// path for the commit composer's actions. The composer's buttons carry
+    /// no key equivalent, so each key is registered once. ⌘Return is on the
+    /// Commit item only while a commit is possible and no Ensemble note is
+    /// in Edit mode (then Format > Done Editing owns ⌘Return).
+    @ViewBuilder
+    private var commitCommandItems: some View {
+        let presentation = workspaceSession?.commitComposerPresentation()
+        let canCommit = GitCommitMenuAvailability.canCommit(presentation)
+        Button("Commit") {
+            guard let session = workspaceSession,
+                GitCommitMenuAvailability.canCommit(session.commitComposerPresentation())
+            else { return }
+            Task { await session.commit() }
+        }
+        .keyboardShortcut(
+            GitCommitMenuAvailability.commitOwnsShortcut(
+                presentation, isNoteEditing: editingNote != nil)
+                ? KeyboardShortcut(.return, modifiers: .command) : nil
+        )
+        .disabled(!canCommit)
+
+        Button("Stage All") {
+            guard let session = workspaceSession else { return }
+            Task { await session.stageAll() }
+        }
+        .disabled(
+            !GitCommitMenuAvailability.canStageAll(
+                presentation, isHunkBusy: workspaceSession?.isGitHunkActionBusy == true))
+
+        Button("Draft Message with AI") {
+            workspaceSession?.startAICommitGeneration()
+        }
+        .keyboardShortcut("g", modifiers: [.command, .option])
+        .disabled(
+            !GitCommitMenuAvailability.canDraft(
+                canGenerate: workspaceSession?.canGenerateAICommitMessage == true,
+                isBusy: workspaceSession?.isGitBusy == true))
+    }
 
     var body: some Commands {
         CommandGroup(replacing: .appSettings) {
@@ -236,6 +277,10 @@ struct RafuAppCommands: Commands {
                 voiceCompanion?.moveToNextCorner()
             }
             .disabled(voiceCompanion == nil)
+
+            Divider()
+
+            commitCommandItems
 
             Divider()
 

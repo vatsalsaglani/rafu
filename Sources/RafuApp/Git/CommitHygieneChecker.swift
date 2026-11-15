@@ -23,7 +23,7 @@ nonisolated struct CommitHygieneFinding: Identifiable, Hashable, Sendable {
 /// Pure heuristic scan of staged paths for files that usually should never
 /// be committed: secrets, vendored dependency trees, build output, and OS
 /// cruft. Advisory only — this never blocks a commit, it only informs the
-/// composer's inline warning (see `GitInspectorView.commitComposer`).
+/// composer's inline warning (see `GitCommitComposerView`).
 ///
 /// `fileSizes`/`largeBinaryThreshold` exist for a future large-binary check;
 /// no caller currently populates `fileSizes`, so `.largeBinary` never fires

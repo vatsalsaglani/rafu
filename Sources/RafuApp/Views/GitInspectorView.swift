@@ -324,10 +324,6 @@ struct GitInspectorView: View {
     @State private var isAddWorktreeSheetPresented = false
     @State private var pendingStashAction: PendingStashAction?
     @State private var pendingWorktreeRemoval: GitWorktree?
-    /// Whether the commit composer's hygiene-warning row is expanded to
-    /// list the flagged paths. Local, ephemeral UI state — never persisted.
-    @State private var isHygieneWarningExpanded = false
-    @FocusState private var isCommitMessageFocused: Bool
     @AppStorage("gitChangesViewMode") private var gitChangesViewModeRaw =
         GitChangesViewMode.flat.rawValue
 
@@ -429,8 +425,9 @@ struct GitInspectorView: View {
         VStack(spacing: 0) {
             changesHeader
             if snapshot.changes.isEmpty && session.gitStashes.isEmpty {
-                // Expand so the commit composer pins to the panel bottom
-                // instead of floating mid-panel with dead space beneath.
+                // Expands to the full height. The commit composer is hidden
+                // on a clean tree unless a message, a merge or a draft keeps
+                // it; then it pins to the panel bottom.
                 RafuPanelEmptyState(
                     icon: "checkmark.circle",
                     title: "No Changes",
@@ -467,8 +464,7 @@ struct GitInspectorView: View {
                                     changeRow(change, scope: .workingTree)
                                 }
                             } header: {
-                                RafuSidebarSectionHeader(
-                                    title: "Changes", count: snapshot.unstagedChanges.count)
+                                changesSectionHeader(count: snapshot.unstagedChanges.count)
                             }
                         }
                     case .tree:
@@ -477,8 +473,7 @@ struct GitInspectorView: View {
                             Section {
                                 GitChangeTreeRows(session: session, changes: nonConflictedChanges)
                             } header: {
-                                RafuSidebarSectionHeader(
-                                    title: "Changes", count: nonConflictedChanges.count)
+                                changesSectionHeader(count: nonConflictedChanges.count)
                             }
                         }
                     }
@@ -490,7 +485,23 @@ struct GitInspectorView: View {
                 .scrollContentBackground(.hidden)
                 .environment(\.defaultMinListRowHeight, GitPanelMetrics.fileRowHeight)
             }
-            commitComposer
+            GitCommitComposerView(session: session)
+        }
+    }
+
+    /// The "Changes" section header. While some files are staged the
+    /// composer's button is Commit, so the visible Stage All path is here.
+    private func changesSectionHeader(count: Int) -> some View {
+        HStack(spacing: 6) {
+            RafuSidebarSectionHeader(title: "Changes", count: count)
+            if session.commitComposerPresentation()?.showsSectionStageAll == true {
+                Button("Stage All") { Task { await session.stageAll() } }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(theme.palette.accent)
+                    .disabled(session.isGitBusy)
+                    .help("Stage every changed file.")
+            }
         }
     }
 
@@ -649,157 +660,6 @@ struct GitInspectorView: View {
                 Task { await session.setStaged(scope != .staged, change: change) }
             }
         }
-    }
-
-    /// Message field with the AI draft control inside its trailing edge (G7),
-    /// a "Commits N files" caption, and Commit as the panel's one accent
-    /// button. ⌘Return commits while the field has focus.
-    private var commitComposer: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            commitMessageField
-            if let error = session.aiCommitGenerationError {
-                Label(error, systemImage: "exclamationmark.triangle")
-                    .font(.caption2)
-                    .foregroundStyle(theme.palette.error)
-            }
-            if !session.commitHygieneFindings.isEmpty {
-                commitHygieneWarning(session.commitHygieneFindings)
-            }
-            HStack(spacing: 8) {
-                Text(GitCommitCaption.text(stagedCount: snapshot.stagedChanges.count))
-                    .font(.system(size: 12))
-                    .foregroundStyle(theme.palette.textSecondary)
-                    .lineLimit(1)
-                Spacer(minLength: 4)
-                // The buttons outrank the caption, so a narrow sidebar
-                // truncates the caption instead of the button titles.
-                Button("Stage All") { Task { await session.stageAll() } }
-                    .buttonStyle(RafuSecondaryButtonStyle(compact: true))
-                    .layoutPriority(1)
-                Button("Commit") { Task { await session.commit() } }
-                    .buttonStyle(RafuProminentButtonStyle(compact: true))
-                    .layoutPriority(1)
-                    .keyboardShortcut(.return, modifiers: .command)
-                    .help("Commit staged changes (⌘Return)")
-                    .disabled(
-                        session.gitCommitMessage.trimmingCharacters(in: .whitespacesAndNewlines)
-                            .isEmpty || snapshot.stagedChanges.isEmpty
-                            || session.isGeneratingAICommitMessage
-                    )
-            }
-        }
-        .padding(10)
-        .background(theme.palette.cardBackground)
-        .clipShape(
-            RoundedRectangle(cornerRadius: RafuMetrics.radiusDenseCard, style: .continuous)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: RafuMetrics.radiusDenseCard, style: .continuous)
-                .strokeBorder(theme.palette.borderSubtle, lineWidth: RafuMetrics.hairline)
-        )
-        .aiCommitGeneratingBorder(isActive: session.isGeneratingAICommitMessage)
-        .padding(RafuMetrics.utilityBodyInset)
-    }
-
-    private var commitMessageField: some View {
-        TextField("Message", text: $session.gitCommitMessage, axis: .vertical)
-            .textFieldStyle(.plain)
-            .lineLimit(2...5)
-            .focused($isCommitMessageFocused)
-            .padding(.trailing, 24)
-            .rafuField(isFocused: isCommitMessageFocused)
-            .overlay(alignment: .topTrailing) {
-                draftControl
-                    .padding(.top, 2)
-                    .padding(.trailing, 2)
-            }
-    }
-
-    @ViewBuilder
-    private var draftControl: some View {
-        if session.isGeneratingAICommitMessage {
-            HStack(spacing: 2) {
-                ProgressView().controlSize(.mini)
-                Button("Stop Generating", systemImage: "stop.fill") {
-                    session.cancelAICommitGeneration()
-                }
-                .buttonStyle(RafuIconButtonStyle(size: 22, iconSize: 10))
-                .help("Stop generating the commit message.")
-            }
-        } else {
-            Button("Draft Message with AI", systemImage: "sparkles") {
-                session.startAICommitGeneration()
-            }
-            .buttonStyle(RafuIconButtonStyle(size: 22, iconSize: 12))
-            .keyboardShortcut("g", modifiers: [.command, .option])
-            .disabled(!session.canGenerateAICommitMessage)
-            .help(
-                "Draft Message with AI (⌥⌘G). From \(session.aiCommitGenerationScopeDescription). No commit is created automatically."
-            )
-        }
-    }
-
-    /// Calm, advisory-only warning for `CommitHygieneChecker.findings` on the
-    /// staged changeset. Never disables Commit — only informs, with an
-    /// optional expansion listing each flagged path, its reason, and a
-    /// per-row Unstage shortcut. No decorative animation.
-    private func commitHygieneWarning(_ findings: [CommitHygieneFinding]) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Button {
-                isHygieneWarningExpanded.toggle()
-            } label: {
-                HStack(spacing: 6) {
-                    Label(
-                        "\(findings.count) staged \(findings.count == 1 ? "file" : "files") may not belong in a commit",
-                        systemImage: "exclamationmark.triangle"
-                    )
-                    .font(.caption2)
-                    .foregroundStyle(theme.palette.warning)
-                    Spacer()
-                    Image(systemName: isHygieneWarningExpanded ? "chevron.up" : "chevron.down")
-                        .font(.caption2)
-                        .foregroundStyle(theme.palette.textSecondary)
-                }
-                .contentShape(.rect)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(
-                "\(findings.count) staged files may not belong in a commit. Toggle details.")
-
-            if isHygieneWarningExpanded {
-                VStack(alignment: .leading, spacing: 6) {
-                    ForEach(findings) { finding in
-                        HStack(alignment: .top, spacing: 6) {
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(finding.path)
-                                    .font(.caption2)
-                                    .foregroundStyle(theme.palette.textPrimary)
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
-                                Text(finding.reason)
-                                    .font(.caption2)
-                                    .foregroundStyle(theme.palette.textSecondary)
-                            }
-                            Spacer(minLength: 4)
-                            Button("Unstage") {
-                                guard
-                                    let change = snapshot.stagedChanges.first(where: {
-                                        $0.path == finding.path
-                                    })
-                                else { return }
-                                Task { await session.setStaged(false, change: change) }
-                            }
-                            .buttonStyle(RafuSecondaryButtonStyle(compact: true))
-                        }
-                    }
-                }
-            }
-        }
-        .padding(8)
-        .background(
-            theme.palette.warning.opacity(0.08),
-            in: RoundedRectangle(cornerRadius: 6, style: .continuous)
-        )
     }
 
     private var historyView: some View {
