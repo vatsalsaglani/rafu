@@ -95,7 +95,7 @@ struct WorkspaceSidebarView: View {
             }
             .onDisappear { session.isFilesTreeFocused = false }
         }
-        .background(theme.palette.sidebarBackground)
+        .frostSpikeFrame(theme.palette.sidebarBackground)
         .sheet(item: $session.pendingTrashRequest) { request in
             // Cancel is the default button, so Return never trashes.
             RafuConfirmPopup(
