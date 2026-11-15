@@ -109,6 +109,15 @@ Never document text, never a full path. The whole ring is in-memory,
 bounded (`eventCap` 120 events, `readingCap` 180 readings), and never
 persisted, logged, or transmitted; it dies with the process.
 
+**11. Debug build note (2026-11-15).** A debug build uses more memory than a
+release build. Under `DEBUG` only, `DebugBuildNote` ("This is a debug build. It
+uses more memory than a release build.") shows as a caption in the Resources
+popover (`ResourcesView`) and is appended to the memory chip tooltip
+(`MemoryChipPresentation.help`). The number is never scaled or adjusted. The
+Resources panel reads `phys_footprint` (`ProcessMemorySampler.swift`), the same
+figure as Activity Monitor; "2 terminals 17 MB" is the child shells, not Rafu.
+See [`autorelease-pools-in-swift-concurrency-loops.md`](autorelease-pools-in-swift-concurrency-loops.md).
+
 ## Why it matters
 
 "Break the memory number down into categories" is a reasonable request that

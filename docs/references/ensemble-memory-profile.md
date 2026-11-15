@@ -127,6 +127,22 @@ document under the board. S5 minus S4 should be near zero after the Icon
 Library release (E-fix 1); a rise that stays means a leak. S6 minus S0 is the
 residual after closing, which should be small.
 
+### Measured profile, debug build (2026-11-15, advisor)
+
+Running debug Rafu Lightning (Xcode with macOS 27.2 SDK (26B118), Darwin 27.2.0,
+Mac17,13) with History visible, an Ensemble with 2 shells, and a conversation
+open. This is not an S0 to S6 row; it is one state, measured before the
+autorelease-pool fix. Malloc Small is the largest line.
+
+| State | `phys_footprint` | Peak | Malloc Small | Fragmentation | IOSurface | Live heap | Leaks |
+|---|---|---|---|---|---|---|---|
+| History, Ensemble with 2 shells, a conversation (before the fix) | 198 MB | 369 MB | 119 MB | 52.7 MB (45 %) | 22 MB | 81 MB | 0 |
+| Same state after the fix | pending (the coordinator measures it) | pending | pending | pending | pending | pending | pending |
+
+IOSurface 22 MB is the window backing store 13.2 MB plus two purgeable card
+shadow drawables (4.2 MB and 4.7 MB). Details and the cause are in
+[`autorelease-pools-in-swift-concurrency-loops.md`](autorelease-pools-in-swift-concurrency-loops.md).
+
 ## Verification
 
 ```sh

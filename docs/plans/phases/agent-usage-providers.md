@@ -15,6 +15,21 @@ The U-A…U-F staging table below is SUPERSEDED by that split (it remains
 as scope reference; W0≈U-A, W2≈U-B(+ADR), W3≈U-C, W4≈U-D+OpenRouter+Qwen,
 W1/W6–W8≈U-E/U-F).
 
+**Work log, 2026-11-15 — hook-driven usage refresh (merge 1f8d146).** The
+menu-bar percent and popover rings did not update by themselves: the 180 s
+timer started only in `NotchCompanionModel.clicked()` for a pinned panel, and
+`clicked()` returns early in menu-bar mode. The pure `UsageRefreshSchedule`
+now plans reads: coalesced turn-end reads from Activity tracking hooks, a 60 s
+minimum between automatic reads, a 300 s fallback, and a failure backoff. The
+age label and the card timeline (30 s tick) were corrected, and a sentence was
+added to the Settings ▸ Usage footer. ADR 0027 has an amendment; rules are in
+[`usage-rings-and-pace.md`](../../references/usage-rings-and-pace.md). The
+implementor ran format, build and the full parallel suite green on the branch;
+the main gate (both modes) is run by the coordinator. On-device checks still
+owed: the percent updates 15 to 75 s after a Claude turn with Activity tracking
+on; no reads while the screen is locked; at most one read per minute under
+rapid turns.
+
 Depends on: Notch Companion (shipped), `AgentUsage.swift` (the current
 `AgentUsageProvider`/`AgentUsageReader` seam), ADR 0016 amendment (reading
 other tools' local files).

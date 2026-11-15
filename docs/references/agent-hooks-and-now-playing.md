@@ -125,6 +125,16 @@ temporary folder. Inspect only normalized events, not provider transcripts.
     attention OR the bell. The Ensemble terminal node header shows
     "Working", "Needs approval", "Needs input", "Reply ready", or "Waiting"
     (one line in `CanvasCardChrome.stateWord`).
+10a. Turn-end trigger for usage (2026-11-15). `AgentActivityStore.apply`
+    collects providers from events the ledger accepted that are `Stop`,
+    `SubagentStop`, `StopFailure`, or `SessionEnd` and at most 60 s old (the
+    freshness guard, `UsageRefreshSchedule.maximumEventAge`), then calls the
+    `onTurnEnded` closure once per fold. It is a closure, not observed state, so
+    no view re-renders. A spool replayed at launch holds old events and so
+    starts no usage read burst. The schedule that consumes it is in
+    [`usage-rings-and-pace.md`](usage-rings-and-pace.md) (Refresh schedule). No
+    new hook entries are written; Codex hooks still need the user's trust
+    through `/hooks`, and until then usage uses only its fallback.
 
 ### Hook installation
 

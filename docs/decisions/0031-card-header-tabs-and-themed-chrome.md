@@ -170,7 +170,8 @@ holds.
   fragment of the next tab beside `+`). The Files header's top padding is
   10 → **19 pt**, so its title centre aligns with the tab labels'
   centre (12 pt inset + half the 38 pt shelf = 31 pt).
-- **One header line for every navigator panel (round 5, 2026-10-20).** Only
+- **One header line for every navigator panel (round 5, 2026-10-20; the
+  elevated band and 14 pt above are superseded by §i, 2026-11-15).** Only
   the Files header got the 19 pt above; Search, Source Control, Terminals,
   and History (all `RafuUtilityPanelHeader`) still sat about 14 pt higher.
   Now one metric, `RafuMetrics.navigatorHeaderTitleCenterY`
@@ -234,6 +235,36 @@ holds.
 Not adopted: a thumbnail in the tab hover preview (a contract test forbids a
 fabricated thumbnail) and in menus (an `NSMenu` item cannot host a view). Open
 Ensemble rows draw a vector silhouette instead (`ui-design-language.md`).
+
+### i. Sidebar panel redesign amendment (2026-11-15)
+
+The user approved a redesign from a mock-up. It replaces round 5's "elevated
+band" utility header (14 pt above) in §g.
+
+- **One quiet header.** All five navigator headers (Files, Search, Source
+  Control, Terminals, History) are one component, `RafuUtilityPanelHeader`: no
+  fill, no hairline, no leading icon, no close button. 13 pt semibold title with
+  tail truncation, `.isHeader`, and a tooltip. A 24 pt row with 19 pt above, a
+  10 pt edge (`RafuMetrics.sidebarTextInset`), and 8 pt below. The trailing
+  inset is 10 pt so Files does not change. `RafuPanelHeaderCount` is a plain
+  muted count (spoken "N terminals"); `RafuPanelHeaderOverflowMenu` is the
+  `⋯` menu. The 19 pt placement metric from round 5 stays.
+- **Sidebar rules.** Fills only for state (hover, selection, field). No dividers
+  under control blocks. The only hairline is above a pinned footer (Saved
+  Terminal Groups). One text edge.
+- **One segmented control**, `RafuSegmentedPicker`: no outer border,
+  `chipBackground` track, selection fill, semibold, `.isSelected`, and a
+  `borderStrong` hairline under Increase Contrast. Words first; icons only when
+  words do not fit (`ViewThatFits`). It also restyles Settings, the Ensemble
+  agent control, and the export, handoff and publish sheets (intended).
+- **Section headers**: `RafuSidebarSectionHeader`, 11 pt semibold, Title Case,
+  plain count.
+- **Frosted-window readiness.** No new slabs; fields and chips are opaque. The
+  nested `sidebarBackground` paints remain until the frosted-window work (ADR
+  0038, planned, not yet written).
+
+Details and the Terminals row rules:
+[`sidebar-panel-anatomy-and-terminal-rows.md`](../references/sidebar-panel-anatomy-and-terminal-rows.md).
 
 ## Alternatives considered
 

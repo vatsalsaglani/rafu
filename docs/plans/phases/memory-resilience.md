@@ -5,6 +5,20 @@
 Planned. Post-initial-push and cross-cutting; increments may interleave with
 feature phases, but each lands with its own measurement evidence.
 
+**Work log, 2026-11-15 — autorelease pools (merge 9f763f1).** Synchronous
+Foundation-heavy loops in Agent History and the workspace symbol index now run
+each unit inside RafuCore `withAutoreleasePool`, and kept strings are copied
+native with `makeContiguousUTF8()`. Debug-process harness over real transcripts:
+after scan 88.6–88.8 → 13.0–13.8 MB; after message search over 170 sessions
+1,090 → 62.5 MB. A debug-build note was added to Resources and the memory chip
+tooltip. Evidence and numbers:
+[`autorelease-pools-in-swift-concurrency-loops.md`](../../references/autorelease-pools-in-swift-concurrency-loops.md).
+The implementor ran format, build and the full parallel suite green on the
+branch; the main gate (both modes) is run by the coordinator. The app-level
+footprint after the fix is pending. Deferred: D1 lazy symbol index (needs user
+approval), D2 find the 94k `CFString` objects with `MallocStackLogging`, D3 card
+shadows only if Instruments shows them idle.
+
 Motivation: on 2026-07-14 the eager recursive file tree took a large monorepo
 to roughly 900 MB–1 GB resident. The fix (lazy per-directory tree plus a
 background filename index — see

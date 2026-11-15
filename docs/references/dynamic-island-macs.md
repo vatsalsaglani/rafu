@@ -111,8 +111,15 @@ Settings ▸ Notch shows the "Usage glance" picker on island Macs only.
   change lands, so the item re-arms it on the next main-actor turn. A `lastDrawn`
   value skips the re-render when nothing the drawing reads changed. There is no
   timer.
-- Usage refresh is TTL-gated and runs when the item is installed and when the
-  popover opens. `teardown(keepingUsageRefresh:)` leaves an in-flight read alone
+- Usage refresh runs when the item is installed, when the popover opens (only
+  if the last good read is older than 60 s), on a 300 s fallback while the item
+  exists, and after an agent turn ends (2026-11-15). Before that fix the item
+  refreshed only at install, on popover open and on manual refresh: the 180 s
+  timer started only in `NotchCompanionModel.clicked()` for a pinned panel, and
+  `clicked()` returns early in menu-bar mode, so the percent never updated by
+  itself. The rules are in
+  [`usage-rings-and-pace.md`](usage-rings-and-pace.md) (Refresh schedule).
+  `teardown(keepingUsageRefresh:)` leaves an in-flight read alone
   when the status item stays: without it a screen-parameter change cancelled the
   item's read and left it blocked by the 60 s TTL.
 

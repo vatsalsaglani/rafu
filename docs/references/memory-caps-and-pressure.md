@@ -55,6 +55,12 @@ These limits are coordinator-verified real values. They protect against runaway 
   turn more, because AppKit is still inside `close()`.
 - Verification: `swift test --filter RafuPopupComponentsTests`.
 
+**Autorelease pools (2026-11-15).** Synchronous loops that create Foundation
+objects (Agent History scan, search and transcript load; the workspace symbol
+index) run each unit inside `withAutoreleasePool`, because Swift concurrency
+drains the pool only when a job ends and freed pages stay charged. See
+[`autorelease-pools-in-swift-concurrency-loops.md`](autorelease-pools-in-swift-concurrency-loops.md).
+
 ## Why it matters
 
 Memory-pressure response keeps the app responsive under kernel-signaled memory warnings without adding polling or standing timers. Shedding the filename index on pressure is invisible to the user (rebuilds on demand), freeing a typically ~2-5 MB snapshot from transient pressure relief.

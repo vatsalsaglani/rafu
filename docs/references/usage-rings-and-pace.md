@@ -61,6 +61,46 @@ Every reason, in the order a refresh meets it:
   stale ("Showing the last successful update"), only while the provider is
   enabled and — for exact data — network consent still exists.
 
+### Refresh schedule (2026-11-15)
+
+Symptom: the menu-bar percent and the popover rings did not update by
+themselves. Root cause: the 180 s usage timer started only in
+`NotchCompanionModel.clicked()` when the panel was pinned, and in menu-bar mode
+`clicked()` returns early. The status item therefore refreshed only at install,
+on popover open (60 s TTL), and on a manual refresh.
+
+The fix is the pure, `Sendable` `UsageRefreshSchedule`
+(`Sources/RafuApp/Usage/UsageRefreshSchedule.swift`). The caller passes every
+`Date`, so tests drive it with a fake clock and no sleeping.
+
+| Trigger or rule | Behavior |
+|---|---|
+| Turn-end hook event (`Stop`, `SubagentStop`, `StopFailure`, `SessionEnd`) | Waits 15 s (coalesce, first due time kept, so a burst is one read). Never starts sooner than 60 s after the previous read start. |
+| Open a surface | Reads only when the last good read is older than 60 s. Ignores the failure backoff; the 429 and ADR 0027 Keychain gates still protect. |
+| Fallback | 300 s while a status item or a panel exists; 180 s only for a pinned panel with no status item. Nothing on screen: no automatic read. |
+| Failure | Backoff 300 s × failure count, count capped at 3. It also delays turn-end reads. |
+| Concurrency | One read at a time. A turn end during a read asks for one follow-up read. A manual refresh bypasses the interval limits but joins a running read. A cancelled read calls `schedule.abort()`. |
+| Locked or asleep screen | No read; the wake-up checks again after 60 s (`RafuMotionGate.shared.isScreenActive`). |
+
+A read is a failure when some provider shows stale data and none came back
+fresh. "No providers at all" counts as success.
+
+Turn ends come from `AgentActivityStore.apply`. It collects providers only from
+events the ledger accepted that are at most 60 s old, and calls its
+`onTurnEnded` closure once per fold. The closure is deliberately not observed
+state, so no view re-renders. A spool replayed at launch holds old events, so it
+starts no read burst. `NotchCompanionModel.agentTurnsEnded` also ignores the
+event when nothing shows usage or none of the providers has usage turned on.
+
+No new hook entries are written. Hooks exist only through the opt-in Activity
+tracking (Settings ▸ Agents). Codex hooks need the user's trust through
+`/hooks`; until then only the fallback runs.
+
+Age label (`UsagePace.ageLabel`): under 10 s "Just updated"; 10 to 59 s
+"Updated 30s ago" in 10 s steps; from 60 s whole minutes rounded down. "Just
+updated" had looked wrong because `observedAt` is the read start and the card
+timeline ticked only every 60 s. The card timeline now ticks every 30 s.
+
 ### Pace (`UsagePace.estimate`)
 
 Ported from Cider. Inputs: the used percentage, the window length, the
@@ -89,8 +129,8 @@ The exhausted state still works without a known reset.
   (`usageDisplayMode` key, suite-name idiom) and lives on
   `NotchCompanionModel` so the notch and Settings agree.
 - The ring draws no sweep under Reduce Motion. Cards update their countdowns
-  through `TimelineView(.periodic(from: .now, by: 60))`, which runs only
-  while the card is on screen.
+  through `TimelineView(.periodic(from: .now, by: 30))` (60 before
+  2026-11-15), which runs only while the card is on screen.
 - The notch's "Connect for exact usage…" opens Settings ▸ Usage through
   `SettingsPaneRouter` + `openSettings()` (after `NSApp.activate()`, since
   the notch panel never activates the app). The Settings card's button runs
@@ -214,9 +254,27 @@ from local transcripts", and the Connect button; after Connect it shows 5h,
 return without a second Connect (one Keychain prompt at most); toggle
 Used/Remaining; enable Reduce Motion; check VoiceOver on a ring.
 
+Refresh schedule (2026-11-15), toolchain: Xcode with macOS 27.2 SDK (26B118),
+Swift 6 language mode, Darwin 27.2.0, Mac17,13. The implementor ran format,
+build, and the full parallel suite green on the branch. Main gate run by
+coordinator; no serial result is recorded here.
+
+```bash
+swift test --filter UsageRefreshScheduleTests
+swift test --filter AgentActivityStoreTests
+swift test --filter NotchCompanionModelTests
+```
+
+On-device checks still owed: with Activity tracking on, the percent updates 15
+to 75 s after a Claude turn; no reads while the screen is locked; at most one
+read per minute under rapid turns.
+
 ## Related code, ADRs, and phases
 
-- Code: `Usage/UsagePace.swift`, `Usage/Providers/ClaudeProvider.swift`,
+- Code: `Usage/UsageRefreshSchedule.swift`,
+  `AgentTracking/AgentActivityStore.swift` (`onTurnEnded`),
+  `Terminal/NotchCompanionModel.swift` (`usageWakeFired`, `agentTurnsEnded`),
+  `Usage/UsagePace.swift`, `Usage/Providers/ClaudeProvider.swift`,
   `Usage/UsageStores.swift`, `Usage/UsageRegistryReader.swift`,
   `Views/UsageRingView.swift`, `Views/UsageProviderCardView.swift`,
   `Support/RafuProgressRing.swift`,

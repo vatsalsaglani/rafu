@@ -114,6 +114,25 @@ New and updated documentation for these rounds:
 [`swiftui-drop-hover-file-promise.md`](../../references/swiftui-drop-hover-file-promise.md),
 [`test-source-policy-and-bookmark-isolation.md`](../../references/test-source-policy-and-bookmark-isolation.md).
 
+**Work log, 2026-11-15 — sidebar panel redesign (merge 78461d9).** Approved by
+the user from a mock-up. All five navigator headers are now one quiet
+`RafuUtilityPanelHeader` (ADR 0031 §i; it replaces round 5's elevated band);
+the panel `×` is removed and the active rail icon hides the sidebar (ADR 0002
+note); one `RafuSegmentedPicker` (words first, icons only when words do not fit);
+Source Control and Search controls simplified; Terminals rows renamed and
+restyled (pure naming in `TerminalNaming`, two-line 40 pt rows, status slot,
+collapsible Saved Terminal Groups); `terminal.badge` replaced by
+`AgentSymbols.agentTerminal` after it was found missing on macOS 27.2. The
+implementor ran format, build and the full parallel suite green on the branch;
+the main gate (both modes) is run by the coordinator. GUI checks owed: Indigo and
+Khadi at widths 250, 310 and 460; Source Control words fit; header titles on the
+tab-label line; the header's empty run drags the window; hover and focus `⋯`;
+grip position; Increase Contrast, Reduce Transparency, grayscale, Larger Text;
+VoiceOver traits and the rail value. Deferred: arrow-key movement in Terminals
+(native `List`, optional, needs an ADR); the nested `sidebarBackground` paints
+(frosted-window work, ADR 0038 planned). Rules:
+[`sidebar-panel-anatomy-and-terminal-rows.md`](../../references/sidebar-panel-anatomy-and-terminal-rows.md).
+
 Parallel execution is specified by
 [`workbench-presentation-upgrade/README.md`](workbench-presentation-upgrade/README.md):
 one serial shared foundation, six file-disjoint worktrees from its exact commit,

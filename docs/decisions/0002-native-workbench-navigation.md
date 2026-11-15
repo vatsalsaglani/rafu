@@ -33,6 +33,14 @@ and active tab identify the file; no `.principal` toolbar icon is shown.
 The default remains restrained: Files Navigator, one editor group, and no detail
 pane. Power features appear when invoked.
 
+## Note 2026-11-15: no panel close button
+
+The panel `×` was a second sidebar toggle, which this decision forbids, and it
+is removed. The active rail icon is now the in-panel way to hide the sidebar:
+tooltip "Hide <Panel>", VoiceOver value "Selected, sidebar shown" (plus the
+attention count). ⌘B and the titlebar button are unchanged. See ADR 0031 §i and
+[`sidebar-panel-anatomy-and-terminal-rows.md`](../references/sidebar-panel-anatomy-and-terminal-rows.md).
+
 ## Alternatives considered
 
 - Keep Files left and Git permanently right. Simple, but permanently sacrifices

@@ -33,6 +33,28 @@ These checks also apply to results from requests already in flight.
 A quota whose reset has passed asks for a refresh, even if its old value
 was 100 percent.
 
+## Amendment 2026-11-15: hook-triggered reads
+
+Usage reads may also start after an agent turn ends. The trigger is a fresh
+(at most 60 s old) `Stop`, `SubagentStop`, `StopFailure`, or `SessionEnd` event
+from the opt-in Activity tracking hooks (Settings ▸ Agents). The rules:
+
+- Turn-end events are coalesced over 15 s. Automatic reads start at least 60 s
+  apart. One read runs at a time, with at most one follow-up.
+- A failed read backs off 300 s × the failure count (count capped at 3), and
+  this also delays turn-end reads. The fallback read is 300 s while a status
+  item or panel exists (180 s for a pinned panel with no status item).
+- No read runs while the screen is locked or asleep.
+- No new credential read is added. The 15-minute Keychain gate, the denial stop,
+  and the 429 handling stay as they are; the schedule only decides when to ask.
+- No new hook entries are written. Hooks exist only through the existing opt-in
+  Activity tracking; Codex hooks need the user's trust through `/hooks`.
+
+Reason: in menu-bar mode the usage percent refreshed only at install, on
+popover open, and on manual refresh. See
+[Usage rings and pace](../references/usage-rings-and-pace.md) (Refresh
+schedule).
+
 ## Alternatives considered
 
 - Require Connect after each restart or expiry: keeps the previous access
@@ -55,6 +77,7 @@ historical observation and cannot prove current capacity.
 - `Tests/RafuAppTests/Usage/UsagePaceTests.swift`
 - `Sources/RafuApp/Usage/UsageStores.swift`
 - `Sources/RafuApp/Usage/UsageRegistryReader.swift`
+- `Sources/RafuApp/Usage/UsageRefreshSchedule.swift` (amendment)
 - [Usage rings and pace](../references/usage-rings-and-pace.md)
 - [ADR 0017](0017-usage-provider-trust-transition.md)
 
