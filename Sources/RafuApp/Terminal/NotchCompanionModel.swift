@@ -262,6 +262,9 @@ final class NotchCompanionModel: NSObject {
     /// While the screen is locked or asleep, nobody can see usage and a read
     /// could raise a Keychain prompt behind the lock: check again this often.
     private static let usageInactiveRecheck: TimeInterval = 60
+    /// Writes the widget snapshot after each usage refresh.
+    @ObservationIgnored
+    private let widgetSnapshotPublisher = WidgetSnapshotPublisher()
 
     // MARK: - Test seams (mirroring NotchHUDController's reply/reveal routes)
 
@@ -1027,6 +1030,11 @@ final class NotchCompanionModel: NSObject {
         let failed = fresh.isEmpty && !merged.staleProviderIDs.isEmpty
         usageSchedule.finish(at: usageNow(), succeeded: !failed)
         rearmUsageWake()
+        // Share the result with the WidgetKit extension.
+        widgetSnapshotPublisher.publish(
+            snapshots: usageSnapshots, observedAt: usageObservedAt,
+            stale: usageStaleProviderIDs, mode: usageDisplayMode, palette: usageRingPalette,
+            now: usageNow())
     }
 
     func setUsageDisplayMode(_ mode: UsageDisplayMode) {
