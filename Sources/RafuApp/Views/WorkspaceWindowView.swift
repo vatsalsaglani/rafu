@@ -76,11 +76,11 @@ struct WorkspaceWindowView: View {
         .modifier(CanvasPresentations(session: session))
         // Raised from 720, then from 760 when the HSplitView divider
         // became the explicit `WorkbenchSplitHandle`, then to 774 when the
-        // deck inset grew. The window gap tightening kept 774: the floor is
-        // now the Activity Rail (38) + sidebar min (220) + the handle's hit
-        // area (10) + deck lane (editor min 472 + leading 6 + trailing 8)
-        // = 754, so the deck gains 20 pt at the minimum width. See
-        // `workbenchContent`'s comment.
+        // deck inset grew. Both window gap tightenings kept 774: the floor
+        // is now the Activity Rail (38) + sidebar min (220) + deck lane
+        // (editor min 472 + leading 8 + trailing 8) = 746 — the split
+        // handle is an overlay and takes no width — so the deck gains 28 pt
+        // at the minimum width. See `workbenchContent`'s comment.
         .frame(minWidth: 774, minHeight: 480)
         .navigationTitle(session.windowTitle)
         .focusedSceneValue(\.workspaceSession, session)
@@ -176,19 +176,16 @@ struct WorkspaceWindowView: View {
                         .frame(maxHeight: .infinity)
                         .zIndex(1)
                 }
-                // Present even while collapsed, right after the rail, so a
-                // drag outward from the collapsed edge can reopen the
-                // sidebar (see `WorkbenchSplitHandle`).
-                WorkbenchSplitHandle(session: session)
                 // Issue #4: the terminal presents as an editor tab inside
                 // `editorCanvas` now, not a separate docked panel here.
                 WorkbenchDeckSurface {
                     editorCanvas
-                        // Resize floor: rail 38 + sidebar min 220 + the
-                        // handle's 10 pt hit area + deck lane (this 472 +
-                        // the 6 pt leading and 8 pt trailing insets below)
-                        // = 754. The window's own `minWidth` (above, in
-                        // `body`) stays 774, clear of it.
+                        // Resize floor: rail 38 + sidebar min 220 + deck
+                        // lane (this 472 + the 8 pt leading and 8 pt
+                        // trailing insets below) = 746; the split handle
+                        // is an overlay and adds nothing. The window's own
+                        // `minWidth` (above, in `body`) stays 774, clear of
+                        // it.
                         // `sidebarWidth` is not window-responsive, so this
                         // floor holds only at a 220 pt sidebar. Below the
                         // true floor the deck clips at the trailing edge
@@ -198,19 +195,29 @@ struct WorkspaceWindowView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .layoutPriority(1)
                 }
-                // Per-edge gutter (`RafuMetrics.deckInset*`); a collapsed
-                // sidebar's handle hit area counts toward the leading one.
+                // Per-edge gutter (`RafuMetrics.deckInset*`); beside a
+                // collapsed sidebar the rail's empty strip counts toward the
+                // leading one.
                 .padding(
                     WorkbenchDeckLane.padding(
                         isSidebarCollapsed: session.isSidebarCollapsed,
-                        handleWidth: WorkbenchSplitHandle.hitAreaWidth
+                        railDeckSideInset: WorkspaceActivityRail.deckSideInset
                     )
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .rafuFrameSurface(.app)
                 .layoutPriority(1)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            // One `.app` frame fill under the rail and the deck lane both, so
+            // the deck's shadow shows under the rail's empty strip (the rail
+            // has no fill of its own). The opaque sidebar still covers it.
+            .rafuFrameSurface(.app)
+            // Present even while collapsed, beside the rail, so a drag
+            // outward from the collapsed edge can reopen the sidebar (see
+            // `WorkbenchSplitHandle`). An overlay on the seam, above the
+            // rail, sidebar, and deck for hit testing: it takes no layout
+            // width, so only the gutter sets the gap.
+            .overlay(alignment: .topLeading) { sidebarSplitHandle }
             // The voice companion: fixed in a corner of the workbench (it
             // does not pan or zoom with a board), above the editor and below
             // sheets, on every tab (voice-presence.md).
@@ -232,6 +239,21 @@ struct WorkspaceWindowView: View {
                     tint: theme.palette.appBackground, tintOpacity: windowSurface.tintOpacity)
             }
         }
+    }
+
+    /// The split handle, placed across the sidebar (or rail) to deck seam by
+    /// `WorkbenchDeckLane.handleHitArea`.
+    private var sidebarSplitHandle: some View {
+        let isCollapsed = session.isSidebarCollapsed
+        let hitArea = WorkbenchDeckLane.handleHitArea(
+            isSidebarCollapsed: isCollapsed,
+            railDeckSideInset: WorkspaceActivityRail.deckSideInset
+        )
+        let paneEdge =
+            WorkspaceActivityRail.width
+            + (isCollapsed ? 0 : CGFloat(WorkbenchSidebarResize.clamp(session.sidebarWidth)))
+        return WorkbenchSplitHandle(session: session, hitAreaWidth: hitArea.width)
+            .offset(x: paneEdge + hitArea.x)
     }
 
     private var editorCanvas: some View {

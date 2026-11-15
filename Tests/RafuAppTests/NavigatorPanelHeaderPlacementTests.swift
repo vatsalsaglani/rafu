@@ -15,13 +15,14 @@ struct NavigatorPanelHeaderPlacementTests {
             RafuMetrics.navigatorHeaderTitleCenterY
                 == RafuMetrics.deckInsetTop + RafuMetrics.tabShelfHeight / 2)
         // Window gap tightening: the deck's top inset 12 → 6 moved the tab
-        // labels up 6 pt, so the headers follow (31 → 25, inset 19 → 13).
-        #expect(RafuMetrics.navigatorHeaderTitleCenterY == 25)
+        // labels up 6 pt, so the headers follow (31 → 25, inset 19 → 13);
+        // window gap tightening 2: 6 → 2 (25 → 21, inset 13 → 9).
+        #expect(RafuMetrics.navigatorHeaderTitleCenterY == 21)
         // Every panel, Files included, uses the one 24 pt header row.
         #expect(RafuMetrics.navigatorHeaderRowHeight == 24)
         #expect(
             RafuMetrics.navigatorHeaderTopInset(rowHeight: RafuMetrics.navigatorHeaderRowHeight)
-                == 13)
+                == 9)
         // A row taller than the line never gets a negative inset.
         #expect(RafuMetrics.navigatorHeaderTopInset(rowHeight: 80) == 0)
     }

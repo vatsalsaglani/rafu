@@ -45,9 +45,14 @@ struct WorkspaceActivityRail: View {
     @Bindable var session: WorkspaceSession
     @Environment(\.rafuTheme) private var theme
 
-    /// The rail's full width: `leadingInset` + a 30 pt button + 3 pt.
+    /// The rail's full width: `leadingInset` + a 30 pt button +
+    /// `deckSideInset`.
     static let width: CGFloat = 38
     static let leadingInset: CGFloat = 5
+    /// The empty strip between the buttons and the rail's deck-side edge.
+    /// It counts toward the collapsed rail-to-card gap
+    /// (`RafuMetrics.deckGapCollapsedRail`, via `WorkbenchDeckLane`).
+    nonisolated static let deckSideInset: CGFloat = 3
 
     var body: some View {
         VStack(spacing: 6) {
@@ -62,16 +67,21 @@ struct WorkspaceActivityRail: View {
         // The rail starts below the titlebar row (`WindowTitlebarRow`) so
         // the traffic lights and sidebar toggle stay clear above it. The top
         // padding equals the deck's top inset, so the app tile's top edge
-        // lines up with the deck card's (window gap tightening: 10 → 6).
+        // lines up with the deck card's (window gap tightening: 10 → 6 → 2).
         .padding(.top, RafuMetrics.deckInsetTop)
         // 30 pt buttons: 5 pt from the window edge, and only 3 pt on the
-        // deck side, where the split handle's 10 pt follows (40 → 38).
+        // deck side (40 → 38). The split handle is an overlay, so with the
+        // sidebar collapsed only 2 pt of gutter follows (5 pt in total).
         .padding(.leading, Self.leadingInset)
         .frame(width: Self.width, alignment: .leading)
         .frame(maxHeight: .infinity)
         .fixedSize(horizontal: true, vertical: false)
         .background(WindowDragHandle())
-        .rafuFrameSurface(.app)
+        // No frame fill here: the workbench row paints the `.app` frame
+        // under the rail and the deck lane together. The rail is drawn above
+        // the deck (for hit testing), so a fill of its own would cut the
+        // deck's sideways shadow at the rail edge, 2 pt from a collapsed
+        // sidebar's card.
     }
 
     private func railButton(_ mode: WorkspaceNavigatorMode) -> some View {

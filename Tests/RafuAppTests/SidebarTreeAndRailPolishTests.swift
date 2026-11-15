@@ -172,11 +172,21 @@ struct SidebarTreeAndRailPolishTests {
         #expect(tileCall.lowerBound < modes.lowerBound)
         #expect(rail.contains("VStack(spacing: 6)"))
         // Window gap tightening: the rail's top padding follows the deck's
-        // top inset (10 → 6), so the app tile lines up with the card's top,
-        // and the rail is 38 pt with 3 pt on the deck side (was 40, 5 pt).
+        // top inset (10 → 6, then 2), so the app tile lines up with the
+        // card's top, and the rail is 38 pt with 3 pt on the deck side (was
+        // 40, 5 pt).
         #expect(rail.contains(".padding(.top, RafuMetrics.deckInsetTop)"))
         #expect(WorkspaceActivityRail.width == 38)
         #expect(WorkspaceActivityRail.leadingInset == 5)
+        #expect(WorkspaceActivityRail.deckSideInset == 3)
+        #expect(
+            WorkspaceActivityRail.leadingInset + 30 + WorkspaceActivityRail.deckSideInset
+                == WorkspaceActivityRail.width)
+        // Window gap tightening 2: the rail paints no frame fill of its own
+        // (the workbench row does), so it never cuts the deck's shadow.
+        let railOnly = try Self.section(
+            of: source, from: "struct WorkspaceActivityRail: View", to: "private func railButton")
+        #expect(!railOnly.contains(".rafuFrameSurface("))
         #expect(rail.contains(".frame(width: Self.width, alignment: .leading)"))
         // Clicks on the tile fall through to the rail's window-drag handle.
         let railBody = try Self.section(
