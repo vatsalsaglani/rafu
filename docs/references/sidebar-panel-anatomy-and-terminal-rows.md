@@ -11,9 +11,12 @@
   `Views/WorkspaceTerminalsPanelView.swift`, and
   `Views/TerminalGroupSavedLayoutsSection.swift`.
 - Last verified: Xcode with macOS 27.2 SDK (26B118), Swift 6 language mode,
-  Darwin 27.2.0, Mac17,13, 2026-11-15. Build and tests ran on the branch
-  (parallel green); the main gate is run by the coordinator. The GUI checks
-  below are not done.
+  Darwin 27.2.0, Mac17,13, 2026-11-15, Swift 6.4.2. Build and tests ran on the
+  branch (parallel green); the main gate is run by the coordinator. The GUI
+  checks below are not done. The Terminals native `List` section (below) is
+  [ADR 0040](../decisions/0040-terminals-panel-native-list.md): merged as a8c614b
+  (branch commit a6d5bf8); branch parallel 495 tests in 36 suites and 3871 tests
+  in 315 suites; main gate run by coordinator.
 
 ## Rule or observed behavior
 
@@ -33,7 +36,9 @@ component) and [ADR 0002](../decisions/0002-native-workbench-navigation.md)
   Files). A 24 pt row (`navigatorHeaderRowHeight`), 19 pt above (puts the title
   on the tab-label line), 10 pt edge, 8 pt below (`navigatorHeaderBottomSpacing`).
   The trailing inset is 10 pt so Files does not move. The empty run drags the
-  window. `RafuPanelHeaderCount` is a plain muted count (spoken as "N
+  window. (The "only hairline is above a pinned footer" rule now applies to the
+  Saved footer list shown only when there are no terminals; see "Terminals as a
+  native List".) `RafuPanelHeaderCount` is a plain muted count (spoken as "N
   terminals"). `RafuPanelHeaderOverflowMenu` is the `⋯` menu.
 - The panel `×` was a second sidebar toggle and is removed. The active rail icon
   now hides the sidebar: tooltip "Hide <Panel>", VoiceOver value "Selected,
@@ -85,7 +90,8 @@ Naming is pure, in `TerminalNaming` and `TerminalsPanelModel.hierarchyRows`.
   bell marks attention.
 - Rows are two lines, 40 pt, with no card fill or border. A 16 pt status slot
   (`AgentActivityGlyph`) replaces the pill. The `⋯` menu and the drag grip are
-  hover and focus overlays. `.onDrag` and inline rename are kept. The tooltip
+  hover overlays (the `⋯` menu also shows on selection, not on focus). `.onDrag`
+  and inline rename are kept. The tooltip
   holds the full title and the `~` path. Pane rows are indented 22 pt: ordinal,
   dot, name, folder if different, abnormal word, glyph.
 - Start Agent is a header icon button and an empty-state button. Both open the
@@ -93,11 +99,54 @@ Naming is pure, in `TerminalNaming` and `TerminalsPanelModel.hierarchyRows`.
   (`RafuPanelEmptyState(compact:)`).
 - Saved Terminal Groups is a collapsible one-line header with a count. It is
   collapsed when empty, open on error, and the choice is kept per window in
-  `@SceneStorage("terminals.savedGroups.expanded")`.
-- Row border resolver (`TerminalSurfaceBorderStyle.managerRow`): the current row
-  is selection fill only (plus `borderStrong` under Increase Contrast); amber
-  means attention only; the session colour is the dot only.
-  `Emphasis.managerCurrent` was removed.
+  `@SceneStorage("terminals.savedGroups.expanded")` (now owned by the panel, same
+  key; see the List section below).
+- Row border resolver (`TerminalSurfaceBorderStyle.managerRow`): amber means
+  attention only; the session colour is the dot only.
+  `Emphasis.managerCurrent` was removed. Since ADR 0040, rows pass
+  `isCurrent: false`, so the resolver draws only the attention border; the
+  selection fill is the system List highlight (see below).
+
+### Terminals as a native List (ADR 0040, 2026-11-15)
+
+The panel is one `List(selection:)` (`.listStyle(.plain)`,
+`.scrollContentBackground(.hidden)`, overlay scrollers,
+`.tint(theme.palette.selection)`). This replaced the stacked custom rows, and
+arrow-key movement is no longer deferred. Decision, rejected alternatives and
+VoiceOver contract: [ADR 0040](../decisions/0040-terminals-panel-native-list.md).
+
+Key map (one Tab stop; no key handling while an inline rename field is open):
+
+| Key | Row | Action |
+|---|---|---|
+| ↑ / ↓ | any | List's own movement |
+| Return or Space | group or session | reveal it (Space did nothing here before) |
+| Return or Space | pane | reveal and focus the pane |
+| Return or Space | saved row | open the saved layout |
+| Return, Space, ← , → | Saved header | toggle the section |
+| ← / → | group or pane | collapse and expand, and move between a group and its panes (Finder-like) |
+
+Structure and state:
+
+- A group with more than one pane is a disclosure row with a hand-drawn
+  `chevron.right` in the 8 pt before the icon. Pane rows are separate List rows
+  indented 22 pt. Expanded by default. Collapsed groups are stored per window in
+  `@SceneStorage("terminals.groups.collapsed")` as sorted UUIDs, and closed groups
+  are removed. Collapsing moves a selected pane's selection to its group. Group
+  menus have "Expand Panes" and "Collapse Panes".
+- One `String?` selection follows the current terminal; a selected pane of the
+  current group stays selected. The current row is semibold with `.isSelected` and
+  "Current" in its value. A hairline marks the selected row under Increase
+  Contrast.
+- Saved Terminal Groups is a `Section` of the same List. The header row is
+  selectable; state lines are `.selectionDisabled()`; saved rows are selectable
+  (click selects, double-click or Return opens). With no terminals, Saved shows
+  under the empty state as a footer list sized to its rows (`footerHeight`, 26 pt
+  rows, `maximumFooterRecordRows`), with the one hairline above it. The delete
+  confirmation is on the header row.
+- Clicks use one tap handler per row; see
+  [`swiftui-macos-click-latency.md`](swiftui-macos-click-latency.md).
+- Not done: "sections by place" (Tabs, Ensemble, Hidden).
 
 ### SF Symbol nuance
 
@@ -120,16 +169,34 @@ folder name used as a title.
 Evidence is the merged tests plus a build on the branch. No GUI pass was done.
 GUI checks owed: Indigo and Khadi at sidebar widths 250, 310 and 460; the Source
 Control words fit; header titles on the tab-label line; the header's empty run
-drags the window; hover and focus `⋯`; the grip position; Increase Contrast,
+drags the window; hover `⋯`; the grip position; Increase Contrast,
 Reduce Transparency, grayscale, and Larger Text; VoiceOver traits and the rail
-value. Arrow-key movement in Terminals is deferred (a native `List`; optional;
-it would need an ADR).
+value.
+
+Terminals native List (ADR 0040): evidence is tests only: `TerminalsPanelListTests`
+(9) plus updated `EnsembleBarRedesignTests`, `SidebarPanelRedesignTests`,
+`TerminalGroupManagerHierarchyTests` and `TerminalManagerPresentationTests`. No GUI
+check was done. GUI checks owed:
+
+- whether `.tint(theme.palette.selection)` changes the plain List selection
+  highlight (if not, it is the system accent; check Khadi contrast);
+- `.onKeyPress` on the List gets Return and Space before the List does;
+- a row click gives the List key focus;
+- inline rename focus, and Escape, inside List rows;
+- the 8 pt chevron hit area;
+- footer list height: no clipping and no extra gap;
+- the delete confirmation sheet when the Saved header has scrolled away;
+- no sticky slab in Frosted;
+- Full Keyboard Access and VoiceOver (group, pane and Saved header contracts);
+- a second window keeps its own expansion and selection;
+- Increase Contrast (selected-row hairline).
 
 ## Verification
 
 ```bash
 swift test --filter AgentSymbolsTests
 swift test --filter NavigatorPanelHeaderPlacementTests
+swift test --filter TerminalsPanelListTests
 rg -n "RafuUtilityPanelHeader|RafuSegmentedPicker" Sources/RafuApp
 ./script/build_and_run.sh --verify
 ```
@@ -138,7 +205,10 @@ rg -n "RafuUtilityPanelHeader|RafuSegmentedPicker" Sources/RafuApp
 
 - [ADR 0031](../decisions/0031-card-header-tabs-and-themed-chrome.md) (§i),
   [ADR 0002](../decisions/0002-native-workbench-navigation.md) (2026-11-15 note),
-  [ADR 0023](../decisions/0023-terminal-groups-and-saved-layouts.md)
+  [ADR 0023](../decisions/0023-terminal-groups-and-saved-layouts.md),
+  [ADR 0040](../decisions/0040-terminals-panel-native-list.md)
+- [`list-custom-disclosure-group-style.md`](list-custom-disclosure-group-style.md),
+  [`swiftui-macos-click-latency.md`](swiftui-macos-click-latency.md)
 - [`ui-design-language.md`](ui-design-language.md),
   [`terminal-agent-identity.md`](terminal-agent-identity.md)
 - Phase: [`workbench-presentation-upgrade.md`](../plans/phases/workbench-presentation-upgrade.md)

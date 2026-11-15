@@ -93,6 +93,26 @@ sidebar `List`. That `List` has no custom-styled group, so it is a plain
 outline, but it uses the same native outline path; if it ever crashes the same
 way, apply the flat style there too.
 
+### The Terminals panel is a second List that avoids the outline (2026-11-15)
+
+Last verified: Xcode with macOS 27.2 SDK (26B118), Swift 6.4.2, Darwin 27.2.0,
+Mac17,13. Tests only; no GUI check.
+
+The Terminals panel ([ADR 0040](../decisions/0040-terminals-panel-native-list.md))
+is a `List(selection:)` with multi-pane groups that collapse. It does not use a
+system `DisclosureGroup` or `OutlineGroup`, and it does not use a custom
+`DisclosureGroupStyle` either. One system-style group would back the whole List
+with an `NSOutlineView`, which crashed on collapse in Files (above), and a
+selected row under a collapsed group draws a phantom highlight. Instead the group
+and its panes are flat List rows, the group row draws its own `chevron.right` (in
+the 8 pt before the icon), and expansion is state the panel owns
+(`@SceneStorage("terminals.groups.collapsed")`; collapsing a group moves a
+selected pane's selection to the group, so no selected row is ever hidden). Keys
+(Return, Space, ←, →) are the panel's own `.onKeyPress`, as for a custom style.
+Rule: if you add a collapsible group to this List, keep it a flat row; never add a
+system `DisclosureGroup`. Keyboard and VoiceOver for that chevron are hand-made
+too (Expanded/Collapsed value and an Expand/Collapse action).
+
 ### `ScrollGeometry.contentOffset` is `−inset` at rest with `contentMargins`
 
 A `ScrollView` that uses `contentMargins` reports a resting
@@ -136,7 +156,8 @@ which reads as an indentation bug until a collapse aborts the app.
   (`Sources/RafuApp/Views/WorkspaceSidebarView.swift`), `WorkspaceRootSection`
   (`Sources/RafuApp/Views/WorkspacesRootSections.swift`).
 - [`multi-folder-workspaces.md`](multi-folder-workspaces.md) (root sections).
-- [ADR 0031](../decisions/0031-card-header-tabs-and-themed-chrome.md) §d
+- [ADR 0031](../decisions/0031-card-header-tabs-and-themed-chrome.md) §d,
+  [ADR 0040](../decisions/0040-terminals-panel-native-list.md) (Terminals List)
 - [`scrollview-legacy-scroller-always-setting.md`](scrollview-legacy-scroller-always-setting.md),
   [`ui-design-language.md`](ui-design-language.md),
   [`sidebar-single-click-opening.md`](sidebar-single-click-opening.md)

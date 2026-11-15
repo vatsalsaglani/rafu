@@ -228,6 +228,41 @@ typing p95, a terminal flood (`yes | head -200000`), and a 40-card board pan.
 New Frosted-only costs: one mask pass for the deck shadow, one per visible card
 shadow, and SwiftTerm compositing a non-opaque layer.
 
+**Work log, 2026-11-15 — Terminals panel as a native List with arrow keys (merge
+a8c614b, branch commit a6d5bf8).** User request: "CONTINUE THE OPTIONALS", which
+included "Terminals as a native macOS list with arrow keys (needs an ADR)". This
+closes the item the sidebar panel redesign deferred. Delivered: the panel is one
+`List(selection:)` with one selection following the current terminal; ↑/↓,
+Return/Space and ←/→ keys; multi-pane groups as flat disclosure rows with a
+hand-drawn chevron and per-window collapsed groups; one tap handler per row;
+Saved Terminal Groups as a List section (footer list when there are no
+terminals); system List highlight tinted with the theme selection. Contract,
+rejected alternatives and VoiceOver rules:
+[ADR 0040](../../decisions/0040-terminals-panel-native-list.md). Nuances:
+[`sidebar-panel-anatomy-and-terminal-rows.md`](../../references/sidebar-panel-anatomy-and-terminal-rows.md),
+[`list-custom-disclosure-group-style.md`](../../references/list-custom-disclosure-group-style.md),
+[`swiftui-macos-click-latency.md`](../../references/swiftui-macos-click-latency.md).
+
+Evidence (toolchain: Swift 6.4.2, Xcode with macOS 27.2 SDK (26B118), Darwin
+27.2.0, Mac17,13):
+
+- Branch, parallel: 495 tests in 36 suites and 3871 tests in 315 suites.
+- Main gate (both modes): run by coordinator (result not in the handoff).
+- Tests: `TerminalsPanelListTests` (9), plus updated `EnsembleBarRedesignTests`,
+  `SidebarPanelRedesignTests`, `TerminalGroupManagerHierarchyTests`,
+  `TerminalManagerPresentationTests`.
+- No GUI check yet; the user tests everything at the end.
+
+Not done: "sections by place" (Tabs, Ensemble, Hidden).
+
+GUI checks owed: whether `.tint` changes the plain List selection highlight (else
+the system accent; check Khadi contrast); `.onKeyPress` on the List gets Return
+and Space before the List; a row click gives the List key focus; inline rename
+focus and Escape inside List rows; the 8 pt chevron hit area; footer list height
+(no clipping, no extra gap); the delete confirmation sheet when the header
+scrolls away; no sticky slab in Frosted; Full Keyboard Access; VoiceOver; a
+second window keeps its own expansion and selection; Increase Contrast.
+
 Parallel execution is specified by
 [`workbench-presentation-upgrade/README.md`](workbench-presentation-upgrade/README.md):
 one serial shared foundation, six file-disjoint worktrees from its exact commit,

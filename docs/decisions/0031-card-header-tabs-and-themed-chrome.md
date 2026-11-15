@@ -265,6 +265,10 @@ band" utility header (14 pt above) in §g.
   nested `sidebarBackground` paints remain until the frosted-window work
   (landed 2026-11-15 as [ADR 0038](0038-optional-frosted-window-base.md):
   `rafuFrameSurface` paints nothing in Frosted).
+- **Amended 2026-11-15 by [ADR 0040](0040-terminals-panel-native-list.md):** the
+  Terminals panel is a native `List(selection:)` with arrow keys, disclosure rows
+  for multi-pane groups and Saved Terminal Groups as a List section. This
+  replaces the stacked custom rows and the earlier "no accordion" row structure.
 
 ### j. Frame gaps and frosted base amendment (2026-11-15)
 

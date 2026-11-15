@@ -160,6 +160,25 @@ Verified with real `CGEvent`s on `bfb1710`: dragging from a tab's title and from
 its icon both reorder, and a plain click still selects. Drag-side details are in
 [`drag-and-drop-custom-uttype.md`](drag-and-drop-custom-uttype.md).
 
+### Terminals and saved rows inside a selectable List (2026-11-15)
+
+Last verified: Xcode with macOS 27.2 SDK (26B118), Swift 6.4.2, Darwin 27.2.0,
+Mac17,13. Tests only; no GUI check, and no latency was measured.
+
+The Terminals panel is now a `List(selection:)`
+([ADR 0040](../decisions/0040-terminals-panel-native-list.md)). Every row (group,
+session, pane, saved layout) uses one tap handler fed by `TabClickIntent`: a click
+selects and reveals at once, a double-click renames (saved rows: opens), and
+⌘-click is a plain click. Pane rows are no longer Buttons, so a click is not held
+back and `.onDrag` keeps the press (the Button rule above). Saved rows replaced
+`.onTapGesture(count: 2)` with the same single handler. The selection is set by
+hand in the tap, as `GitCommitGraphView` does, so the click does not wait for the
+List's own selection handling.
+
+Unmeasured hypothesis: a lone `.onTapGesture(count: 2)` on a row in a selectable
+List holds back the single click (the cause 2 delay, plus the List's own click).
+That is why the saved rows lost it. Not confirmed by measurement.
+
 ## Why it matters
 
 Each cause alone makes tabs feel unresponsive, and they stack. The
