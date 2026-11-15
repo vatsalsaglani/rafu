@@ -242,9 +242,19 @@ func chromeIsSharedSourceContract() throws {
     // The HUD window belongs to no scene: it needs its own motion scope so
     // the sweep pauses while hidden.
     #expect(hud.contains(".rafuMotionScope()"))
-    let menu = try SidebarPanelRedesignTests.source("Sources/RafuApp/Notch/UsageMenuBarItem.swift")
+    // The menu bar card is a custom panel with the companion outline, not a
+    // system popover, and has no inset border inside a popover rim.
+    let menuItem = try SidebarPanelRedesignTests.source(
+        "Sources/RafuApp/Notch/UsageMenuBarItem.swift")
+    #expect(!menuItem.contains("NSPopover"))
+    #expect(menuItem.contains("CompanionMenuPanel(contentRect:"))
+    #expect(menuItem.contains("hostingView.hitOutline = CompanionMenuPanelGeometry.outline"))
+    let menu = try SidebarPanelRedesignTests.source(
+        "Sources/RafuApp/Notch/CompanionMenuPanel.swift")
     #expect(menu.contains(".companionGlowBorder("))
-    #expect(menu.contains("NSPopover()"))
+    #expect(menu.contains(".rafuMotionScope()"))
+    #expect(menu.contains("CompanionMenuRevealShape(progress: reveal.progress, openTop: true)"))
+    #expect(!menu.contains("popoverBorderInset"))
     let chrome = try SidebarPanelRedesignTests.source("Sources/RafuApp/Views/CompanionChrome.swift")
     // The timeline is paused whenever the border is still.
     #expect(chrome.contains("paused: state.period == nil"))
