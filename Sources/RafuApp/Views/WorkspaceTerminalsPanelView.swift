@@ -405,7 +405,7 @@ private struct AgentStartMenuView: View {
             isPresented = true
         } label: {
             HStack(spacing: 8) {
-                Image(systemName: "terminal.badge")
+                Image(systemName: AgentSymbols.agentTerminal)
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(theme.palette.textSecondary)
                     .frame(width: 26, height: 26)
