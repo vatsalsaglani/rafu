@@ -50,6 +50,8 @@ struct ThemeSettingsSection: View {
                 }
             }
 
+            WindowSurfaceSettingsSection()
+
             Section {
                 LazyVGrid(columns: [.init(.adaptive(minimum: 142), spacing: 10)], spacing: 10) {
                     ForEach(options) { option in

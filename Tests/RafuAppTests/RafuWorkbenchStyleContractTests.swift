@@ -64,7 +64,7 @@ struct RafuWorkbenchStyleContractTests {
         #expect(!source.contains(".clipShape("))
         // Round 4: the one mask shapes the deck's corner-wedge DECORATION
         // (frame + shadow), never the card's content.
-        #expect(Self.occurrences(of: ".mask {", in: source) == 1)
+        #expect(Self.occurrences(of: ".mask", in: source) == 1)
         let wedges = try Self.section(
             of: source,
             from: "private struct WorkbenchDeckCornerWedges: View",
@@ -78,7 +78,10 @@ struct RafuWorkbenchStyleContractTests {
             from: "struct WorkbenchDeckSurface<Content: View>",
             to: "private struct WorkbenchDeckShadowShape: View"
         )
-        #expect(!deck.contains(".mask {"))
+        #expect(!deck.contains(".mask"))
+        // Frosted corners use masked behind-window views (`maskImage`, in
+        // WindowFrostBackdrop.swift), never a mask or clip on the card.
+        #expect(deck.contains("WindowFrostWedges(radius: RafuMetrics.radiusWorkbenchDeck)"))
     }
 
     @Test("The deck's corner wedges repaint its shadow; only the editor group keeps flat wedges")
@@ -93,7 +96,11 @@ struct RafuWorkbenchStyleContractTests {
         // bounding box and left square points at the bottom corners.
         #expect(!deck.contains("CornerCutoutOverlay("))
         #expect(deck.contains("WorkbenchDeckCornerWedges("))
-        #expect(deck.contains("theme.palette.appBackground"))
+        // Solid wedges paint the opaque frame colour; Frosted wedges paint it
+        // at the window's tint opacity, over their own behind-window blur.
+        #expect(deck.contains(": theme.palette.appBackground,"))
+        #expect(
+            deck.contains("? theme.palette.appBackground.opacity(windowSurface.tintOpacity)"))
         // The dark-only inner top highlight.
         #expect(deck.contains("if theme.isDark {"))
         #expect(deck.contains("WorkbenchDeckTopHighlight()"))

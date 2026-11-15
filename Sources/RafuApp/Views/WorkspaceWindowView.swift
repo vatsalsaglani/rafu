@@ -14,19 +14,25 @@ struct WorkspaceWindowView: View {
     @AppStorage(FileIconProvider.colouredFileIconsKey) private var colouredFileIcons = false
     /// This window's voice companion: its corner, tuck and toggles.
     @State private var voiceCompanion = VoiceCompanionModel()
-    // SPIKE (frosted window base, Step 0): debug defaults, read live.
-    @AppStorage("RafuFrostSpike") private var frostMechanism = ""
-    @AppStorage("RafuFrostSpikeMaterial") private var frostMaterial = ""
-    @AppStorage("RafuFrostSpikeState") private var frostState = "active"
-    @AppStorage("RafuFrostSpikeTint") private var frostTint = 0.74
-    @AppStorage("RafuFrostSpikeWedge") private var frostWedge = "masked"
-    @AppStorage("RafuFrostSpikeClear") private var frostClearWindow = false
+    /// Settings → Appearance → Window background and Frost.
+    @AppStorage(WindowSurfacePreference.styleKey) private var windowSurfaceStyle =
+        WindowSurfacePreference.Style.solid.rawValue
+    @AppStorage(WindowSurfacePreference.frostLevelKey) private var windowSurfaceFrost =
+        WindowSurfacePreference.FrostLevel.balanced.rawValue
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
 
-    private var frostSpike: FrostSpikeConfig? {
-        guard !showsWelcome else { return nil }
-        return FrostSpikeConfig.resolve(
-            mechanism: frostMechanism, material: frostMaterial, state: frostState,
-            tint: frostTint, wedge: frostWedge, clearWindow: frostClearWindow)
+    /// Resolved per window. The welcome window is always Solid; Reduce
+    /// Transparency and Increase Contrast force Solid live.
+    private var windowSurface: WindowSurfacePreference.Resolved {
+        guard !showsWelcome else { return .solid }
+        return WindowSurfacePreference.resolve(
+            style: windowSurfaceStyle,
+            level: windowSurfaceFrost,
+            isDark: theme.isDark,
+            reduceTransparency: reduceTransparency,
+            increaseContrast: colorSchemeContrast == .increased
+        )
     }
 
     var body: some View {
@@ -46,11 +52,9 @@ struct WorkspaceWindowView: View {
         // (see flat-window-chrome-titlebar-merge.md).
         .background(
             FlatWindowChrome(
-                titleBarColor: frostSpike?.clearWindow == true
-                    ? .clear
-                    : NSColor(
-                        showsWelcome ? theme.palette.editorBackground : theme.palette.appBackground
-                    ),
+                titleBarColor: NSColor(
+                    showsWelcome ? theme.palette.editorBackground : theme.palette.appBackground
+                ),
                 topologyToken: windowChromeTopologyToken,
                 hidesTrafficLights: false,
                 onFullScreenChange: { isFullScreen in
@@ -93,8 +97,7 @@ struct WorkspaceWindowView: View {
         .environment(\.rafuColouredFileIcons, colouredFileIcons)
         // Board cards report their drags, so the orb tucks away.
         .environment(voiceCompanion)
-        .environment(\.rafuFrostSpike, frostSpike)
-        .modifier(FrostSpikeContainerBackground(config: frostSpike))
+        .environment(\.rafuWindowSurface, windowSurface)
     }
 
     private var showsWelcome: Bool {
@@ -203,7 +206,7 @@ struct WorkspaceWindowView: View {
                     )
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .frostSpikeFrame(theme.palette.appBackground)
+                .rafuFrameSurface(.app)
                 .layoutPriority(1)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
@@ -219,9 +222,13 @@ struct WorkspaceWindowView: View {
             WorkspaceStatusBar(session: session)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        // Frosted: the one behind-window blur and the one frame tint, below
+        // every frame surface (which then paints nothing). Not mounted in
+        // Solid, so Solid costs nothing.
         .background {
-            if let frostSpike {
-                FrostSpikeBackdrop(config: frostSpike, tint: theme.palette.appBackground)
+            if windowSurface.isFrosted {
+                WindowFrostBackdrop(
+                    tint: theme.palette.appBackground, tintOpacity: windowSurface.tintOpacity)
             }
         }
     }

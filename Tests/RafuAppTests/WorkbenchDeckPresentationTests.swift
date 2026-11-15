@@ -17,7 +17,7 @@ struct WorkbenchDeckPresentationTests {
         let deckLane = try Self.section(
             in: windowContent,
             from: "WorkbenchDeckSurface {",
-            through: ".frostSpikeFrame(theme.palette.appBackground)"
+            through: ".rafuFrameSurface(.app)"
         )
 
         #expect(Self.occurrences(of: "WorkbenchDeckSurface {", in: windowContent) == 1)
@@ -62,13 +62,13 @@ struct WorkbenchDeckPresentationTests {
         let deckLane = try Self.section(
             in: source,
             from: "WorkbenchDeckSurface {",
-            through: ".frostSpikeFrame(theme.palette.appBackground)"
+            through: ".rafuFrameSurface(.app)"
         )
         let padding = try #require(
             deckLane.range(of: "WorkbenchDeckLane.padding(")
         )
         let backing = try #require(
-            deckLane.range(of: ".frostSpikeFrame(theme.palette.appBackground)")
+            deckLane.range(of: ".rafuFrameSurface(.app)")
         )
 
         // Design polish round 2: 8 → 10 so the stronger deck shadow fits;
@@ -140,7 +140,7 @@ struct WorkbenchDeckPresentationTests {
     func filesLeafStaysFlat() throws {
         let source = try Self.source("Sources/RafuApp/Views/WorkspaceSidebarView.swift")
 
-        #expect(source.contains(".frostSpikeFrame(theme.palette.sidebarBackground)"))
+        #expect(source.contains(".rafuFrameSurface(.sidebar)"))
         #expect(source.contains(".listStyle(.plain)"))
         #expect(
             source.contains(".environment(\\.defaultMinListRowHeight, FileTreeMetrics.rowHeight)"))
