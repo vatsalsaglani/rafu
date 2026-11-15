@@ -11,7 +11,6 @@ import SwiftUI
 struct NotchHUDView: View {
     @Bindable var controller: NotchHUDController
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.colorSchemeContrast) private var contrast
     @FocusState private var replyFocused: Bool
 
     private var theme: RafuTheme { controller.theme }
@@ -33,9 +32,26 @@ struct NotchHUDView: View {
             }
         }
         .padding(.top, controller.bandInset)
-        .frame(width: NotchHUDController.layoutWidth, height: height)
+        // Under a notch the window is wider by both shoulders
+        // (`NotchHUDController.panelWidth`); the content stays between them.
+        .padding(.horizontal, outlineLimits.shoulder)
+        .frame(width: controller.panelWidth, height: height)
         .background(hudShape.fill(surfaceColor))
-        .overlay(hudShape.strokeBorder(borderColor, lineWidth: borderWidth))
+        .overlay {
+            if controller.event?.color != nil {
+                CompanionOutline(limits: outlineLimits, openTop: true)
+                    .stroke(borderColor, lineWidth: borderWidth * 2)
+                    .clipShape(hudShape)
+            }
+        }
+        // No session colour: Cider's gradient border, swept once when an
+        // event arrives (`CompanionGlowPolicy`), then still. Increase
+        // Contrast makes it a solid line.
+        .companionGlowBorder(
+            stroke: CompanionOutline(limits: outlineLimits, openTop: true), clip: hudShape,
+            visible: controller.event != nil && controller.event?.color == nil,
+            anyWorking: false, sweepKey: controller.event?.sessionID
+        )
         .clipShape(hudShape)
         .onHover { controller.isHovered = $0 }
         .onKeyPress(.escape) {
@@ -54,6 +70,9 @@ struct NotchHUDView: View {
             value: controller.state
         )
         .rafuTheme(theme)
+        // The HUD window belongs to no scene: this pauses the border's
+        // sweep while the panel is hidden or the screen is locked.
+        .rafuMotionScope()
     }
 
     private var height: CGFloat {
@@ -71,32 +90,28 @@ struct NotchHUDView: View {
         controller.bandInset > 0 ? Color.black : theme.palette.elevatedBackground
     }
 
-    /// Bottom-rounded so the HUD reads as attached to the notch / menu bar
-    /// its top edge is flush with.
-    private var hudShape: UnevenRoundedRectangle {
-        UnevenRoundedRectangle(
-            topLeadingRadius: 0,
-            bottomLeadingRadius: RafuMetrics.radiusPanel,
-            bottomTrailingRadius: RafuMetrics.radiusPanel,
-            topTrailingRadius: 0,
-            style: .continuous
-        )
+    /// Hangs from the notch with Cider's concave shoulders, so the HUD reads
+    /// as growing out of the housing. Without a notch it stays a
+    /// bottom-rounded card under the menu bar (no shoulders).
+    private var outlineLimits: CompanionOutlineLimits {
+        controller.bandInset > 0 ? .open : .closed
     }
 
-    /// The session color IS the border, matching the Terminals panel cards;
-    /// Increase Contrast always gets a defined border (product decision 6).
+    private var hudShape: CompanionOutline {
+        CompanionOutline(limits: outlineLimits)
+    }
+
+    /// A session colour IS the border, matching the Terminals panel cards.
+    /// Without one the gradient border draws instead, which Increase
+    /// Contrast turns into a solid strong line (product decision 6).
     private var borderColor: Color {
         if let color = controller.event?.color {
             return theme.palette.color(for: color)
         }
-        return contrast == .increased
-            ? theme.palette.borderStrong
-            : theme.palette.borderSubtle.opacity(0.6)
+        return theme.palette.borderStrong
     }
 
-    private var borderWidth: CGFloat {
-        controller.event?.color != nil ? 2 : RafuMetrics.hairline
-    }
+    private var borderWidth: CGFloat { 2 }
 
     /// Reduce Motion: cross-fade only, no slide (product decision 6).
     private var transition: AnyTransition {

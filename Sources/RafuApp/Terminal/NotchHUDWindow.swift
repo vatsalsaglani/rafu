@@ -92,6 +92,17 @@ final class NotchHUDPanel: NSPanel {
         }
     }
 
+    /// The surface's `CompanionOutline`, or `nil` for the whole rectangle.
+    /// Set while the panel draws concave shoulders: a point outside the
+    /// outline (beside a shoulder) is not the panel's, so the click and the
+    /// hover go to what is behind it — the same path that draws the panel
+    /// (Cider's `NotchController` hit test).
+    var hitOutline: CompanionOutlineLimits? {
+        didSet {
+            (contentView as? any NotchHUDPassthroughHosting)?.hitOutline = hitOutline
+        }
+    }
+
     override var canBecomeKey: Bool { allowsKeyStatus }
 
     init(contentRect: NSRect) {
@@ -136,6 +147,7 @@ final class NotchHUDPanel: NSPanel {
 /// panel is currently hosting.
 protocol NotchHUDPassthroughHosting: AnyObject {
     var clickThroughRegions: [CGRect] { get set }
+    var hitOutline: CompanionOutlineLimits? { get set }
 }
 
 /// The hit-transparent content view (terminal-notch-hud.md NC-B, "Resting":
@@ -159,6 +171,8 @@ final class NotchHUDPassthroughHostingView<Content: View>: NSHostingView<Content
     NotchHUDPassthroughHosting
 {
     var clickThroughRegions: [CGRect] = []
+    /// `NotchHUDPanel.hitOutline`.
+    var hitOutline: CompanionOutlineLimits?
 
     // Apple Swift 6.3.3 crashes in EarlyPerfInliner while optimizing this
     // generic hosting view's synthesized destructor. An explicit empty
@@ -175,6 +189,15 @@ final class NotchHUDPassthroughHostingView<Content: View>: NSHostingView<Content
     /// `clickThroughRegions` is expressed in (matching
     /// `NotchCompanionGeometry`'s own coordinate space).
     override func hitTest(_ point: NSPoint) -> NSView? {
+        if let hitOutline {
+            // `point` is in window coordinates (no superview); the outline
+            // is laid out top-left origin, as SwiftUI draws it.
+            let local = convert(point, from: nil)
+            let topDown = CGPoint(x: local.x, y: isFlipped ? local.y : bounds.height - local.y)
+            if !CompanionOutline.contains(topDown, size: bounds.size, limits: hitOutline) {
+                return nil
+            }
+        }
         guard let window, !clickThroughRegions.isEmpty else { return super.hitTest(point) }
         let screenPoint = window.convertPoint(toScreen: point)
         if clickThroughRegions.contains(where: { $0.contains(screenPoint) }) {
