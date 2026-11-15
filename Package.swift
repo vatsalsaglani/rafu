@@ -13,6 +13,9 @@ let package = Package(
         .executable(name: "rafu", targets: ["RafuCLI"]),
         // The agent hook helper (X11), staged into Contents/Helpers.
         .executable(name: "rafu-agent-events", targets: ["RafuAgentEventHelper"]),
+        // SPIKE: the WidgetKit extension executable. build_and_run.sh wraps
+        // it in Contents/PlugIns/RafuWidgets.appex.
+        .executable(name: "RafuWidgets", targets: ["RafuWidgets"]),
     ],
     dependencies: [
         .package(
@@ -100,10 +103,35 @@ let package = Package(
     ],
     targets: [
         .target(name: "RafuCore"),
+        // SPIKE: credential-free widget snapshot model, shared by the app
+        // and the sandboxed widget extension.
+        .target(
+            name: "RafuWidgetShared",
+            swiftSettings: [.unsafeFlags(["-application-extension"])]
+        ),
+        .executableTarget(
+            name: "RafuWidgets",
+            dependencies: ["RafuWidgetShared"],
+            swiftSettings: [
+                // App extensions may use only extension-safe API.
+                .unsafeFlags(["-application-extension"])
+            ],
+            linkerSettings: [
+                // `-e _NSExtensionMain` is what Xcode's app-extension product
+                // type adds. Without it the @main WidgetBundle entry traps in
+                // `_EXRunningExtension` bootstrap instead of starting as an
+                // extension XPC service.
+                .unsafeFlags([
+                    "-Xlinker", "-application_extension",
+                    "-Xlinker", "-e", "-Xlinker", "_NSExtensionMain",
+                ])
+            ]
+        ),
         .executableTarget(
             name: "RafuApp",
             dependencies: [
                 "RafuCore",
+                "RafuWidgetShared",
                 .product(name: "MarkdownUI", package: "swift-markdown-ui"),
                 .product(name: "Neon", package: "Neon"),
                 .product(name: "SwiftTreeSitter", package: "SwiftTreeSitter"),
@@ -172,7 +200,7 @@ let package = Package(
         ),
         .testTarget(
             name: "RafuAppTests",
-            dependencies: ["RafuApp"],
+            dependencies: ["RafuApp", "RafuWidgetShared"],
             exclude: ["Fixtures/workbench-converged-surfaces.json"]
         ),
     ],

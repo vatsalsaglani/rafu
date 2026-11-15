@@ -247,6 +247,8 @@ final class NotchCompanionModel: NSObject {
     private var lastUsageRefreshDate: Date?
     @ObservationIgnored
     private var usageRefreshTimer: Timer?
+    /// SPIKE: writes the widget snapshot after each usage refresh.
+    private let widgetSnapshotPublisher = WidgetSnapshotPublisher()
     /// Never refresh more than this often, even if `refreshUsage()` is
     /// called from multiple triggers in quick succession (dwell + a
     /// same-tick click).
@@ -1009,6 +1011,11 @@ final class NotchCompanionModel: NSObject {
         usageStaleProviderIDs = merged.staleProviderIDs
         usageNetworkConsentIDs = networkConsent
         isUsageRefreshing = false
+        // SPIKE: share the result with the WidgetKit extension.
+        widgetSnapshotPublisher.publish(
+            snapshots: usageSnapshots, observedAt: usageObservedAt,
+            stale: usageStaleProviderIDs, mode: usageDisplayMode, palette: usageRingPalette,
+            now: now)
     }
 
     func setUsageDisplayMode(_ mode: UsageDisplayMode) {

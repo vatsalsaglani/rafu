@@ -7,6 +7,8 @@ APP_EXECUTABLE="${APP_NAME// /}"
 GUI_PRODUCT="RafuApp"
 CLI_PRODUCT="rafu"
 HOOK_HELPER_PRODUCT="rafu-agent-events"
+# SPIKE: WidgetKit extension executable, wrapped into an .appex below.
+WIDGET_PRODUCT="RafuWidgets"
 MIN_SYSTEM_VERSION="15.0"
 # Overridable so the release workflow can stamp the branch-derived version
 # into the bundle without editing this script.
@@ -79,11 +81,13 @@ fi
 swift build --product "$GUI_PRODUCT"
 swift build --product "$CLI_PRODUCT"
 swift build --product "$HOOK_HELPER_PRODUCT"
+swift build --product "$WIDGET_PRODUCT"
 
 BUILD_BIN_DIR="$(swift build --show-bin-path)"
 BUILD_APP_BINARY="$BUILD_BIN_DIR/$GUI_PRODUCT"
 BUILD_CLI_BINARY="$BUILD_BIN_DIR/$CLI_PRODUCT"
 BUILD_HOOK_HELPER_BINARY="$BUILD_BIN_DIR/$HOOK_HELPER_PRODUCT"
+BUILD_WIDGET_BINARY="$BUILD_BIN_DIR/$WIDGET_PRODUCT"
 
 rm -rf "$APP_BUNDLE"
 mkdir -p "$APP_MACOS" "$APP_RESOURCES" "$APP_SHARED_BIN" "$APP_HELPERS"
@@ -94,6 +98,71 @@ cp "$BUILD_CLI_BINARY" "$CLI_BINARY"
 # on Connect; hooks never run it from inside the bundle.
 cp "$BUILD_HOOK_HELPER_BINARY" "$HOOK_HELPER_BINARY"
 chmod +x "$APP_BINARY" "$CLI_BINARY" "$HOOK_HELPER_BINARY"
+
+# SPIKE: WidgetKit extension. SwiftPM cannot emit an .appex, so the script
+# assembles one around the RafuWidgets executable (its @main WidgetBundle
+# provides the entry point; no -e _NSExtensionMain is needed). An app
+# extension must be sandboxed. It reads the app's snapshot through a
+# read-only home-relative temporary exception, scoped to this variant's
+# own Application Support folder. Signed ad-hoc before the app bundle.
+WIDGET_APPEX="$APP_CONTENTS/PlugIns/$WIDGET_PRODUCT.appex"
+WIDGET_BUNDLE_ID="$BUNDLE_ID.widgets"
+WIDGET_ENTITLEMENTS="$ROOT_DIR/.build/rafu-widgets.entitlements"
+mkdir -p "$WIDGET_APPEX/Contents/MacOS"
+cp "$BUILD_WIDGET_BINARY" "$WIDGET_APPEX/Contents/MacOS/$WIDGET_PRODUCT"
+chmod +x "$WIDGET_APPEX/Contents/MacOS/$WIDGET_PRODUCT"
+cat >"$WIDGET_APPEX/Contents/Info.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleDevelopmentRegion</key>
+  <string>en</string>
+  <key>CFBundleExecutable</key>
+  <string>$WIDGET_PRODUCT</string>
+  <key>CFBundleIdentifier</key>
+  <string>$WIDGET_BUNDLE_ID</string>
+  <key>CFBundleInfoDictionaryVersion</key>
+  <string>6.0</string>
+  <key>CFBundleName</key>
+  <string>$WIDGET_PRODUCT</string>
+  <key>CFBundleDisplayName</key>
+  <string>$APP_NAME</string>
+  <key>CFBundlePackageType</key>
+  <string>XPC!</string>
+  <key>CFBundleShortVersionString</key>
+  <string>$VERSION</string>
+  <key>CFBundleVersion</key>
+  <string>1</string>
+  <key>CFBundleSupportedPlatforms</key>
+  <array>
+    <string>MacOSX</string>
+  </array>
+  <key>LSMinimumSystemVersion</key>
+  <string>$MIN_SYSTEM_VERSION</string>
+  <key>NSExtension</key>
+  <dict>
+    <key>NSExtensionPointIdentifier</key>
+    <string>com.apple.widgetkit-extension</string>
+  </dict>
+</dict>
+</plist>
+PLIST
+cat >"$WIDGET_ENTITLEMENTS" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.app-sandbox</key>
+  <true/>
+  <key>com.apple.security.temporary-exception.files.home-relative-path.read-only</key>
+  <array>
+    <string>/Library/Application Support/$APP_NAME/Widgets/</string>
+  </array>
+</dict>
+</plist>
+PLIST
+plutil -lint "$WIDGET_APPEX/Contents/Info.plist" "$WIDGET_ENTITLEMENTS" >/dev/null
 
 # System Now Playing (X11): the BSD-3 MediaRemote adapter, run by
 # /usr/bin/perl. Optional: without xcrun clang the build skips it and Now
@@ -275,6 +344,7 @@ PLIST
 # this signing step fully seals the resource bundle.
 # Nested code is signed first so the bundle signature can seal it.
 codesign --force --sign - --timestamp=none "$HOOK_HELPER_BINARY"
+codesign --force --sign - --timestamp=none --entitlements "$WIDGET_ENTITLEMENTS" "$WIDGET_APPEX"
 if [[ -d "$APP_HELPERS/MediaRemoteAdapter.framework" ]]; then
   codesign --force --sign - --timestamp=none "$APP_HELPERS/MediaRemoteAdapter.framework"
 fi
@@ -289,6 +359,9 @@ plutil -lint "$INFO_PLIST" >/dev/null
 test -x "$APP_BINARY"
 test -x "$CLI_BINARY"
 test -x "$HOOK_HELPER_BINARY"
+test -x "$WIDGET_APPEX/Contents/MacOS/$WIDGET_PRODUCT"
+test "$(plutil -extract NSExtension.NSExtensionPointIdentifier raw "$WIDGET_APPEX/Contents/Info.plist")" = "com.apple.widgetkit-extension"
+codesign -d --entitlements - --xml "$WIDGET_APPEX" 2>/dev/null | grep -F "com.apple.security.app-sandbox" >/dev/null
 test -s "$APP_ICON"
 test "$(plutil -extract CFBundleIconFile raw "$INFO_PLIST")" = "$APP_ICON_NAME"
 # Keep the Info.plist-declared drag UTI identifier in lockstep with
