@@ -78,6 +78,27 @@ checking for every async protocol witness. Do not use an `@preconcurrency`
 import for this case because it weakens checking for the complete imported
 module.
 
+### RafuApp nuances found with the menu bar card (2026-11-15)
+
+- Applies to: `Sources/RafuApp/Notch/`, `Sources/RafuApp/Terminal/NotchCompanionModel.swift`,
+  `Sources/RafuApp/Notch/UsageMenuBarItem.swift`, `Tests/RafuAppTests`
+- Last verified: Xcode with the macOS 27.2 SDK (26B118), Swift 6 language mode,
+  Darwin 27.2.0 (Mac17,13). Build OK; 466 tests in 33 suites (parallel) and 3726
+  tests in 301 suites (`--no-parallel`) passed on `main`.
+
+1. **A pure static on a `@MainActor` class needs `nonisolated`.** In the
+   `RafuApp` target (default `MainActor`), a pure `static func` declared on a
+   `@MainActor` class stays main-actor isolated. A nonisolated test cannot call
+   it. Write `nonisolated` before the function. (Types that are `nonisolated`
+   as a whole, like `CompanionHost`, need nothing.)
+2. **Swift Testing `#expect` cannot hold a mutating call.** Assign the result of
+   the mutating call to a local first, then `#expect` the local.
+3. **`NSPopoverDelegate.popoverDidClose` is nonisolated.** Sending
+   `notification.object` into `MainActor.assumeIsolated` fails region isolation.
+   Read the identity first, as an `ObjectIdentifier` (a `Sendable` value), and
+   compare it inside `MainActor.assumeIsolated`. The site is
+   `UsageMenuBarItem` (`popoverDidClose`).
+
 ## Verification
 
 ```bash

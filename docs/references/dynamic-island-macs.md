@@ -123,6 +123,30 @@ Settings ▸ Notch shows the "Usage glance" picker on island Macs only.
   when the status item stays: without it a screen-parameter change cancelled the
   item's read and left it blocked by the 60 s TTL.
 
+**8a. Menu bar card sections and status item badge (2026-11-15).** The popover
+is now 380 x 460 pt (it was 360 x 380 pt) and offers Agents, Up next and Usage
+through `CompanionSectionHost`; decision text in the 2026-11-15 amendment of
+[ADR 0037](../decisions/0037-dynamic-island-macs.md). Engineering facts:
+
+- The status item title is "42% · 2": the percent, then the count of agents that
+  need the person. With no usage the title is the count only; above 99 it reads
+  "99+". The ring gets a filled dot SHAPE at 1 o'clock. A shape (not a colour)
+  works in a template image, which the Monochrome palette uses. VoiceOver adds
+  "N agents need you". The status item redraw is guarded by a `Drawn` compare, as
+  `lastDrawn` is in item 8.
+- `CompanionHost.outsideNotices(surface:position:)` routes outside-agent notices
+  to exactly one surface (menu card, notch panel, or none). Two surfaces would
+  show the same notice twice.
+- While the card is open, bells go to its feed; on `popoverDidClose` the feed
+  cards are dropped (ADR 0016) and waiting terminals stay as Up next rows. The
+  delegate method is nonisolated; see
+  [`concurrency.md`](concurrency.md) (RafuApp nuances).
+- Keyboard: Left and Right change tabs (clamped), Command-1 to Command-3 only in
+  the menu card, Escape closes.
+- Verified: build OK, 466 tests in 33 suites (parallel) and 3726 tests in 301
+  suites (`--no-parallel`) on `main`, macOS 27.2 SDK (26B118). Not checked on the
+  device: see "Not verified".
+
 **9. The macOS 27 "»" overflow (NOTCHED Macs).** The status-item window is at
 layer 25. A companion panel at `.statusBar` covers the overflow items that
 expand beside the notch. Rule: on macOS 27 or later (`osMajorVersion`,
@@ -220,6 +244,10 @@ like a visual glitch only.
   Rafu, so the popover may not get key focus. The code calls `makeKey()` on the
   popover window after `show` and adds `onExitCommand`; the result was not
   checked.
+- Menu bar card (2026-11-15): popover key status for reply typing; Command-1 to
+  Command-3 and the arrow keys; the dot on the template ring image; whether 380 x
+  460 pt fits below the 45 pt menu bar; status item redraw frequency (guarded by
+  the `Drawn` compare; a profile is owed).
 - The overflow "»" fix and the leading-wing rule on a notched Mac on macOS 27.
 - Full-screen Spaces, for both the pill and the status item.
 - "Below the Dynamic Island" visual match (colour seam with the system island)

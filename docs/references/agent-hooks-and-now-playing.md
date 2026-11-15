@@ -63,6 +63,34 @@ file, point its commands at the bundled helper and a temporary
 --tools '' --no-session-persistence 'Reply with RAFU_HOOK_CHECK_OK'` from that
 temporary folder. Inspect only normalized events, not provider transcripts.
 
+## Sub-agent payloads (Claude Code 2.1.325, 2026-11-15)
+
+Decision and ledger rules: the 2026-11-15 amendment in
+[ADR 0029](../decisions/0029-agent-status-vocabulary.md). Verified payload
+facts for Claude Code 2.1.325:
+
+- `SubagentStart` carries the base fields plus `agent_id` and `agent_type`.
+- `SubagentStop` adds `agent_transcript_path`, `last_assistant_message`,
+  `background_tasks` and `session_crons`.
+- Base fields: `session_id`, `transcript_path`, `cwd`, `scratchpad_dir`,
+  `prompt_id`, `permission_mode`, `agent_id`, `agent_type`, `effort`. There is
+  **no `model` field** on any of these events.
+- The model and the description exist only in the Agent tool input
+  `{description (3 to 5 words), prompt, subagent_type?, model?, effort?}`, which
+  arrives as `tool_input` of a `PreToolUse` event. So Rafu links a queued spawn
+  (from `PreToolUse`) to the later `SubagentStart` by type; this is a heuristic,
+  not an id match.
+- The helper reads only `subagent_type`, `model` and `description` from
+  `tool_input`, never `prompt`. The description crosses the private spool, as the
+  600-character reply preview does.
+- Codex 0.169.0: NOT verified. Its binary has the names `SubagentStart` and
+  `SubagentStop`, and `agent_type`, `agent_id` and `model` in `spawn_agent`
+  arguments. Rafu has no Codex tool-input path.
+
+Build and tests on `main` (Xcode, macOS 27.2 SDK 26B118, Swift 6, Darwin 27.2.0):
+build OK; 466 tests in 33 suites (parallel) and 3726 tests in 301 suites
+(`--no-parallel`) passed. No on-device check of the sub-agent chip yet.
+
 ## Rule or observed behavior
 
 ### Hook helper

@@ -174,6 +174,41 @@ Out of scope (reported to the user, not changed):
 Also noted: the new toolchain trap on this Mac is in
 [`build-and-run.md`](../../references/build-and-run.md).
 
+### Menu bar card and sub-agents, steps 1 and 2 (2026-11-15)
+
+Status: steps 1 and 2 of the menu bar / notch plan are done and merged to `main`
+("menu bar card sections, sub-agents"). Decisions: the 2026-11-15 amendments of
+[ADR 0037](../../decisions/0037-dynamic-island-macs.md) (menu sections and feed
+routing) and [ADR 0029](../../decisions/0029-agent-status-vocabulary.md)
+(sub-agents, in memory). Facts: [`dynamic-island-macs.md`](../../references/dynamic-island-macs.md)
+item 8a, [`agent-hooks-and-now-playing.md`](../../references/agent-hooks-and-now-playing.md)
+(sub-agent payloads), [`concurrency.md`](../../references/concurrency.md)
+(RafuApp nuances).
+
+- Step 1: the menu bar card offers Agents, Up next and Usage through the shared
+  `CompanionSectionHost`; the notch tab "Ensembles" is now "Agents"; the status
+  item title shows the count of agents that need the person; bells and
+  outside-agent notices route to one surface.
+- Step 2: sub-agents (type, model, short description) from hook events, shown by
+  `CompanionSubagentsView`; held in memory only.
+- User decisions: no Now Playing in the menu bar card; outside-agent notices on
+  the surface in use only; sub-agents show type, model and short description.
+
+Verification on `main` (Xcode, macOS 27.2 SDK 26B118, Swift 6, Darwin 27.2.0,
+Mac17,13): build OK; `./script/test.sh` (parallel) passed 466 tests in 33 suites;
+`./script/test.sh --no-parallel` passed 3726 tests in 301 suites. No on-device
+check yet; the user will test later.
+
+Owed device checks (not verified):
+
+- Popover key status: reply typing in the card, Command-1 to Command-3, and the
+  arrow keys.
+- The filled dot on the template ring image in the status item.
+- 380 x 460 pt fits below the 45 pt menu bar.
+- Status item redraw frequency (guarded by a `Drawn` compare; a profile is owed).
+- Sub-agent chip on real Claude Code runs; Codex 0.169.0 sub-agent events are
+  unverified.
+
 ## Vision
 
 The notch stops being dead space and becomes Rafu's **always-on companion

@@ -147,6 +147,67 @@ whether a WidgetKit extension fits Rafu's SwiftPM-built bundle. Revisit decision
 band around the island. Revisit decision 6 if Apple changes the status-item
 window level.
 
+## Amendment 2026-11-15: menu bar card sections and feed routing
+
+User decisions of the same day: no Now Playing in the menu bar card; outside
+agents that need the person appear on the surface in use only; the notch tab
+"Ensembles" is now named "Agents"; sub-agents show type, model and a short
+description (see the amendment in
+[ADR 0029](0029-agent-status-vocabulary.md)). This amendment changes decision 3
+(the popover size, 360 x 380 pt, and "Usage section only") and decision 4 for
+the menu bar card only. The island pill card still offers Usage only.
+
+1. **One section host.** `CompanionSectionHost(model:host:close:)` renders the
+   sections for every host. `CompanionHost` has three cases: `.notchPanel`,
+   `.islandCard`, `.menuBar`. `NotchSection.offered(_:host:)` decides the
+   sections: the notch panel is unchanged; the island card offers Usage only; the
+   menu bar card offers Agents, Up next and Usage. Usage is always offered there
+   (the status item is the usage glance); Now Playing never. Agents and Up next
+   still follow the stored section flags.
+2. **Three tabs, not four.** The attention feed cards (bells with inline reply)
+   sit inside Up next, above the waiting rows. There is no separate Attention
+   tab.
+3. **Notch tab rename.** The tab "Ensembles" is now "Agents". The raw value and
+   the storage key stay `ensembles`, so stored choices survive.
+4. **Popover.** 380 x 460 pt; each section scrolls. It has its own remembered
+   tab key, `menuBarCompanionSection`, apart from the notch's
+   `notchSelectedSection`. It opens on Up next when something needs the person
+   (`CompanionMenuSelection.initial`); otherwise on the remembered tab if still
+   offered, else the first offered tab.
+5. **Keyboard and accessibility.** Left and Right change tabs and stop at the
+   ends. Command-1 to Command-3 select a tab in the menu card only. Escape
+   closes. A close button sits in the tab row. VoiceOver reads the selected trait
+   and spoken counts. The popover root has `.rafuMotionScope()`.
+6. **Status item.** Title "42% · 2": the percent, then the number of agents that
+   need the person. With no usage data the title is the count only. Above 99 it
+   reads "99+". A filled dot shape at the 1 o'clock position of the ring marks
+   the state without colour; a shape also works in a template image. VoiceOver
+   adds "N agents need you".
+7. **Bells.** While the card is open (`isMenuPopoverShown`) a bell goes to the
+   card's feed (`companionArbitration(..., menuPopoverShown:)`). When the popover
+   closes (`NSPopoverDelegate.popoverDidClose`) the feed cards are dropped, as in
+   ADR 0016; waiting terminals stay as Up next rows. With the card closed the bell
+   uses the drop-down HUD as before.
+8. **Outside-agent notices.** `CompanionHost.outsideNotices(surface:position:)`
+   picks one host, never two:
+   - island Mac with the usage glance in the menu bar: the menu bar card;
+   - notched Mac or plain-display pill: the notch panel;
+   - island Mac with the pill below the island: nowhere (its card shows Usage
+     only).
+   The rows are information only (no reply field).
+9. **Empty states.** Menu Agents: "No agents running. Start one in a terminal or
+   an Ensemble." With Activity tracking off: a one-line hint and a "Connect…"
+   button that opens Settings ▸ Agents. The Agents list now also shows when only
+   outside agents run.
+10. **Changed notch behaviour.** On notched Macs and the pill, outside agents that
+    need the person now appear in the notch panel's Up next. The Agents tab shows
+    outside agents that have no editor window. The tab badge counts outside
+    agents.
+
+Usage refresh behaviour is unchanged. Not device-verified at the time of this
+amendment: see the "Owed device checks" in
+[`terminal-notch-hud.md`](../plans/phases/terminal-notch-hud.md).
+
 ## Related paths
 
 - `Sources/RafuApp/Terminal/NotchHUDGeometry.swift`
@@ -158,7 +219,8 @@ window level.
 - `Sources/RafuApp/Terminal/NotchCompanionModel.swift`
 - `Sources/RafuApp/Terminal/NotchHUDWindow.swift` (`constrainFrameRect`)
 - `Sources/RafuApp/Notch/UsageMenuBarItem.swift`
-- `Sources/RafuApp/Notch/NotchDisplayPreferences.swift` (`UsageGlancePosition`)
+- `Sources/RafuApp/Notch/NotchDisplayPreferences.swift` (`UsageGlancePosition`,
+  `CompanionHost`, `CompanionMenuSelection`, `NotchSection.offered(_:host:)`)
 - `Sources/RafuApp/Notch/NotchSettingsSection.swift`
-- `Sources/RafuApp/Views/NotchCompanionView.swift`
+- `Sources/RafuApp/Views/NotchCompanionView.swift` (`CompanionSectionHost`)
 - `Tests/RafuAppTests/NotchIslandGeometryTests.swift`

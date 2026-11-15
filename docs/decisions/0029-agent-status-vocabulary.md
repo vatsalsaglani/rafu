@@ -86,6 +86,49 @@ All three use `CanvasAgentSummaryItem(board:session:)` or the tool log, so the
 tab, the bar, the Dock and the card header cannot disagree. Details:
 [`ensemble-presence-and-trust.md`](../references/ensemble-presence-and-trust.md).
 
+### Amendment 2026-11-15: sub-agents (in memory)
+
+This replaces "no sub-agent count" for display: a card and an outside-agent row
+may show the sub-agents of a session, with type, model and a short description
+(user decision, same day). Still no cost, and sub-agents add no state to the
+seven-state vocabulary and never change the parent's state.
+
+- **Event fields.** `AgentHookEvent` gains optional `subagentType`,
+  `subagentModel`, `subagentDescription`. `schemaVersion` stays 1: events from an
+  older helper still decode.
+- **Where each value comes from.** Type: `agent_type`, only on an event that also
+  has `agent_id`, filtered to `[A-Za-z0-9 _.:-]`, at most 64 characters. Model,
+  type and description: only from the `tool_input` of a Claude `PreToolUse` for
+  the Agent or Task tool. The helper reads only the keys `subagent_type`, `model`
+  and `description`, never `prompt`. Description: one line, whitespace collapsed,
+  at most 80 characters with an ellipsis.
+- **Ledger.** `TrackedAgentSession.subagents` holds `TrackedSubagent` values.
+  Cap 16 per session (the least recently active is dropped). `SubagentStart`
+  adds one and takes model and description from the matching queued spawn (same
+  type first, else an untyped one). `SubagentStop` removes it. A bounded list of
+  recently stopped ids stops a late event from adding it again. A parent `Stop`
+  keeps the list; a parent `SessionEnd` clears it. A sub-agent expires after 10
+  minutes of silence; a queued spawn expires after 2 minutes.
+- **Isolation from the parent.** Sub-agent tracking is exempt from the turn-ID and
+  event-order checks and never changes the parent's state, so a late parent `Stop`
+  still cannot finish a newer turn.
+- **Privacy.** The description crosses the private spool (folder 0700, file
+  deleted on read), as the existing 600-character reply preview does. Afterwards
+  it is in memory only: never logged, never persisted.
+- **UI.** `CompanionSubagentsView`: an "N sub-agents" chip on Rafu and outside
+  agent rows in Agents and Up next. It expands to "type · model · description".
+  It is a `Button`, so the keyboard reaches it. VoiceOver reads "3 sub-agents
+  running: implementor, …". With an older helper (no type) the list says
+  "Reconnect Activity tracking in Settings ▸ Agents to see names."
+- **Heuristic.** The link from a spawn to a start is a heuristic (type match,
+  oldest first), not an id match.
+- **Providers.** Claude Code 2.1.325 is verified (see
+  [`agent-hooks-and-now-playing.md`](../references/agent-hooks-and-now-playing.md)).
+  Codex 0.169.0 is NOT verified: its binary contains the names `SubagentStart`
+  and `SubagentStop` and `agent_type`, `agent_id` and `model` in `spawn_agent`
+  arguments; Rafu reads `agent_type` from any event that has `agent_id` and has no
+  Codex tool-input path. Cursor is unchanged.
+
 ## Alternatives considered
 
 - **Derive Failed from a non-zero exit status.** Rejected: it mislabels a
@@ -114,7 +157,10 @@ exit code, a persisted activity ledger, or a product decision to show spend.
 
 ## Related
 
-- Code: `Sources/RafuApp/AgentTracking/`, `Sources/RafuApp/Canvas/`
+- Code: `Sources/RafuCore/AgentTracking/` (`AgentHookEvent`,
+  `TrackedAgentSession`, `TrackedSubagent`),
+  `Sources/RafuApp/Notch/CompanionSubagentsView.swift`,
+  `Sources/RafuApp/AgentTracking/`, `Sources/RafuApp/Canvas/`
   (`CanvasAgentSummaryBar`), `Sources/RafuApp/Terminal/WorkspaceTerminalController.swift`.
 - References:
   [`agent-hooks-and-now-playing.md`](../references/agent-hooks-and-now-playing.md)
