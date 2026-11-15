@@ -228,6 +228,28 @@ typing p95, a terminal flood (`yes | head -200000`), and a 40-card board pan.
 New Frosted-only costs: one mask pass for the deck shadow, one per visible card
 shadow, and SwiftTerm compositing a non-opaque layer.
 
+**Work log, 2026-11-15 — opaque Ensemble cards on the frosted board (merge
+adb61a9, implementor commit b97bbb7).** User report: a screenshot showed a card
+below another card through the upper card; terminal text was faded; a note card in
+edit mode was grey; "Return to Board" wrapped. Delivered: `DeckLayer.boardCard`
+(1 in Frosted and Solid) for cards and floating board controls; card face
+resolved as Solid; card shadow ring mask removed; `TerminalMarginFillView` fills
+`bounds.intersection(dirtyRect)` (cause of faded terminal text in every Frosted
+terminal); `CanvasNoteEditor` sets `drawsBackground = false` on a non-opaque
+base; `CanvasReturnToBoardButton` uses `ViewThatFits` with a key-hint-only
+fallback. Decision: [ADR 0038 second Amendment](../../decisions/0038-optional-frosted-window-base.md).
+Nuances: [`frosted-window-base.md`](../../references/frosted-window-base.md) rules
+13 to 15; [`canvas-interaction.md`](../../references/canvas-interaction.md).
+
+Evidence: the probes ran offscreen (`cacheDisplay`), not in Rafu Lightning.
+Regression test `terminalMarginFillStaysInBounds` fails on the old code
+(verified). Branch parallel: 523 tests in 40 suites and 3893 tests in 317 suites.
+Main after merge: build, parallel and `--no-parallel` passed (3893 tests in 317
+suites each); `build_and_run.sh --verify` passed. No GUI check yet. Owed: the checks in `frosted-window-base.md`
+Verification item 8. Open: the left-edge strip on the note card is unexplained by
+the code; `CodeEditorView.swift` (around lines 139 and 751) may have the same
+clip-view opaque-base defect with its 0.82 alpha, not verified on screen.
+
 **Work log, 2026-11-15 — Terminals panel as a native List with arrow keys (merge
 a8c614b, branch commit a6d5bf8).** User request: "CONTINUE THE OPTIONALS", which
 included "Terminals as a native macOS list with arrow keys (needs an ADR)". This
@@ -247,7 +269,7 @@ Evidence (toolchain: Swift 6.4.2, Xcode with macOS 27.2 SDK (26B118), Darwin
 27.2.0, Mac17,13):
 
 - Branch, parallel: 495 tests in 36 suites and 3871 tests in 315 suites.
-- Main gate (both modes): run by coordinator (result not in the handoff).
+- Main gate (both modes): passed, 523 tests in 40 suites and 3890 tests in 317 suites.
 - Tests: `TerminalsPanelListTests` (9), plus updated `EnsembleBarRedesignTests`,
   `SidebarPanelRedesignTests`, `TerminalGroupManagerHierarchyTests`,
   `TerminalManagerPresentationTests`.

@@ -73,6 +73,12 @@ pending).
   content is active; otherwise Next Tab keeps it. This is a known conflict, not
   an accident: do not "fix" it by removing either binding without choosing which
   one the user keeps.
+- **The "Return to Board" header button never wraps.**
+  `CanvasReturnToBoardButton` (`CanvasCardChrome.swift`) uses
+  `ViewThatFits(in: .horizontal)`: the full label ("Return to Board" plus "⌃⇥"),
+  then a "⌃⇥"-only fallback. Each label has `.lineLimit(1)` and `.fixedSize()`.
+  Help text and the accessibility label and hint stay on both. Check a narrow
+  note card in edit mode, where the format bar also takes width.
 - **Quick Open ⌘↩ adds a file.** With an Ensemble as the focused tab, ⌘P, a
   file row, then **Command-Return** adds that file as a card (Return still
   opens it). See "2026-10-20: Quick Open adds a file to the Ensemble".

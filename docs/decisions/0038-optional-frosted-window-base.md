@@ -19,6 +19,9 @@
   the rule that geometry is Rafu's. The editor and terminal are opaque only when
   the "Frost the editor and terminals" switch is off or the base is Solid (see
   the Amendment).
+- **Amended 2026-11-15 (second):** Ensemble cards and board controls are opaque
+  (`DeckLayer.boardCard`); only the board is frosted. See "Amendment 2026-11-15:
+  Ensemble cards and board controls are opaque".
 
 ## Context
 
@@ -161,6 +164,50 @@ fill. `FrostedDeckContractTests` enforces the main call sites.
 
 **New Frosted-only costs (not measured).** One mask pass for the deck shadow,
 one per visible card shadow, and SwiftTerm compositing a non-opaque layer.
+
+## Amendment 2026-11-15: Ensemble cards and board controls are opaque
+
+User report: a screenshot showed a card below another card through the upper
+card (merge commit adb61a9, implementor commit b97bbb7). This amendment
+supersedes the Amendment above for the `card` layer on the Ensemble board.
+
+**Decision.**
+
+- Ensemble cards and the floating board controls (tool palette, zoom capsule,
+  notices, minimap, edge labels, session links bar, silhouette, agent control
+  capsule) paint the new layer `DeckLayer.boardCard`. It paints 1 in Frosted and
+  in Solid. Only the board (deck) is frosted.
+- The card face content resolves as Solid, through
+  `.environment(\.rafuWindowSurface, .solid)` on the face content in the card
+  shell. Every node kind (note read and edit, file, view, Mermaid, image, web
+  app, terminal) uses its known Solid path inside a card. A terminal in a card
+  therefore has alpha 1. The header keeps `elevatedBackground`; the face shows
+  `editorBackground`.
+- The Frosted-only shadow ring mask (`rafuShadowOutsideOnly`) is removed from the
+  card shell, and the card `shadowReach` constant with it. An opaque card hides
+  its own shadow shape. The deck shadow ring is unchanged.
+- `.card` stays. The tab-shelf fade and `.pinned` still use `Frost.cardOpacity`.
+
+**Why.** A single layer with alpha `a` always shows `(1 - a)` of what is under
+it. No alpha below 1 can hide a card below. With the old `card` value (about 0.67
+over the board at Balanced dark) a lower card showed at about 33 %, and at 0.94
+it would still show at 6 %. The visible cost of the fix is small: the Card column
+of the opacity table above no longer applies to the board (target 0.94, so about
+6 % of desktop).
+
+**Rejected.** One behind-window `NSVisualEffectView` for each card. It gives up
+to about 50 extra WindowServer blur regions on a 40-card board, each moved on
+every pan and zoom frame; the one existing backdrop already costs 4 to 5 points
+of WindowServer CPU (see Consequences). A pre-mixed colour at alpha
+`cardOpacity` was also rejected, for the reason above.
+
+**Changed in the Opacity table text above.** "Card" in the table is now the
+value for the tab-shelf fade and `pinned` only. In the `DeckLayer` list, `card`
+no longer covers Ensemble cards and board controls; `boardCard` does.
+"New Frosted-only costs" no longer has a per-card shadow mask pass.
+
+Nuances (a `dirtyRect` larger than the bounds, and the clip view opaque base):
+[`frosted-window-base.md`](../references/frosted-window-base.md).
 
 ## Alternatives considered
 
