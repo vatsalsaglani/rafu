@@ -1,4 +1,5 @@
 import Foundation
+import RafuCore
 import SwiftTreeSitter
 
 /// One resolved workspace symbol, with its path already de-interned back to a
@@ -115,6 +116,13 @@ actor WorkspaceSymbolIndex {
         reset()
     }
 
+    /// The result of reading and parsing one file in the build loop.
+    private enum FileExtraction {
+        case unreadable
+        case capReached
+        case symbols([ExtractedSymbol])
+    }
+
     private func buildSymbols(rootURL: URL, relativePaths: [String]) async throws {
         // Resolve every grammar's query + parser ONCE, up front, so the
         // per-file loop below has no `await` between iterations and the
@@ -128,7 +136,7 @@ actor WorkspaceSymbolIndex {
         var isTruncated = false
         var visited = 0
 
-        for relativePath in relativePaths {
+        fileLoop: for relativePath in relativePaths {
             visited += 1
             if visited.isMultiple(of: 2_000) { try Task.checkCancellation() }
             guard
@@ -138,19 +146,30 @@ actor WorkspaceSymbolIndex {
             else { continue }
 
             let fileURL = rootURL.appending(path: relativePath)
-            guard let text = readableText(at: fileURL) else { continue }
-
             let remaining = symbolCap - total
-            if remaining <= 0 {
-                isTruncated = true
-                break
+            // One pool per file: the mapped data, the decoded text, and the
+            // tree-sitter bridging objects are freed here, not when the whole
+            // build job ends (the loop has no `await`).
+            let outcome: FileExtraction = withAutoreleasePool {
+                guard let text = readableText(at: fileURL) else { return .unreadable }
+                if remaining <= 0 { return .capReached }
+                return .symbols(
+                    WorkspaceSymbolExtractor.extractSymbols(
+                        text: text,
+                        query: grammar.query,
+                        parser: grammar.parser,
+                        limit: min(perFileLimit, remaining)))
             }
-            let extracted = WorkspaceSymbolExtractor.extractSymbols(
-                text: text,
-                query: grammar.query,
-                parser: grammar.parser,
-                limit: min(perFileLimit, remaining)
-            )
+            let extracted: [ExtractedSymbol]
+            switch outcome {
+            case .unreadable:
+                continue
+            case .capReached:
+                isTruncated = true
+                break fileLoop
+            case .symbols(let symbols):
+                extracted = symbols
+            }
             guard !extracted.isEmpty else { continue }
 
             let pathIndex = Int32(newPaths.count)
@@ -234,14 +253,22 @@ actor WorkspaceSymbolIndex {
             guard
                 let grammarID = WorkspaceSymbolExtractor.grammarWithTags(
                     forRelativePath: relativePath),
-                let grammar = grammars[grammarID],
-                let text = readableText(at: child.url)
+                let grammar = grammars[grammarID]
             else {
                 removeFile(relativePath)
                 continue
             }
-            let extracted = WorkspaceSymbolExtractor.extractSymbols(
-                text: text, query: grammar.query, parser: grammar.parser, limit: perFileLimit)
+            // One pool per file; see `buildSymbols`.
+            let extracted: [ExtractedSymbol]? = withAutoreleasePool {
+                guard let text = readableText(at: child.url) else { return nil }
+                return WorkspaceSymbolExtractor.extractSymbols(
+                    text: text, query: grammar.query, parser: grammar.parser,
+                    limit: perFileLimit)
+            }
+            guard let extracted else {
+                removeFile(relativePath)
+                continue
+            }
             replaceFile(relativePath, with: extracted)
         }
         for path in previouslyIndexed where !seen.contains(path) { removeFile(path) }

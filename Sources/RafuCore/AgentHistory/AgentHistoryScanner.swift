@@ -69,7 +69,11 @@ public actor AgentHistoryScanner {
                     summary = cached.summary
                     reused += 1
                 } else {
-                    summary = Self.summarize(file, provider: provider)
+                    // One pool per file: the sampled lines and their parsed
+                    // trees are freed here, not when the whole scan ends.
+                    summary = withAutoreleasePool {
+                        Self.summarize(file, provider: provider)
+                    }
                     cache[file.url.path] = CacheEntry(stamp: file.stamp, summary: summary)
                     parsed += 1
                 }
@@ -239,11 +243,16 @@ public enum AgentHistoryMessageSearch {
         var matches: Set<AgentHistorySessionKey> = []
         for session in sessions {
             try Task.checkCancellation()
-            guard
-                let transcript = try? AgentTranscriptLoader.load(
-                    fileURL: session.fileURL, key: session.key, limits: limits)
-            else { continue }
-            if transcript.conversationContains(needle) { matches.insert(session.key) }
+            // One pool per session: a transcript read parses up to the
+            // search byte limit, and that must not pile up across sessions.
+            let isMatch = withAutoreleasePool {
+                guard
+                    let transcript = try? AgentTranscriptLoader.load(
+                        fileURL: session.fileURL, key: session.key, limits: limits)
+                else { return false }
+                return transcript.conversationContains(needle)
+            }
+            if isMatch { matches.insert(session.key) }
         }
         return matches
     }

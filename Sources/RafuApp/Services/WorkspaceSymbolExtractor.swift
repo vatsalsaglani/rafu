@@ -128,8 +128,12 @@ nonisolated enum WorkspaceSymbolExtractor {
 
         let range = nameCapture.range
         guard range.location != NSNotFound, NSMaxRange(range) <= text.length else { return nil }
+        // Store the name natively: `substring(with:)` returns a bridged
+        // `NSString`, and a kept bridged string pins that Foundation object.
+        var name = text.substring(with: range)
+        name.makeContiguousUTF8()
         return ExtractedSymbol(
-            name: text.substring(with: range),
+            name: name,
             kind: String(definitionName.dropFirst("definition.".count)),
             range: range
         )

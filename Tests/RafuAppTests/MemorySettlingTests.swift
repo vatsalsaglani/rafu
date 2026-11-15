@@ -66,4 +66,19 @@ struct MemorySettlingTests {
         #expect(MemoryChipPresentation.trendSymbol(.flat) == nil)
         #expect(MemoryChipPresentation.trendSymbol(.up) == "arrow.up.right")
     }
+
+    @Test("Only a debug build adds the debug note, and the numbers do not change")
+    func debugNote() {
+        let mebibyte: UInt64 = 1_024 * 1_024
+        let value = settling([100, 100, 300, 100, 100, 100].map { $0 * mebibyte })
+        let help = MemoryChipPresentation.help(value, live: 100 * mebibyte)
+        #expect(help.contains(MemoryChipPresentation.values(value, live: 100 * mebibyte)))
+        #if DEBUG
+            #expect(DebugBuildNote.current == DebugBuildNote.text)
+            #expect(help.hasSuffix(DebugBuildNote.text))
+        #else
+            #expect(DebugBuildNote.current == nil)
+            #expect(!help.contains(DebugBuildNote.text))
+        #endif
+    }
 }
