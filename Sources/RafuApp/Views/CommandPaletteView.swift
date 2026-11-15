@@ -207,17 +207,30 @@ struct CommandPaletteView: View {
                 return symbols.isEmpty ? "No symbols found in this file" : "No matching symbols"
             }
         case .workspaceSymbols:
-            switch session.symbolIndexState {
-            case .idle:
-                return "Open a folder to search its symbols"
-            case .building where workspaceSymbolMatches.isEmpty:
-                return "Indexing symbols…"
-            case .building, .ready:
-                return "No matching symbols"
-            }
+            return Self.workspaceSymbolEmptyMessage(
+                state: session.symbolIndexState,
+                hasWorkspace: session.rootURL != nil,
+                hasMatches: !workspaceSymbolMatches.isEmpty)
         case .gotoLine:
             guard session.selectedDocument != nil else { return "Open a file to go to a line" }
             return "Type a line number, e.g. :20"
+        }
+    }
+
+    /// Empty-state text for `#` mode. The symbol index is built lazily on the
+    /// first `#` query (memory D1), so an open workspace with an idle index
+    /// reads "Indexing symbols…" too: the query task starts the build in the
+    /// same frame, and "Open a folder" would flash for an open folder.
+    static func workspaceSymbolEmptyMessage(
+        state: WorkspaceSymbolIndex.State, hasWorkspace: Bool, hasMatches: Bool
+    ) -> String {
+        switch state {
+        case .idle:
+            return hasWorkspace ? "Indexing symbols…" : "Open a folder to search its symbols"
+        case .building where !hasMatches:
+            return "Indexing symbols…"
+        case .building, .ready:
+            return "No matching symbols"
         }
     }
 
@@ -499,8 +512,10 @@ struct CommandPaletteView: View {
 
     /// Queries the background workspace-symbol index off-main; superseded by
     /// the next keystroke or index rebuild via `.task(id:)` cancellation. Only
-    /// runs while `#` mode is active. `ensureSymbolIndexReady()` transparently
-    /// rebuilds an index a memory-pressure shed emptied.
+    /// runs while `#` mode is active. `ensureSymbolIndexReady()` builds the
+    /// index on the first `#` query (memory D1) and rebuilds one a
+    /// memory-pressure shed emptied; the generation bump at the end of the
+    /// build re-runs this query with results.
     private func runWorkspaceSymbolQuery(parsed: PaletteQueryParser.ParsedQuery) async {
         guard parsed.mode == .workspaceSymbols else { return }
         session.ensureSymbolIndexReady()
