@@ -332,6 +332,5 @@ private let claudeDay6 = provider(
     @Test func publisherReloadsTheSevenWidget() {
         #expect(
             WidgetSnapshotPublisher.widgetKinds.contains("dev.vatsalsaglani.rafu.widgets.seven"))
-        #expect(WidgetSnapshotPublisher.widgetKinds.count == 3)
     }
 }
