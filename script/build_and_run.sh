@@ -13,6 +13,17 @@ MIN_SYSTEM_VERSION="15.0"
 # Overridable so the release workflow can stamp the branch-derived version
 # into the bundle without editing this script.
 VERSION="${RAFU_VERSION:-0.1.0}"
+# Code-signing identity for the staged bundle. Default is ad-hoc ("-"), which
+# needs no certificate and is what CI uses. Set RAFU_SIGN_IDENTITY (for
+# example "Apple Development: Name (TEAMID)") to sign the widget extension
+# and the app with a real identity so the widget gallery lists the widget.
+# List usable identities with `security find-identity -v -p codesigning`.
+SIGN_IDENTITY="${RAFU_SIGN_IDENTITY:--}"
+# Optional: search only this keychain for the identity (a private keychain).
+CODESIGN_KEYCHAIN_ARGS=()
+if [[ -n "${RAFU_SIGN_KEYCHAIN:-}" ]]; then
+  CODESIGN_KEYCHAIN_ARGS=(--keychain "$RAFU_SIGN_KEYCHAIN")
+fi
 
 case "$APP_NAME" in
   "Rafu Lightning")
@@ -78,10 +89,17 @@ if [[ "$STOPS_EXISTING_APP" == true ]]; then
   pkill -x "$APP_EXECUTABLE" >/dev/null 2>&1 || true
 fi
 
-swift build --product "$GUI_PRODUCT"
-swift build --product "$CLI_PRODUCT"
-swift build --product "$HOOK_HELPER_PRODUCT"
-swift build --product "$WIDGET_PRODUCT"
+# Stamp the selected SDK into every binary (LC_BUILD_VERSION `sdk`). SwiftPM's
+# Swift Build backend would otherwise record the deployment target there, and
+# the system would treat Rafu as linked against that older SDK. The minimum OS
+# stays MIN_SYSTEM_VERSION (keep it equal to `.macOS(.v15)` in Package.swift;
+# the stamp check below fails on a mismatch). See script/sdk_link_flags.sh.
+read -ra SDK_LINK_FLAGS <<<"$("$ROOT_DIR/script/sdk_link_flags.sh" "$MIN_SYSTEM_VERSION")"
+
+swift build --product "$GUI_PRODUCT" "${SDK_LINK_FLAGS[@]}"
+swift build --product "$CLI_PRODUCT" "${SDK_LINK_FLAGS[@]}"
+swift build --product "$HOOK_HELPER_PRODUCT" "${SDK_LINK_FLAGS[@]}"
+swift build --product "$WIDGET_PRODUCT" "${SDK_LINK_FLAGS[@]}"
 
 BUILD_BIN_DIR="$(swift build --show-bin-path)"
 BUILD_APP_BINARY="$BUILD_BIN_DIR/$GUI_PRODUCT"
@@ -326,7 +344,7 @@ cat >"$INFO_PLIST" <<PLIST
 </plist>
 PLIST
 
-# Best-effort ad-hoc sign the staged bundle. Without a bundle identity,
+# Best-effort sign the staged bundle (ad-hoc unless RAFU_SIGN_IDENTITY is set). Without a bundle identity,
 # macOS's `UNUserNotificationCenter.current()` (terminal-manager.md T-E's
 # attention notifications) is known to fail or trap
 # ("bundleProxyForCurrentProcess is nil") against an unsigned app. `--sign -`
@@ -343,16 +361,28 @@ PLIST
 # below (build, resources, launch) must still pass regardless of whether
 # this signing step fully seals the resource bundle.
 # Nested code is signed first so the bundle signature can seal it.
-codesign --force --sign - --timestamp=none "$HOOK_HELPER_BINARY"
-codesign --force --sign - --timestamp=none --entitlements "$WIDGET_ENTITLEMENTS" "$WIDGET_APPEX"
+sign_item() {
+  # `${arr[@]+...}` keeps an empty array safe under `set -u` on bash 3.2.
+  codesign --force --sign "$SIGN_IDENTITY" \
+    ${CODESIGN_KEYCHAIN_ARGS[@]+"${CODESIGN_KEYCHAIN_ARGS[@]}"} --timestamp=none "$@"
+}
+sign_item "$HOOK_HELPER_BINARY"
+sign_item --entitlements "$WIDGET_ENTITLEMENTS" "$WIDGET_APPEX"
 if [[ -d "$APP_HELPERS/MediaRemoteAdapter.framework" ]]; then
-  codesign --force --sign - --timestamp=none "$APP_HELPERS/MediaRemoteAdapter.framework"
+  sign_item "$APP_HELPERS/MediaRemoteAdapter.framework"
 fi
 if [[ -d "$APP_BUNDLE/$RESOURCE_BUNDLE_NAME" || -d "$APP_BUNDLE/SwiftTerm_SwiftTerm.bundle" ]]; then
-  codesign --force --sign - --timestamp=none "$APP_BUNDLE" || true
+  sign_item "$APP_BUNDLE" || true
 else
-  codesign --force --sign - --timestamp=none "$APP_BUNDLE"
+  sign_item "$APP_BUNDLE"
   codesign --verify --deep --strict "$APP_BUNDLE"
+fi
+if [[ "$SIGN_IDENTITY" != "-" ]]; then
+  # A real identity was requested, so a bundle that does not verify is a
+  # failure, not the tolerated ad-hoc limitation above.
+  codesign --verify --strict "$WIDGET_APPEX"
+  codesign --verify --deep --strict "$APP_BUNDLE"
+  echo "Signed $APP_BUNDLE and its widget extension with: $SIGN_IDENTITY" >&2
 fi
 
 plutil -lint "$INFO_PLIST" >/dev/null
@@ -360,6 +390,11 @@ test -x "$APP_BINARY"
 test -x "$CLI_BINARY"
 test -x "$HOOK_HELPER_BINARY"
 test -x "$WIDGET_APPEX/Contents/MacOS/$WIDGET_PRODUCT"
+# Every shipped Mach-O must be stamped with the selected SDK and the declared
+# minimum OS. Fails when the SDK stamp falls back to the deployment target.
+RAFU_EXPECT_MINOS="$MIN_SYSTEM_VERSION" "$ROOT_DIR/script/check_sdk_stamp.sh" \
+  "$APP_BINARY" "$CLI_BINARY" "$HOOK_HELPER_BINARY" \
+  "$WIDGET_APPEX/Contents/MacOS/$WIDGET_PRODUCT"
 test "$(plutil -extract NSExtension.NSExtensionPointIdentifier raw "$WIDGET_APPEX/Contents/Info.plist")" = "com.apple.widgetkit-extension"
 codesign -d --entitlements - --xml "$WIDGET_APPEX" 2>/dev/null | grep -F "com.apple.security.app-sandbox" >/dev/null
 test -s "$APP_ICON"
