@@ -244,7 +244,9 @@ private struct EditorGroupView: View {
                                     },
                                     action: session.performTerminalGroupViewAction,
                                     theme: theme,
-                                    requestFocusToken: session.terminalGroupFocusRequest
+                                    requestFocusToken: session.terminalGroupFocusRequest,
+                                    workspaceFolderFallbackPaneIDs:
+                                        session.terminalPanesStartingInWorkspaceFolder
                                 )
                                 .environment(
                                     \.terminalSurfaceCanMount,

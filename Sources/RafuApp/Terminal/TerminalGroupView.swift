@@ -76,8 +76,18 @@ nonisolated enum TerminalPanePresentation {
         pane.launchProfile?.preferredStartFolder.rawValue
     }
 
+    /// The stopped-pane text when the saved folder is gone and a start uses
+    /// the workspace folder (ADR 0023, 2026-11-15 amendment).
+    static let workspaceFolderFallbackDescription =
+        "Start this pane when you are ready. Its saved folder is gone, so it starts in the workspace folder."
+
     /// The stopped-pane text, naming the folder Start Shell uses.
-    static func stoppedDescription(for pane: TerminalPaneSnapshot) -> String {
+    static func stoppedDescription(
+        for pane: TerminalPaneSnapshot, startsInWorkspaceFolder: Bool = false
+    ) -> String {
+        if startsInWorkspaceFolder, pane.launchProfile != nil {
+            return workspaceFolderFallbackDescription
+        }
         guard let folder = folderLabel(for: pane) else {
             return "Start this pane when you are ready."
         }
@@ -102,19 +112,23 @@ struct TerminalGroupView: View {
     let action: (TerminalGroupViewAction) -> Void
     let theme: RafuTheme
     var requestFocusToken: UInt64 = 0
+    /// Stopped panes whose start falls back to the workspace folder.
+    var workspaceFolderFallbackPaneIDs: Set<TerminalPaneID> = []
 
     init(
         snapshot: TerminalGroupSnapshot,
         controllerForPane: @escaping @MainActor (TerminalPaneID) -> WorkspaceTerminalController?,
         action: @escaping (TerminalGroupViewAction) -> Void,
         theme: RafuTheme,
-        requestFocusToken: UInt64 = 0
+        requestFocusToken: UInt64 = 0,
+        workspaceFolderFallbackPaneIDs: Set<TerminalPaneID> = []
     ) {
         self.snapshot = snapshot
         self.controllerForPane = controllerForPane
         self.action = action
         self.theme = theme
         self.requestFocusToken = requestFocusToken
+        self.workspaceFolderFallbackPaneIDs = workspaceFolderFallbackPaneIDs
     }
 
     var body: some View {
@@ -135,6 +149,7 @@ struct TerminalGroupView: View {
                         controller: controllerForPane(paneID),
                         isFocused: snapshot.focusedPaneID == paneID,
                         requestFocusToken: requestFocusToken,
+                        startsInWorkspaceFolder: workspaceFolderFallbackPaneIDs.contains(paneID),
                         action: action,
                         theme: theme
                     )
@@ -171,6 +186,7 @@ private struct TerminalGroupPaneView: View {
     let controller: WorkspaceTerminalController?
     let isFocused: Bool
     let requestFocusToken: UInt64
+    let startsInWorkspaceFolder: Bool
     let action: (TerminalGroupViewAction) -> Void
     let theme: RafuTheme
 
@@ -371,7 +387,9 @@ private struct TerminalGroupPaneView: View {
             ContentUnavailableView {
                 Label("Terminal Pane Stopped", systemImage: "stop.circle")
             } description: {
-                Text(TerminalPanePresentation.stoppedDescription(for: pane))
+                Text(
+                    TerminalPanePresentation.stoppedDescription(
+                        for: pane, startsInWorkspaceFolder: startsInWorkspaceFolder))
             } actions: {
                 if pane.startAvailability == .available {
                     Button("Start Shell") {

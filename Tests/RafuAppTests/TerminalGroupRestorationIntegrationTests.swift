@@ -96,8 +96,8 @@ func workspaceSessionRetainsRestorationWarningAcrossLibraryRefresh() async throw
 }
 
 @MainActor
-@Test("Workspace persistence retains only groups associated with a saved layout")
-func workspaceSessionPersistsOnlySavedTerminalGroups() async throws {
+@Test("Workspace persistence retains saved and unsaved Terminal Group tabs")
+func workspaceSessionPersistsSavedAndUnsavedTerminalGroups() async throws {
     let (session, root) = try makeTerminalGroupWorkspace()
     defer { removeTerminalGroupWorkspace(root) }
     let store = TerminalGroupIntegrationStore()
@@ -110,10 +110,12 @@ func workspaceSessionPersistsOnlySavedTerminalGroups() async throws {
     session.newTerminalGroup()
     let unsavedGroupID = try #require(session.selectedTerminalGroupID)
 
+    // ADR 0023, 2026-11-15 amendment: an unsaved tab is restored too.
     let envelope = try #require(session.terminalGroupWorkspaceRestorationForTesting())
-    #expect(envelope.openGroups.map(\.groupID) == [savedGroupID])
-    #expect(envelope.openGroups.map(\.savedLayoutID) == [savedLayoutID])
-    #expect(!envelope.openGroups.contains { $0.groupID == unsavedGroupID })
+    #expect(Set(envelope.openGroups.map(\.groupID)) == [savedGroupID, unsavedGroupID])
+    #expect(
+        envelope.openGroups.first { $0.groupID == savedGroupID }?.savedLayoutID == savedLayoutID)
+    #expect(envelope.openGroups.first { $0.groupID == unsavedGroupID }?.savedLayoutID == nil)
 }
 
 @MainActor

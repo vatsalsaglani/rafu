@@ -584,6 +584,10 @@ final class WorkspaceSession {
     /// list epoch. Views consume this value; they never await test seams.
     private(set) var isTerminalGroupStoreLoading = false
     private(set) var terminalGroupRestorationError: String?
+    /// Restored stopped panes whose saved folder is gone, so a start uses the
+    /// workspace folder. Only the empty-state labels read it; the start path
+    /// resolves the folder again on disk. A start removes the pane.
+    private(set) var terminalPanesStartingInWorkspaceFolder: Set<TerminalPaneID> = []
     private(set) var pendingTerminalGroupClose: TerminalGroupCloseToken?
     private(set) var terminalGroupClosePresentationRevision: UInt64 = 0
     @ObservationIgnored var terminalGroupCloseRepreparedForTesting: (@MainActor () -> Void)?
@@ -1522,6 +1526,7 @@ final class WorkspaceSession {
                 instantiation: .ordinaryShell(
                     startingDirectory: resolvedTerminalDirectory(startFolder, rootURL: rootURL),
                     shell: shell, profile: profile))
+            terminalPanesStartingInWorkspaceFolder.remove(paneID)
             if background {
                 hostCanvasTerminalView(paneID)
                 return
@@ -1604,6 +1609,7 @@ final class WorkspaceSession {
         do {
             _ = try terminal.startAllRestartablePanes(
                 in: groupID, instantiations: instantiations)
+            terminalPanesStartingInWorkspaceFolder.subtract(instantiations.keys)
             if selectedCanvasID == nil || selectedTerminalGroupID != groupID {
                 revealTerminalGroup(groupID)
             } else {
@@ -1965,13 +1971,17 @@ final class WorkspaceSession {
 
     /// The folder a stopped ordinary shell starts in: its last working folder
     /// while that is still a directory inside the workspace, else its
-    /// starting folder. `nil` when neither is usable.
+    /// starting folder, else the workspace folder when the starting folder is
+    /// gone. `nil` when none applies (for example a symlink escape).
     private func terminalStartFolder(
         for profile: TerminalPaneLaunchProfile, rootURL: URL
     ) -> TerminalWorkspaceRelativePath? {
-        TerminalStartFolderResolver.resolve(profile) { folder in
-            terminalFolder(for: resolvedTerminalDirectory(folder, rootURL: rootURL)) != nil
-        }
+        TerminalStartFolderResolver.resolve(
+            profile,
+            isUsable: { folder in
+                terminalFolder(for: resolvedTerminalDirectory(folder, rootURL: rootURL)) != nil
+            },
+            isMissing: { TerminalWorkspaceFolder.isMissing($0, root: rootURL) })
     }
 
     private func resolvedTerminalDirectory(
@@ -2116,6 +2126,12 @@ final class WorkspaceSession {
     /// would encode and cannot modify the live editor layout.
     func terminalGroupWorkspaceRestorationForTesting() -> TerminalGroupWorkspaceRestoration? {
         terminalGroupWorkspaceRestoration()
+    }
+
+    /// Read-only seam: the editor layout value normal workspace persistence
+    /// would encode. It filters a copy and never changes the live layout.
+    func editorLayoutForWorkspaceRestorationForTesting() -> EditorLayoutState {
+        editorLayoutForWorkspaceRestoration()
     }
 
     /// Exercises layout repair after inert-group insertion without bookmark
@@ -5886,13 +5902,15 @@ final class WorkspaceSession {
             else { return }
             let savedIDs = Set(records.map(\.id))
             for record in restoration.openGroups {
-                guard let savedLayoutID = record.savedLayoutID, savedIDs.contains(savedLayoutID)
-                else {
+                // An unsaved group (no saved layout) restores as an open tab
+                // too. A group whose saved layout was deleted stays dropped.
+                if let savedLayoutID = record.savedLayoutID, !savedIDs.contains(savedLayoutID) {
                     continue
                 }
                 do {
                     let decoded = try terminalGroupCodec(for: rootURL).restoreOpenInstance(record)
                     _ = try terminal.insertInertSnapshot(decoded.snapshot)
+                    noteWorkspaceFolderFallbacks(decoded)
                 } catch {
                     // The sibling file tabs remain valid. A corrupt group is
                     // intentionally dropped as one bounded restoration unit.
@@ -5911,25 +5929,26 @@ final class WorkspaceSession {
 
     private func terminalGroupCodec(for workspaceRoot: URL) -> TerminalGroupRestorationCodec {
         let root = workspaceRoot.resolvingSymlinksInPath().standardizedFileURL
-        let rootPath = root.path
         let approvedShellPaths = Set(availableTerminalShells.map(\.path))
         return TerminalGroupRestorationCodec(
             validateProfile: { profile in
-                let folder = root.appending(path: profile.startingFolder.rawValue)
-                    .resolvingSymlinksInPath().standardizedFileURL
-                var isDirectory: ObjCBool = false
+                // The same order a start uses: last folder, starting folder,
+                // then the workspace folder (ADR 0023, 2026-11-15 amendment).
+                let isUsable = { TerminalWorkspaceFolder.isUsable($0, root: root) }
+                let isMissing = { TerminalWorkspaceFolder.isMissing($0, root: root) }
                 guard
-                    FileManager.default.fileExists(atPath: folder.path, isDirectory: &isDirectory),
-                    isDirectory.boolValue,
-                    FileManager.default.isReadableFile(atPath: folder.path),
-                    folder.path == rootPath || folder.path.hasPrefix(rootPath + "/")
+                    TerminalStartFolderResolver.resolve(
+                        profile, isUsable: isUsable, isMissing: isMissing) != nil
                 else { return .missingFolder }
-                switch profile.shell {
-                case .preferredShell:
-                    return approvedShellPaths.isEmpty ? .unapprovedShell : .available
-                case .approvedShellPath(let path):
-                    return approvedShellPaths.contains(path) ? .available : .unapprovedShell
-                }
+                let shellApproved =
+                    switch profile.shell {
+                    case .preferredShell: !approvedShellPaths.isEmpty
+                    case .approvedShellPath(let path): approvedShellPaths.contains(path)
+                    }
+                guard shellApproved else { return .unapprovedShell }
+                return TerminalStartFolderResolver.fallsBackToWorkspaceFolder(
+                    profile, isUsable: isUsable, isMissing: isMissing)
+                    ? .workspaceFolderFallback : .available
             },
             revalidateProfile: { profile in
                 TerminalStartFolderResolver.revalidated(profile) {
@@ -6038,9 +6057,20 @@ final class WorkspaceSession {
         for record in document.terminalGroups?.openGroups ?? []
         where references.contains(record.groupID) {
             guard terminal.terminalGroup(record.groupID) == nil else { continue }
-            if let value = try? terminalGroupCodec(for: rootURL).restoreOpenInstance(record) {
-                _ = try? terminal.insertInertSnapshot(value.snapshot, ensemble: true)
+            if let value = try? terminalGroupCodec(for: rootURL).restoreOpenInstance(record),
+                (try? terminal.insertInertSnapshot(value.snapshot, ensemble: true)) != nil
+            {
+                noteWorkspaceFolderFallbacks(value)
             }
+        }
+    }
+
+    /// Records the restored panes whose start falls back to the workspace
+    /// folder, for the stopped-pane and Ensemble card labels.
+    private func noteWorkspaceFolderFallbacks(_ decoded: TerminalGroupDecodedSnapshot) {
+        for (paneID, validation) in decoded.paneValidation
+        where validation == .workspaceFolderFallback {
+            terminalPanesStartingInWorkspaceFolder.insert(paneID)
         }
     }
 
@@ -6057,8 +6087,7 @@ final class WorkspaceSession {
             snapshot in
             guard
                 canvasIDs.map({ $0.contains(snapshot.id) })
-                    ?? (snapshot.savedLayoutID != nil
-                        && presentedTerminalGroupIDs.contains(snapshot.id))
+                    ?? isWindowRestorableTerminalGroup(snapshot)
             else {
                 return nil
             }
@@ -6104,9 +6133,34 @@ final class WorkspaceSession {
             stored: profile, observedPath: controller?.currentDirectoryPath, root: rootURL)
     }
 
-    /// Filters a value copy only. Unsaved groups and every legacy live
-    /// terminal remain usable in this window but never enter the workspace
-    /// restoration payload.
+    /// Whether the window payload keeps `snapshot`. A group with a saved
+    /// layout is kept while presented (unchanged). An unsaved group is kept
+    /// only while it has its own editor tab and lives on no Ensemble: a
+    /// closed or hidden group has no tab, and a group an Ensemble shows is
+    /// restored by that board, so a tab would duplicate it.
+    private func isWindowRestorableTerminalGroup(_ snapshot: TerminalGroupSnapshot) -> Bool {
+        if snapshot.savedLayoutID != nil {
+            return presentedTerminalGroupIDs.contains(snapshot.id)
+        }
+        return editorLayout.tab(matching: .terminalGroup(groupID: snapshot.id)) != nil
+            && !isOnEnsemble(snapshot.id)
+    }
+
+    /// True for an Ensemble terminal group, a lease holder, or a group any
+    /// open board has a card for.
+    private func isOnEnsemble(_ groupID: TerminalGroupID) -> Bool {
+        if terminal.isEnsembleTerminalGroup(groupID) || canvasTerminalOwners[groupID] != nil {
+            return true
+        }
+        let content = CanvasCardContent.terminal(groupID: groupID)
+        return canvas.boards.values.contains { board in
+            board.cards.contains { $0.content == content }
+        }
+    }
+
+    /// Filters a value copy only. Legacy live terminals, and Terminal Group
+    /// tabs the window payload does not keep, remain usable in this window
+    /// but never enter the workspace restoration payload.
     private func editorLayoutForWorkspaceRestoration() -> EditorLayoutState {
         var layout = editorLayout
         for editorGroupID in layout.groupIDs {
@@ -6116,7 +6170,9 @@ final class WorkspaceSession {
                 case .canvas(let id): retain = canvas.boards[id]?.revision ?? 0 > 0
                 case .file: retain = true
                 case .terminalGroup(let groupID):
-                    retain = terminal.terminalGroup(groupID)?.savedLayoutID != nil
+                    retain =
+                        terminal.terminalGroup(groupID).map(isWindowRestorableTerminalGroup)
+                        ?? false
                 case .terminal, .restorable: retain = false
                 }
                 if !retain { _ = layout.closeTab(tab.id) }

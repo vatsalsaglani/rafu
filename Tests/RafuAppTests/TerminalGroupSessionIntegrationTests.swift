@@ -774,10 +774,13 @@ func workspaceSessionExternalDeleteDetachesMatchingOpenGroup() async throws {
     await second.waitForTerminalGroupStoreOperationForTesting()
     #expect(second.terminal.terminalGroup(secondGroupID)?.savedLayoutID == nil)
     #expect(second.terminal.terminalGroup(secondGroupID) != nil)
-    #expect(
-        second.terminalGroupWorkspaceRestorationForTesting()?.openGroups.contains {
-            $0.groupID == secondGroupID
-        } == false)
+    // ADR 0023, 2026-11-15 amendment: the detached group is now an unsaved
+    // tab, and unsaved tabs enter workspace restoration without a layout ID.
+    let detached = second.terminalGroupWorkspaceRestorationForTesting()?.openGroups.first {
+        $0.groupID == secondGroupID
+    }
+    #expect(detached != nil)
+    #expect(detached?.savedLayoutID == nil)
 }
 
 @MainActor
