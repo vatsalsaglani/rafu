@@ -610,14 +610,24 @@ struct GitCommitComposerPresentationTests {
     @Test("Command-Return stays with an Ensemble note in Edit mode")
     func commandReturnConflict() {
         let ready = presentation(message: "Fix", staged: 2)
-        #expect(GitCommitMenuAvailability.commitOwnsShortcut(ready, isNoteEditing: false))
+        #expect(
+            GitCommitMenuAvailability.commitOwnsShortcut(
+                ready, isComposerFocused: true, isNoteEditing: false))
+        // ⌘Return in a terminal, the editor or anywhere else never commits.
+        #expect(
+            !GitCommitMenuAvailability.commitOwnsShortcut(
+                ready, isComposerFocused: false, isNoteEditing: false))
         // Format > Done Editing owns ⌘Return while a note is edited.
-        #expect(!GitCommitMenuAvailability.commitOwnsShortcut(ready, isNoteEditing: true))
+        #expect(
+            !GitCommitMenuAvailability.commitOwnsShortcut(
+                ready, isComposerFocused: true, isNoteEditing: true))
         // A disabled Commit item never claims ⌘Return.
         #expect(
             !GitCommitMenuAvailability.commitOwnsShortcut(
-                presentation(staged: 2), isNoteEditing: false))
-        #expect(!GitCommitMenuAvailability.commitOwnsShortcut(nil, isNoteEditing: false))
+                presentation(staged: 2), isComposerFocused: true, isNoteEditing: false))
+        #expect(
+            !GitCommitMenuAvailability.commitOwnsShortcut(
+                nil, isComposerFocused: true, isNoteEditing: false))
         // The note's own text view still leaves Edit mode on ⌘Return.
         #expect(
             CanvasNoteShortcuts.exitsEditing(

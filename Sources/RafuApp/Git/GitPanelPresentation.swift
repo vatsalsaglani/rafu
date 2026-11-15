@@ -383,18 +383,20 @@ nonisolated struct GitCommitComposerPresentation: Equatable, Sendable {
 }
 
 /// Menu enablement for the Source Control items in the app menu. The
-/// Commit item owns ⌘Return only while a commit is possible and no
-/// Ensemble note is in Edit mode, because the Format menu's Done Editing
-/// uses ⌘Return then. So the item never takes ⌘Return from the note.
+/// Commit item owns ⌘Return only while a commit is possible, a commit
+/// message field has focus, and no Ensemble note is in Edit mode (the
+/// Format menu's Done Editing uses ⌘Return then). So ⌘Return typed in a
+/// terminal, the editor or a note never commits.
 nonisolated enum GitCommitMenuAvailability {
     static func canCommit(_ presentation: GitCommitComposerPresentation?) -> Bool {
         presentation?.canCommit == true
     }
 
     static func commitOwnsShortcut(
-        _ presentation: GitCommitComposerPresentation?, isNoteEditing: Bool
+        _ presentation: GitCommitComposerPresentation?, isComposerFocused: Bool,
+        isNoteEditing: Bool
     ) -> Bool {
-        canCommit(presentation) && !isNoteEditing
+        canCommit(presentation) && isComposerFocused && !isNoteEditing
     }
 
     static func canStageAll(_ presentation: GitCommitComposerPresentation?, isHunkBusy: Bool)

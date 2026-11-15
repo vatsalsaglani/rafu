@@ -44,6 +44,9 @@ struct GitCommitComposerView: View {
         .onChange(of: session.isGeneratingAICommitMessage) { _, isDrafting in
             announceDraftChange(isDrafting: isDrafting)
         }
+        // The Commit menu item takes ⌘Return only while a message field has
+        // focus, so ⌘Return in a terminal or the editor never commits.
+        .focusedValue(\.commitComposerFocused, focusedPart != nil ? true : nil)
     }
 
     private func composer(_ presentation: GitCommitComposerPresentation) -> some View {

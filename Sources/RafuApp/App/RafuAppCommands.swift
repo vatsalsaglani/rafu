@@ -1,18 +1,25 @@
 import AppKit
 import SwiftUI
 
+extension FocusedValues {
+    /// True while the commit summary or description field has focus.
+    @Entry var commitComposerFocused: Bool?
+}
+
 struct RafuAppCommands: Commands {
     @Environment(\.openSettings) private var openSettings
     @Environment(\.openWindow) private var openWindow
     @FocusedValue(\.workspaceSession) private var workspaceSession
     @FocusedValue(\.voiceCompanion) private var voiceCompanion
     @FocusedValue(\.canvasNoteEditing) private var editingNote
+    @FocusedValue(\.commitComposerFocused) private var isCommitComposerFocused
 
     /// Commit, Stage All and Draft Message with AI (G7): the menu and key
     /// path for the commit composer's actions. The composer's buttons carry
     /// no key equivalent, so each key is registered once. ⌘Return is on the
-    /// Commit item only while a commit is possible and no Ensemble note is
-    /// in Edit mode (then Format > Done Editing owns ⌘Return).
+    /// Commit item only while a commit is possible, a commit message field
+    /// has focus, and no Ensemble note is in Edit mode (then Format > Done
+    /// Editing owns ⌘Return).
     @ViewBuilder
     private var commitCommandItems: some View {
         let presentation = workspaceSession?.commitComposerPresentation()
@@ -25,7 +32,8 @@ struct RafuAppCommands: Commands {
         }
         .keyboardShortcut(
             GitCommitMenuAvailability.commitOwnsShortcut(
-                presentation, isNoteEditing: editingNote != nil)
+                presentation, isComposerFocused: isCommitComposerFocused == true,
+                isNoteEditing: editingNote != nil)
                 ? KeyboardShortcut(.return, modifiers: .command) : nil
         )
         .disabled(!canCommit)
