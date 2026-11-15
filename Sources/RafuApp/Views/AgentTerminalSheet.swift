@@ -25,7 +25,7 @@ struct AgentTerminalSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             RafuSheetHeader(
-                icon: "terminal.badge",
+                icon: AgentSymbols.agentTerminal,
                 title: "New Agent Terminal",
                 subtitle: "Launch an installed agent CLI interactively in this workspace."
             )

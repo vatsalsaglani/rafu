@@ -13,9 +13,6 @@ struct WorkspaceSidebarView: View {
     /// The window's undo manager: Edit > Undo puts trashed items back.
     @Environment(\.undoManager) private var undoManager
 
-    /// The Files header row: the 24 pt icon buttons set its height.
-    static let headerRowHeight: CGFloat = 24
-
     var body: some View {
         VStack(spacing: 0) {
             sidebarHeader
@@ -133,22 +130,16 @@ struct WorkspaceSidebarView: View {
         }
     }
 
-    /// Workspace name at the leading end (13 pt semibold, truncating) so
-    /// several windows are told apart at a glance; two quiet icon actions sit
-    /// at the trailing end. "Filter Files" is the file-name filter (the Go to
-    /// File palette); workspace-wide text search lives in the Search section
-    /// of this same sidebar, reached from the Activity Rail. The creation
-    /// actions share one `plus` menu so the header is not a row of badges.
+    /// Workspace name at the leading end so several windows are told apart
+    /// at a glance; two quiet icon actions sit at the trailing end. "Filter
+    /// Files" is the file-name filter (the Go to File palette); workspace-wide
+    /// text search lives in the Search section of this same sidebar, reached
+    /// from the Activity Rail. The creation actions share one `plus` menu so
+    /// the header is not a row of badges. The look (13 pt semibold title, no
+    /// fill, 10 pt edge, title on the tab-label line, window-move run) is the
+    /// shared `RafuUtilityPanelHeader`, so the five panels cannot drift apart.
     private var sidebarHeader: some View {
-        HStack(spacing: 4) {
-            Text(workspaceTitle)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(theme.palette.textPrimary)
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .help(workspaceTitle)
-                .accessibilityAddTraits(.isHeader)
-            Spacer(minLength: 8)
+        RafuUtilityPanelHeader(title: workspaceTitle, titleHelp: workspaceTitle) {
             Button("Filter Files", systemImage: "magnifyingglass") {
                 session.showCommandPalette(seed: "")
             }
@@ -156,16 +147,6 @@ struct WorkspaceSidebarView: View {
             .help("Filter Files (⌘P)")
             newItemMenu
         }
-        .padding(.horizontal, 10)
-        // The header sits directly below the titlebar row. The shared
-        // placement puts this 24 pt row's centre on the editor tab labels'
-        // centre (19 pt above it), like every other navigator panel header.
-        .rafuNavigatorHeaderPlacement(rowHeight: Self.headerRowHeight)
-        .padding(.bottom, 8)
-        // The header's empty leading run doubles as a window-move surface
-        // (`isMovable` is off; see WindowDragHandle). The icon buttons above
-        // still win hit-testing.
-        .background(WindowDragHandle())
     }
 
     /// New File, New Folder, and Add Folder to Workspace in one `plus` menu.

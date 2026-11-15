@@ -726,7 +726,6 @@ nonisolated struct TerminalSurfaceBorderResolution: Equatable, Sendable {
     nonisolated enum Emphasis: Equatable, Sendable {
         case none
         case editorFocus
-        case managerCurrent
         case managerAttention
     }
 
@@ -814,25 +813,25 @@ nonisolated struct TerminalSurfaceBorderStyle {
                 rowFill: .none
             )
         case .managerRow(let isCurrent, let needsAttention):
-            let emphasis: TerminalSurfaceBorderResolution.Emphasis =
-                needsAttention ? .managerAttention : (isCurrent ? .managerCurrent : .none)
-            let emphasisWidth =
-                emphasis == .none ? 0 : RafuMetrics.terminalBorderWidth
+            // Terminals panel rows (sidebar redesign, "tuned rows"): a row has
+            // no border at rest. The current row is the `selection` fill (plus
+            // a `borderStrong` hairline under Increase Contrast, so selection
+            // does not rest on a low-contrast fill); the amber border means
+            // "needs attention" only, so current and attention no longer look
+            // alike. The session colour is the 6 pt dot beside the name, never
+            // a third border. `hasIdentity` is ignored here on purpose.
+            let showsNeutral = needsAttention || (isCurrent && contrast == .increased)
             return TerminalSurfaceBorderResolution(
-                neutralStructure: isCurrent || needsAttention || contrast == .increased
-                    ? .borderStrong
-                    : .borderSubtle,
-                neutralWidth: RafuMetrics.terminalBorderWidth,
-                showsIdentityAccent: hasIdentity,
-                identityWidth: hasIdentity ? RafuMetrics.focusedTerminalBorderWidth : 0,
-                identityInset: hasIdentity ? RafuMetrics.terminalBorderWidth : 0,
-                emphasis: emphasis,
-                emphasisRole: needsAttention ? .warning : (isCurrent ? .focusRing : .clear),
-                emphasisWidth: emphasisWidth,
+                neutralStructure: showsNeutral ? .borderStrong : .clear,
+                neutralWidth: showsNeutral ? RafuMetrics.terminalBorderWidth : 0,
+                showsIdentityAccent: false,
+                identityWidth: 0,
+                identityInset: 0,
+                emphasis: needsAttention ? .managerAttention : .none,
+                emphasisRole: needsAttention ? .warning : .clear,
+                emphasisWidth: needsAttention ? RafuMetrics.terminalBorderWidth : 0,
                 emphasisInset: 0,
-                drawOrder: hasIdentity
-                    ? [.neutralStructure, .emphasis, .identity]
-                    : [.neutralStructure, .emphasis],
+                drawOrder: [.neutralStructure, .emphasis],
                 rowFill: isCurrent ? .current : .none
             )
         }
@@ -985,8 +984,8 @@ struct EditorGroupSurface<Content: View>: View {
 extension View {
     /// Places a navigator panel header so its title's centre sits on the
     /// editor tab labels' centre line (`RafuMetrics.navigatorHeaderTitleCenterY`).
-    /// Every rail panel's header uses this — the Files header directly,
-    /// the others through `RafuUtilityPanelHeader` — and a contract test
+    /// Every rail panel's header uses this through `RafuUtilityPanelHeader`
+    /// (Files included) — and a contract test
     /// checks it. The space above the header is a window-move surface, like
     /// the titlebar row it extends.
     func rafuNavigatorHeaderPlacement(rowHeight: CGFloat) -> some View {
@@ -998,141 +997,211 @@ extension View {
     }
 }
 
-/// Shared one-row panel header. The supplied context and action builders are
-/// stored as values so the header remains a normal SwiftUI diffing boundary.
-/// Every user is a navigator (rail) panel, so the header places itself with
-/// `rafuNavigatorHeaderPlacement(rowHeight:)`: its band starts below a
-/// short strip of the sidebar tone, with the title on the tab labels' line.
+/// Shared one-row panel header. Every navigator (rail) panel uses it:
+/// Files, Search, Source Control, Terminals and History. The sidebar is one quiet
+/// surface, so the header has no fill, no hairline, no leading icon and no
+/// close button (ADR 0002: the active rail icon, Command-B and the titlebar
+/// toggle hide the sidebar). Only the 13 pt semibold title, an optional
+/// context view (a plain count), and at most two 24 pt icon actions plus one
+/// overflow menu. Space below, not a line, separates it from the content.
+///
+/// The header places itself with `rafuNavigatorHeaderPlacement(rowHeight:)`
+/// so its title sits on the tab labels' line, and its empty run is a
+/// window-move surface. It paints nothing, so a translucent sidebar base
+/// shows through it unchanged. The supplied builders are stored as values so
+/// the header remains a normal SwiftUI diffing boundary.
 struct RafuUtilityPanelHeader<Context: View, Actions: View>: View {
-    let icon: String
     let title: String
-    let closeAccessibilityLabel: String
-    let onClose: () -> Void
+    /// Tooltip for the title. Files passes its workspace name, which can be
+    /// truncated; the panel names default to the title itself.
+    let titleHelp: String?
     @ViewBuilder let context: Context
     @ViewBuilder let actions: Actions
 
     @Environment(\.rafuTheme) private var theme
     @ScaledMetric(relativeTo: .body) private var scaledMinimumHeight =
-        RafuMetrics.sectionHeaderHeight
+        RafuMetrics.navigatorHeaderRowHeight
 
     init(
-        icon: String,
         title: String,
-        closeAccessibilityLabel: String,
-        onClose: @escaping () -> Void,
+        titleHelp: String? = nil,
         @ViewBuilder context: () -> Context,
         @ViewBuilder actions: () -> Actions
     ) {
-        self.icon = icon
         self.title = title
-        self.closeAccessibilityLabel = closeAccessibilityLabel
-        self.onClose = onClose
+        self.titleHelp = titleHelp
         self.context = context()
         self.actions = actions()
     }
 
     var body: some View {
         let rowHeight = WorkbenchTextHeightPolicy.minimumHeight(
-            base: RafuMetrics.sectionHeaderHeight,
+            base: RafuMetrics.navigatorHeaderRowHeight,
             scaledHeight: scaledMinimumHeight
         )
-        HStack(spacing: RafuMetrics.space2) {
-            // 13 pt glyph in the secondary tone, then the title: the same
-            // icon size as every other chrome glyph.
-            HStack(spacing: RafuMetrics.space1 + 2) {
-                Image(systemName: icon)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(theme.palette.textSecondary)
-                    .frame(width: 16)
-                    .accessibilityHidden(true)
-                Text(title)
-                    .font(.callout.weight(.medium))
-                    .foregroundStyle(theme.palette.textPrimary)
-            }
-            .accessibilityElement(children: .combine)
-            .accessibilityAddTraits(.isHeader)
+        HStack(spacing: RafuMetrics.space1) {
+            Text(title)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(theme.palette.textPrimary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .help(titleHelp ?? title)
+                .accessibilityAddTraits(.isHeader)
             context
             Spacer(minLength: RafuMetrics.space2)
             actions
-            Button(action: onClose) {
-                Label("Close", systemImage: "xmark")
-            }
-            .buttonStyle(RafuIconButtonStyle(size: 24))
-            .accessibilityLabel(closeAccessibilityLabel)
-            .help(closeAccessibilityLabel)
         }
-        .padding(.horizontal, RafuMetrics.utilityBodyInset)
+        .padding(.horizontal, RafuMetrics.sidebarTextInset)
         .frame(minHeight: rowHeight)
-        .background(theme.palette.elevatedBackground)
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(theme.palette.borderSubtle)
-                .frame(height: RafuMetrics.hairline)
-                .allowsHitTesting(false)
-                .accessibilityHidden(true)
-        }
         .rafuNavigatorHeaderPlacement(rowHeight: rowHeight)
+        .padding(.bottom, RafuMetrics.navigatorHeaderBottomSpacing)
+        // The empty run doubles as a window-move surface (`isMovable` is
+        // off; see WindowDragHandle). The icon buttons still win hit-testing.
+        .background(WindowDragHandle())
         .accessibilityElement(children: .contain)
     }
 }
 
 extension RafuUtilityPanelHeader where Context == EmptyView {
     init(
-        icon: String,
         title: String,
-        closeAccessibilityLabel: String,
-        onClose: @escaping () -> Void,
+        titleHelp: String? = nil,
         @ViewBuilder actions: () -> Actions
     ) {
         self.init(
-            icon: icon,
             title: title,
-            closeAccessibilityLabel: closeAccessibilityLabel,
-            onClose: onClose,
+            titleHelp: titleHelp,
             context: { EmptyView() },
             actions: actions
         )
     }
 }
 
+/// The optional count after a panel header title: plain 12 pt monospaced
+/// digits in the muted tone, not a chip. Use it only when the count is the
+/// panel's main fact (Terminals).
+struct RafuPanelHeaderCount: View {
+    let count: Int
+    let accessibilityLabel: String
+
+    @Environment(\.rafuTheme) private var theme
+
+    var body: some View {
+        Text("\(count)")
+            .font(.system(size: 12).monospacedDigit())
+            .foregroundStyle(theme.palette.textMuted)
+            .lineLimit(1)
+            .fixedSize()
+            .accessibilityLabel(accessibilityLabel)
+    }
+}
+
+/// The last trailing control of a panel header when a panel has more than two
+/// actions: one quiet `ellipsis` menu in the shared 24 pt icon button style.
+/// Each item keeps its own label; the menu has a label and a tooltip.
+struct RafuPanelHeaderOverflowMenu<Content: View>: View {
+    let accessibilityLabel: String
+    @ViewBuilder let content: Content
+
+    @Environment(\.rafuTheme) private var theme
+
+    init(accessibilityLabel: String, @ViewBuilder content: () -> Content) {
+        self.accessibilityLabel = accessibilityLabel
+        self.content = content()
+    }
+
+    var body: some View {
+        Menu {
+            content
+        } label: {
+            Label(accessibilityLabel, systemImage: "ellipsis")
+        }
+        .menuStyle(.button)
+        .buttonStyle(RafuIconButtonStyle(size: 24))
+        .menuIndicator(.hidden)
+        .tint(theme.palette.textSecondary)
+        .fixedSize()
+        .help(accessibilityLabel)
+        .accessibilityLabel(accessibilityLabel)
+    }
+}
+
+/// One section header style for the sidebar lists ("Staged", "Changes",
+/// "Saved Terminal Groups"): 11 pt semibold in the secondary tone, Title Case
+/// (never upper case), and an optional plain count in muted monospaced
+/// digits, with no parentheses, no chip and no line.
+struct RafuSidebarSectionHeader: View {
+    let title: String
+    var count: Int?
+
+    @Environment(\.rafuTheme) private var theme
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(title)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(theme.palette.textSecondary)
+                .lineLimit(1)
+            if let count {
+                Text("\(count)")
+                    .font(.system(size: 11).monospacedDigit())
+                    .foregroundStyle(theme.palette.textMuted)
+            }
+            Spacer(minLength: 0)
+        }
+        .textCase(nil)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
+    }
+}
+
 /// Shared lower-emphasis panel state. It expands to the remaining panel body,
 /// so the concrete panel's primary header stays pinned at the top.
+///
+/// `compact` is the sidebar size (sidebar redesign): a 20 pt muted icon, a
+/// 13 pt semibold title and a 12 pt message at most 220 pt wide, for the
+/// navigator panels' 260 pt column. The regular size is for window-sized
+/// surfaces.
 struct RafuPanelEmptyState<Action: View>: View {
     let icon: String
     let title: String
     let message: String
+    let compact: Bool
     @ViewBuilder let action: Action
 
     @Environment(\.rafuTheme) private var theme
     @ScaledMetric(relativeTo: .title3) private var iconSize: CGFloat = 30
+    @ScaledMetric(relativeTo: .body) private var compactIconSize: CGFloat = 20
 
     init(
         icon: String,
         title: String,
         message: String,
+        compact: Bool = false,
         @ViewBuilder action: () -> Action
     ) {
         self.icon = icon
         self.title = title
         self.message = message
+        self.compact = compact
         self.action = action()
     }
 
     var body: some View {
-        VStack(spacing: RafuMetrics.space3) {
+        VStack(spacing: compact ? RafuMetrics.space2 : RafuMetrics.space3) {
             Image(systemName: icon)
-                .font(.system(size: iconSize, weight: .medium))
-                .foregroundStyle(theme.palette.textSecondary)
+                .font(.system(size: compact ? compactIconSize : iconSize, weight: .medium))
+                .foregroundStyle(compact ? theme.palette.textMuted : theme.palette.textSecondary)
                 .accessibilityHidden(true)
             Text(title)
-                .font(.title3.weight(.semibold))
+                .font(compact ? .system(size: 13, weight: .semibold) : .title3.weight(.semibold))
                 .foregroundStyle(theme.palette.textPrimary)
                 .multilineTextAlignment(.center)
             Text(message)
-                .font(.callout)
+                .font(compact ? .system(size: 12) : .callout)
                 .foregroundStyle(theme.palette.textSecondary)
                 .multilineTextAlignment(.center)
-                .frame(maxWidth: 280)
+                .frame(maxWidth: compact ? 220 : 280)
                 .fixedSize(horizontal: false, vertical: true)
             action
         }
@@ -1143,8 +1212,8 @@ struct RafuPanelEmptyState<Action: View>: View {
 }
 
 extension RafuPanelEmptyState where Action == EmptyView {
-    init(icon: String, title: String, message: String) {
-        self.init(icon: icon, title: title, message: message) {
+    init(icon: String, title: String, message: String, compact: Bool = false) {
+        self.init(icon: icon, title: title, message: message, compact: compact) {
             EmptyView()
         }
     }

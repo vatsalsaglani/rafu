@@ -86,18 +86,42 @@ struct WorkspaceActivityRail: View {
                 RafuRailButtonStyle(
                     isSelected: isActive,
                     deckFacingEdge: .trailing,
-                    tooltip: isEnabled ? mode.title : "\(mode.title) — open a folder first",
+                    tooltip: NavigatorRailPresentation.tooltip(
+                        title: mode.title, isEnabled: isEnabled, isActive: isActive),
                     badge: mode == .terminals && attentionCount > 0 ? attentionCount : nil
                 )
             )
             .disabled(!isEnabled)
+        // The panel headers have no close button (ADR 0002: one sidebar
+        // toggle), so the active rail icon says that a click hides the panel.
+        let value = NavigatorRailPresentation.accessibilityValue(
+            isActive: isActive, attentionCount: attentionCount)
         return Group {
-            if mode == .terminals, attentionCount > 0 {
-                button.accessibilityValue("\(attentionCount) needing attention")
+            if let value {
+                button.accessibilityValue(value)
             } else {
                 button
             }
         }
+    }
+}
+
+/// Tooltip and VoiceOver value for one Activity Rail button. A click on the
+/// active icon hides the sidebar (`selectNavigatorRailIcon`); with no close
+/// button in the panel headers, the rail must say so.
+nonisolated enum NavigatorRailPresentation {
+    static func tooltip(title: String, isEnabled: Bool, isActive: Bool) -> String {
+        guard isEnabled else { return "\(title) — open a folder first" }
+        return isActive ? "Hide \(title)" : title
+    }
+
+    /// "Selected, sidebar shown" for the active icon, plus the Terminals
+    /// attention count; `nil` when there is nothing to say.
+    static func accessibilityValue(isActive: Bool, attentionCount: Int) -> String? {
+        var parts: [String] = []
+        if isActive { parts.append("Selected, sidebar shown") }
+        if attentionCount > 0 { parts.append("\(attentionCount) needing attention") }
+        return parts.isEmpty ? nil : parts.joined(separator: ", ")
     }
 }
 
@@ -189,18 +213,49 @@ struct WorkspaceSearchNavigatorView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            RafuUtilityPanelHeader(
-                icon: WorkspaceNavigatorMode.search.symbolName,
-                title: "Search",
-                closeAccessibilityLabel: "Close Search",
-                onClose: { session.isSidebarCollapsed = true }
-            ) {
-                EmptyView()
+            RafuUtilityPanelHeader(title: "Search") {
+                WorkspaceSearchHeaderActions(session: session, search: session.workspaceSearch)
             }
             WorkspaceSearchContent(session: session, search: session.workspaceSearch)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+}
+
+/// The Search header's two trailing actions: Recent Searches (a menu) and the
+/// Replace toggle. The Replace toggle uses the replace glyph with an active
+/// state, not a disclosure chevron, so it reads as a toggle with a name.
+private struct WorkspaceSearchHeaderActions: View {
+    @Bindable var session: WorkspaceSession
+    @Bindable var search: WorkspaceSearchModel
+
+    var body: some View {
+        Menu {
+            ForEach(search.recentQueries, id: \.self) { recentQuery in
+                Button(recentQuery) {
+                    search.query = recentQuery
+                    guard session.rootURL != nil else { return }
+                    search.search(in: session.workspaceSearchRoots)
+                }
+            }
+        } label: {
+            Label("Recent Searches", systemImage: "clock")
+        }
+        .menuStyle(.button)
+        .buttonStyle(RafuIconButtonStyle(size: 24))
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .disabled(search.recentQueries.isEmpty)
+        .help("Recent Searches")
+        .accessibilityLabel("Recent Searches")
+        Button(
+            search.isReplacePresented ? "Hide Replace" : "Show Replace",
+            systemImage: "arrow.left.arrow.right"
+        ) { search.isReplacePresented.toggle() }
+        .buttonStyle(RafuIconButtonStyle(isActive: search.isReplacePresented, size: 24))
+        .help(search.isReplacePresented ? "Hide Replace" : "Show Replace")
+        .accessibilityAddTraits(search.isReplacePresented ? .isSelected : [])
     }
 }
 
@@ -222,9 +277,10 @@ private struct WorkspaceSearchContent: View {
     @State private var isApplyConfirmationPresented = false
 
     var body: some View {
+        // No divider under the controls: space separates them from the
+        // results, as in Files (sidebar redesign).
         VStack(spacing: 0) {
             searchControls
-            Divider().overlay(theme.palette.borderSubtle)
             searchResults
         }
         .defaultFocus($isQueryFocused, true)
@@ -256,39 +312,20 @@ private struct WorkspaceSearchContent: View {
 
     private var searchControls: some View {
         VStack(spacing: 7) {
+            // Full-width field with a leading glyph; Return searches. The
+            // recent-searches menu and the Replace toggle are header actions.
             HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(theme.palette.textMuted)
+                    .accessibilityHidden(true)
                 TextField("Search workspace", text: $search.query)
                     .textFieldStyle(.plain)
-                    .rafuField(isFocused: isQueryFocused)
                     .focused($isQueryFocused)
                     .onSubmit(performSearch)
-                Menu {
-                    ForEach(search.recentQueries, id: \.self) { recentQuery in
-                        Button(recentQuery) {
-                            search.query = recentQuery
-                            performSearch()
-                        }
-                    }
-                } label: {
-                    Label("Recent Searches", systemImage: "clock")
-                }
-                .menuStyle(.button)
-                .buttonStyle(RafuIconButtonStyle(size: 24))
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .disabled(search.recentQueries.isEmpty)
-                .help("Recent Searches")
-                Button("Search", systemImage: "magnifyingglass", action: performSearch)
-                    .buttonStyle(RafuIconButtonStyle(size: 24))
-                    .disabled(search.query.isEmpty)
-                    .help("Search")
-                Button(
-                    search.isReplacePresented ? "Hide Replace" : "Show Replace",
-                    systemImage: search.isReplacePresented ? "chevron.down" : "chevron.right"
-                ) { search.isReplacePresented.toggle() }
-                .buttonStyle(RafuIconButtonStyle(isActive: search.isReplacePresented, size: 24))
-                .help(search.isReplacePresented ? "Hide Replace" : "Show Replace")
+                    .help("Press Return to search")
             }
+            .rafuField(isFocused: isQueryFocused)
             DisclosureGroup("File filters", isExpanded: fileFiltersExpandedBinding) {
                 HStack(spacing: 6) {
                     TextField("files to include", text: $search.includePattern)
@@ -348,7 +385,8 @@ private struct WorkspaceSearchContent: View {
                 }
             }
         }
-        .padding(RafuMetrics.utilityBodyInset)
+        .padding(.horizontal, RafuMetrics.sidebarTextInset)
+        .padding(.bottom, RafuMetrics.space2)
     }
 
     @ViewBuilder
@@ -426,7 +464,8 @@ private struct WorkspaceSearchContent: View {
             RafuPanelEmptyState(
                 icon: "magnifyingglass",
                 title: "Search Workspace",
-                message: "Find or replace text across the open folder."
+                message: "Find or replace text across the open folder.",
+                compact: true
             )
         }
     }

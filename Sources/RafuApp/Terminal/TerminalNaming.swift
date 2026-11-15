@@ -89,6 +89,149 @@ nonisolated enum TerminalNaming {
         livePaneCount > 0 ? "Running" : "Not running"
     }
 
+    /// The Terminals header count, spoken: "1 terminal", "3 terminals". A
+    /// group and an ungrouped session each count as one terminal; "legacy"
+    /// is an internal word and never reaches the user.
+    static func terminalCountLabel(_ count: Int) -> String {
+        count == 1 ? "1 terminal" : "\(count) terminals"
+    }
+
+    // MARK: Terminals panel rows ("tuned rows")
+
+    /// A panel row's title: the most specific name, never repeated by the
+    /// second line. A name the user gave the group wins, then the name the
+    /// user gave the focused pane, then the agent's session title (or the
+    /// agent's name for a generic title), then the shell or agent name. The
+    /// folder is not part of the title; the second line carries it.
+    static func panelTitle(
+        storedGroupName: String?, paneUserName: String?, agentTitle: String?,
+        providerOrShell: String
+    ) -> String {
+        let fallback = providerOrShell.trimmingCharacters(in: .whitespacesAndNewlines)
+        return resolvedGroupTitle(
+            storedName: storedGroupName ?? "Terminal",
+            paneUserName: paneUserName,
+            agentTitle: agentTitle ?? (fallback.isEmpty ? nil : fallback))
+    }
+
+    /// Adds an ordinal to the second and later rows that read the same: the
+    /// same title and the same context line ("Claude Code", "Claude Code 2").
+    /// Rows keep creation order. A name the user typed never changes.
+    static func disambiguatedTitles(_ rows: [(title: String, context: String, isUserNamed: Bool)])
+        -> [String]
+    {
+        var seen: [String: Int] = [:]
+        return rows.map { row in
+            guard !row.isUserNamed else { return row.title }
+            let key = row.title + "\u{1F}" + row.context
+            let count = (seen[key] ?? 0) + 1
+            seen[key] = count
+            return count == 1 ? row.title : "\(row.title) \(count)"
+        }
+    }
+
+    /// The context line a row shows under its title: the agent or shell
+    /// name (left out when the title already is that name) and the folder,
+    /// or the pane count and folder for a group with more than one pane.
+    static func panelContext(
+        title: String, providerOrShell: String, folder: String?, paneCount: Int
+    )
+        -> String
+    {
+        if paneCount > 1 { return subtitle([paneCountLabel(paneCount), folder ?? ""]) }
+        let sameAsTitle =
+            providerOrShell.trimmingCharacters(in: .whitespaces).lowercased()
+            == title.trimmingCharacters(in: .whitespaces).lowercased()
+        return subtitle([sameAsTitle ? "" : providerOrShell, folder ?? ""])
+    }
+
+    /// The full second line: an abnormal status word first, then the
+    /// context, then where the terminal lives ("Ensemble", "Hidden").
+    static func panelSubtitle(statusWord: String?, context: String, placement: String?) -> String {
+        subtitle([statusWord ?? "", context, placement ?? ""])
+    }
+
+    /// "Ensemble" for a group whose card is on an Ensemble board, "Hidden" for
+    /// a group with no tab, else `nil`. Never "Canvas" or "Parked".
+    static func panelPlacement(isCanvasOwned: Bool, isParked: Bool) -> String? {
+        if isCanvasOwned { return "Ensemble" }
+        return isParked ? "Hidden" : nil
+    }
+
+    /// The status word a row shows, or `nil` in the normal state. A running
+    /// or idle shell and a working, done, or inactive agent are normal: the
+    /// glyph says so. Attention, a failure, an exit, a stop, or an
+    /// unavailable pane leads the second line as a word, so the state never
+    /// depends on the glyph's colour or shape alone.
+    static func abnormalStatusWord(
+        agentStatus: AgentCardStatus?, paneStatus: TerminalPaneStatus, hasAttention: Bool
+    ) -> String? {
+        if let agentStatus {
+            switch agentStatus {
+            case .needsYou, .failed, .stopped: return agentStatus.word
+            case .working, .done, .doneUnread, .inactive:
+                return hasAttention ? "Needs attention" : nil
+            }
+        }
+        if hasAttention { return "Needs attention" }
+        switch paneStatus {
+        case .idle, .live: return nil
+        case .exited: return "Exited"
+        case .stopped: return "Stopped"
+        case .unavailable: return "Unavailable"
+        }
+    }
+
+    /// The status word of an ungrouped session row, or `nil` while it runs
+    /// or is idle: "Needs attention", "Exited (1)".
+    static func abnormalSessionStatusWord(_ status: TerminalSessionStatus) -> String? {
+        switch status {
+        case .idle, .running: nil
+        case .bell, .exited: TerminalSessionPresentation.label(status)
+        }
+    }
+
+    /// The status word of a group with more than one pane: attention, else
+    /// "Not running" when no pane runs, else `nil`.
+    static func abnormalGroupStatusWord(attentionCount: Int, livePaneCount: Int) -> String? {
+        if attentionCount > 0 { return attentionLabel(attentionCount) }
+        return livePaneCount == 0 ? groupStateLabel(livePaneCount: 0) : nil
+    }
+
+    /// A shape-distinct SF Symbol for a shell's state in the 16 pt status
+    /// slot (an agent uses `AgentActivityGlyph`). Attention is a bell.
+    static func shellStatusSymbol(paneStatus: TerminalPaneStatus, hasAttention: Bool) -> String {
+        if hasAttention { return "bell.fill" }
+        return switch paneStatus {
+        case .idle: "circle"
+        case .live: "circle.fill"
+        case .exited: "xmark.circle.fill"
+        case .stopped: "stop.circle"
+        case .unavailable: "exclamationmark.triangle"
+        }
+    }
+
+    /// A pane row's name: the user's name, then a meaningful reported title
+    /// (not a path, the shell, or the agent's bare name), then the shell or
+    /// agent name. The ordinal beside it tells identical panes apart.
+    static func paneRowTitle(
+        userName: String?, reportedTitle: String?, providerOrShell: String,
+        shellName: String?, provider: ConductorCLIID?
+    ) -> String {
+        if let userName = userName?.trimmingCharacters(in: .whitespacesAndNewlines),
+            !userName.isEmpty
+        {
+            return userName
+        }
+        if let reportedTitle,
+            !TerminalSessionPresentation.isGenericTitle(
+                reportedTitle, shellName: shellName, provider: provider)
+        {
+            return reportedTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return providerOrShell
+    }
+
     /// "1 needs attention", "2 need attention".
     static func attentionLabel(_ count: Int) -> String {
         count == 1 ? "1 needs attention" : "\(count) need attention"

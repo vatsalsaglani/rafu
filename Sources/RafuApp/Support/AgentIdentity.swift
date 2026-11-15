@@ -34,6 +34,16 @@ extension ConductorCLIID {
     nonisolated var menuFallbackSymbolName: String { "terminal" }
 }
 
+/// SF Symbols for agent surfaces that do not show a specific vendor mark.
+///
+/// One constant so the call sites cannot drift. `terminal.badge` looked
+/// plausible but is not an SF Symbol: `NSImage(systemSymbolName:)` returns
+/// `nil` and SwiftUI draws nothing. A test resolves every name here.
+nonisolated enum AgentSymbols {
+    /// "Start Agent" / "New Agent Terminal" and the agent-terminal process kind.
+    static let agentTerminal = "sparkles"
+}
+
 /// Pure matching rules, kept separate so the tests can pin every alias.
 nonisolated enum AgentIdentityMatcher {
     /// One word (already lowercased, path-stripped) to its CLI.

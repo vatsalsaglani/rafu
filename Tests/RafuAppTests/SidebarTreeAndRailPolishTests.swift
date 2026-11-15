@@ -233,10 +233,10 @@ struct SidebarTreeAndRailPolishTests {
             to: "/// New File, New Folder, and Add Folder to Workspace in one")
         #expect(header.contains("Button(\"Filter Files\", systemImage: \"magnifyingglass\")"))
         #expect(header.contains("newItemMenu"))
-        #expect(header.contains(".rafuNavigatorHeaderPlacement(rowHeight: Self.headerRowHeight)"))
+        // Placement, the 8 pt space below and the window-move run come from
+        // the shared header (NavigatorPanelHeaderPlacementTests).
+        #expect(header.contains("RafuUtilityPanelHeader(title: workspaceTitle"))
         #expect(!header.contains(".padding(.top,"))
-        #expect(header.contains(".padding(.bottom, 8)"))
-        #expect(header.contains(".background(WindowDragHandle())"))
         #expect(!header.contains("Button(\"New"))
         #expect(!header.contains("New Folder"))
         #expect(!header.contains("requestAddFolder"))

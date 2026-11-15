@@ -129,16 +129,6 @@ nonisolated struct GitSyncPresentation: Equatable, Sendable {
     var canSync: Bool { state != .noRemote }
 }
 
-/// Section picker layout rule (G1): segments show words, and fall back to
-/// icons with tooltips below `iconThreshold` points of available width.
-nonisolated enum GitSectionPickerLayout {
-    static let iconThreshold: CGFloat = 320
-
-    static func usesIcons(forWidth width: CGFloat) -> Bool {
-        width < iconThreshold
-    }
-}
-
 nonisolated extension GitInspectorSection {
     /// SF Symbol used when the picker is too narrow for words.
     var symbolName: String {
@@ -149,11 +139,11 @@ nonisolated extension GitInspectorSection {
         }
     }
 
-    /// Segment text: "Changes (3)", "History", "Worktrees". The count is
-    /// omitted when it is zero.
+    /// Segment text: "Changes 3", "History", "Worktrees". The count is plain
+    /// text with no parentheses (sidebar redesign), omitted when it is zero.
     func segmentLabel(changeCount: Int) -> String {
         guard self == .changes, changeCount > 0 else { return title }
-        return "\(title) (\(changeCount))"
+        return "\(title) \(changeCount)"
     }
 }
 

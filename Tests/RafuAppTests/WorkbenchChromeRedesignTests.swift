@@ -406,7 +406,8 @@ struct WorkbenchChromeRedesignTests {
     func filesHeader() throws {
         let source = try Self.source("Sources/RafuApp/Views/WorkspaceSidebarView.swift")
         #expect(source.contains("\"Filter Files\", systemImage: \"magnifyingglass\""))
-        #expect(source.contains(".font(.system(size: 13, weight: .semibold))"))
+        // The 13 pt semibold title is the shared header's.
+        #expect(source.contains("RafuUtilityPanelHeader(title: workspaceTitle"))
         #expect(!source.contains("Button(\"Search Workspace\""))
     }
 

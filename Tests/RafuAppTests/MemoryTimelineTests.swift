@@ -252,7 +252,7 @@ func processKindTitlesAreDistinctFromRowLabels() {
     #expect(ProcessResourcePresentation.sectionTitle(.terminalShell) == "Terminals")
     #expect(ProcessResourcePresentation.sectionTitle(.agentTerminal) == "Agent Terminals")
     #expect(MemoryComposition.title(for: .agentTerminal) == "Agent Terminals")
-    #expect(MemoryComposition.symbol(for: .agentTerminal) == "terminal.badge")
+    #expect(MemoryComposition.symbol(for: .agentTerminal) == AgentSymbols.agentTerminal)
 }
 
 @Test("Composition groups by kind in a fixed order, omitting empty categories")

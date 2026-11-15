@@ -359,34 +359,28 @@ struct RafuWorkbenchStyleContractTests {
                         contrast: contrast
                     )
                     let hasIdentity = identity != .none
-                    #expect(resolution.neutralWidth == 1)
-                    #expect(resolution.showsIdentityAccent == hasIdentity)
-                    #expect(resolution.identityWidth == (hasIdentity ? 2 : 0))
-                    #expect(resolution.identityInset == (hasIdentity ? 1 : 0))
                     #expect(resolution.emphasisInset == 0)
                     #expect(resolution.identityAndEmphasisDoNotOverlap)
-                    #expect(
-                        resolution.drawOrder
-                            == (hasIdentity
-                                ? [.neutralStructure, .emphasis, .identity]
-                                : [.neutralStructure, .emphasis])
-                    )
-
-                    let expectsStrongNeutral: Bool =
-                        switch context {
-                        case .editorGroup(let isFocused, let hostsTerminal, _):
-                            (isFocused && (hostsTerminal || hasIdentity))
-                                || contrast == .increased
-                        case .managerRow(let isCurrent, let needsAttention):
-                            isCurrent || needsAttention || contrast == .increased
-                        }
-                    #expect(
-                        resolution.neutralStructure
-                            == (expectsStrongNeutral ? .borderStrong : .borderSubtle)
-                    )
 
                     switch context {
                     case .editorGroup(let isFocused, let hostsTerminal, let hasSiblings):
+                        #expect(resolution.neutralWidth == 1)
+                        #expect(resolution.showsIdentityAccent == hasIdentity)
+                        #expect(resolution.identityWidth == (hasIdentity ? 2 : 0))
+                        #expect(resolution.identityInset == (hasIdentity ? 1 : 0))
+                        #expect(
+                            resolution.drawOrder
+                                == (hasIdentity
+                                    ? [.neutralStructure, .emphasis, .identity]
+                                    : [.neutralStructure, .emphasis])
+                        )
+                        let expectsStrongNeutral =
+                            (isFocused && (hostsTerminal || hasIdentity))
+                            || contrast == .increased
+                        #expect(
+                            resolution.neutralStructure
+                                == (expectsStrongNeutral ? .borderStrong : .borderSubtle)
+                        )
                         let terminalFocus = isFocused && (hostsTerminal || hasIdentity)
                         let siblingFocus = isFocused && hasSiblings && !terminalFocus
                         #expect(resolution.rowFill == .none)
@@ -400,11 +394,19 @@ struct RafuWorkbenchStyleContractTests {
                         // Gold only ever marks a focused terminal.
                         #expect((resolution.emphasisRole == .focusRing) == terminalFocus)
                     case .managerRow(let isCurrent, let needsAttention):
-                        let expectedEmphasis: TerminalSurfaceBorderResolution.Emphasis =
-                            needsAttention
-                            ? .managerAttention : (isCurrent ? .managerCurrent : .none)
-                        #expect(resolution.emphasis == expectedEmphasis)
-                        #expect(resolution.emphasisWidth == (expectedEmphasis == .none ? 0 : 1))
+                        // Sidebar redesign ("tuned rows"): no border at rest;
+                        // selection is a fill; amber means attention only;
+                        // the session colour is the dot, never a border.
+                        let showsNeutral = needsAttention || (isCurrent && contrast == .increased)
+                        #expect(resolution.neutralWidth == (showsNeutral ? 1 : 0))
+                        #expect(
+                            resolution.neutralStructure == (showsNeutral ? .borderStrong : .clear))
+                        #expect(!resolution.showsIdentityAccent)
+                        #expect(resolution.identityWidth == 0)
+                        #expect(resolution.drawOrder == [.neutralStructure, .emphasis])
+                        #expect(resolution.emphasis == (needsAttention ? .managerAttention : .none))
+                        #expect(resolution.emphasisRole == (needsAttention ? .warning : .clear))
+                        #expect(resolution.emphasisWidth == (needsAttention ? 1 : 0))
                         #expect(resolution.rowFill == (isCurrent ? .current : .none))
                     }
                 }
@@ -439,10 +441,20 @@ struct RafuWorkbenchStyleContractTests {
             identity: .none,
             contrast: .increased
         )
-        #expect(normalRow.neutralStructure == .borderSubtle)
-        #expect(increasedRow.neutralStructure == .borderStrong)
+        // A resting manager row has no border in either mode; Increase
+        // Contrast adds the hairline to the current row only.
+        #expect(normalRow.neutralWidth == 0)
+        #expect(increasedRow.neutralWidth == 0)
         #expect(increasedRow.emphasis == .none)
         #expect(increasedRow.rowFill == .none)
+        let increasedCurrentRow = TerminalSurfaceBorderStyle.resolve(
+            context: .managerRow(isCurrent: true, needsAttention: false),
+            identity: .none,
+            contrast: .increased
+        )
+        #expect(increasedCurrentRow.neutralStructure == .borderStrong)
+        #expect(increasedCurrentRow.neutralWidth == 1)
+        #expect(increasedCurrentRow.emphasis == .none)
 
         let source = try Self.workbenchStyleSource()
         #expect(source.contains("@Environment(\\.colorSchemeContrast)"))
@@ -461,9 +473,12 @@ struct RafuWorkbenchStyleContractTests {
             identity: .none,
             contrast: .normal
         )
+        // Current is the selection fill only: no amber ring, so it can no
+        // longer be mistaken for attention.
         #expect(!current.showsIdentityAccent)
-        #expect(current.emphasis == .managerCurrent)
-        #expect(current.emphasisRole == .focusRing)
+        #expect(current.emphasis == .none)
+        #expect(current.emphasisRole == .clear)
+        #expect(current.neutralWidth == 0)
         #expect(current.rowFill == .current)
 
         let attention = TerminalSurfaceBorderStyle.resolve(
@@ -471,11 +486,10 @@ struct RafuWorkbenchStyleContractTests {
             identity: .assigned(matchesEditorBackground: false),
             contrast: .normal
         )
-        #expect(attention.showsIdentityAccent)
+        // Identity is the dot beside the name, never a row border.
+        #expect(!attention.showsIdentityAccent)
         #expect(attention.emphasis == .managerAttention)
         #expect(attention.emphasisRole == .warning)
-        #expect(attention.identityWidth == 2)
-        #expect(attention.identityInset == 1)
         #expect(attention.emphasisWidth == 1)
         #expect(attention.identityAndEmphasisDoNotOverlap)
         #expect(attention.rowFill == .none)
@@ -487,7 +501,7 @@ struct RafuWorkbenchStyleContractTests {
         )
         #expect(currentAttention.emphasis == .managerAttention)
         #expect(currentAttention.rowFill == .current)
-        #expect(currentAttention.showsIdentityAccent)
+        #expect(!currentAttention.showsIdentityAccent)
     }
 
     @Test("Source policy excludes terminal status from border resolver inputs")

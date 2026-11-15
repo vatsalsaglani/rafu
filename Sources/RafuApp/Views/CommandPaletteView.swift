@@ -979,7 +979,7 @@ struct CommandPaletteView: View {
                 .init(
                     id: "terminal.new-agent",
                     title: "New Agent Terminal…",
-                    symbolName: "terminal.badge",
+                    symbolName: AgentSymbols.agentTerminal,
                     keywords: ["agent", "terminal", "claude", "codex"],
                     shortcut: "⌘⇧A"
                 ) {

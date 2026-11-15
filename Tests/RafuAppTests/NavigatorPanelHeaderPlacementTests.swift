@@ -15,10 +15,11 @@ struct NavigatorPanelHeaderPlacementTests {
             RafuMetrics.navigatorHeaderTitleCenterY
                 == RafuMetrics.workbenchInset + RafuMetrics.tabShelfHeight / 2)
         #expect(RafuMetrics.navigatorHeaderTitleCenterY == 31)
-        // Files (24 pt row) and the shared utility header (34 pt band).
-        #expect(RafuMetrics.navigatorHeaderTopInset(rowHeight: 24) == 19)
+        // Every panel, Files included, uses the one 24 pt header row.
+        #expect(RafuMetrics.navigatorHeaderRowHeight == 24)
         #expect(
-            RafuMetrics.navigatorHeaderTopInset(rowHeight: RafuMetrics.sectionHeaderHeight) == 14)
+            RafuMetrics.navigatorHeaderTopInset(rowHeight: RafuMetrics.navigatorHeaderRowHeight)
+                == 19)
         // A row taller than the line never gets a negative inset.
         #expect(RafuMetrics.navigatorHeaderTopInset(rowHeight: 80) == 0)
     }
@@ -31,22 +32,49 @@ struct NavigatorPanelHeaderPlacementTests {
             to: "extension RafuUtilityPanelHeader where Context == EmptyView")
         #expect(header.contains(".rafuNavigatorHeaderPlacement(rowHeight: rowHeight)"))
         #expect(header.contains(".frame(minHeight: rowHeight)"))
+        #expect(header.contains("base: RafuMetrics.navigatorHeaderRowHeight"))
         let modifier = try Self.section(
             of: source, from: "func rafuNavigatorHeaderPlacement(rowHeight: CGFloat)",
             to: "/// Shared one-row panel header.")
         #expect(modifier.contains("RafuMetrics.navigatorHeaderTopInset(rowHeight: rowHeight)"))
     }
 
+    /// The sidebar redesign: the four panel headers had an elevated slab, a
+    /// hairline, a leading icon and a close button that Files never had, so
+    /// they looked foreign. The header is now the Files look for all five.
+    @Test("The shared header is the quiet Files look: no slab, line, icon, or close")
+    func sharedHeaderIsQuiet() throws {
+        let source = try Self.source("Sources/RafuApp/Support/RafuWorkbenchStyles.swift")
+        let header = try Self.section(
+            of: source, from: "struct RafuUtilityPanelHeader<Context: View, Actions: View>",
+            to: "extension RafuUtilityPanelHeader where Context == EmptyView")
+        #expect(header.contains(".font(.system(size: 13, weight: .semibold))"))
+        #expect(header.contains(".truncationMode(.tail)"))
+        #expect(header.contains(".accessibilityAddTraits(.isHeader)"))
+        #expect(header.contains(".padding(.horizontal, RafuMetrics.sidebarTextInset)"))
+        #expect(header.contains(".background(WindowDragHandle())"))
+        // Nothing painted: a translucent sidebar base must show through.
+        #expect(!header.contains("elevatedBackground"))
+        #expect(!header.contains("sidebarBackground"))
+        #expect(!header.contains("RafuMetrics.hairline"))
+        #expect(!header.contains("Rectangle()"))
+        // No second sidebar toggle and no icon that repeats the rail.
+        #expect(!header.contains("xmark"))
+        #expect(!header.contains("onClose"))
+        #expect(!header.contains("Image(systemName:"))
+        #expect(RafuMetrics.sidebarTextInset == 10)
+    }
+
     @Test(
-        "Every rail panel's header uses the shared placement",
+        "Every rail panel's header is the shared header",
         arguments: WorkspaceNavigatorMode.allCases)
-    func everyPanelUsesSharedPlacement(mode: WorkspaceNavigatorMode) throws {
+    func everyPanelUsesSharedHeader(mode: WorkspaceNavigatorMode) throws {
         let source = try Self.source(Self.panelSourcePath(for: mode))
-        let usesSharedHeader = source.contains("RafuUtilityPanelHeader(")
-        let usesModifier = source.contains(".rafuNavigatorHeaderPlacement(rowHeight:")
-        #expect(usesSharedHeader || usesModifier, "\(mode.title) header is not placed")
-        // No panel aligns its header with its own hard-coded top padding.
+        #expect(source.contains("RafuUtilityPanelHeader("), "\(mode.title) header is not shared")
+        // No panel places or closes its header by hand.
         #expect(!source.contains(".padding(.top, 19)"), "\(mode.title)")
+        #expect(!source.contains(".rafuNavigatorHeaderPlacement(rowHeight:"), "\(mode.title)")
+        #expect(!source.contains("closeAccessibilityLabel"), "\(mode.title)")
     }
 
     @Test("The sidebar hosts exactly these panel views for the rail modes")

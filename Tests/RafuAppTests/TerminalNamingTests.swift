@@ -19,6 +19,14 @@ struct TerminalNamingTests {
         #expect(!TerminalNaming.isAutomaticGroupName(""))
     }
 
+    @Test("The Terminals header count is spoken as terminals, never legacy")
+    func terminalCountLabel() {
+        #expect(TerminalNaming.terminalCountLabel(0) == "0 terminals")
+        #expect(TerminalNaming.terminalCountLabel(1) == "1 terminal")
+        #expect(TerminalNaming.terminalCountLabel(3) == "3 terminals")
+        #expect(!TerminalNaming.terminalCountLabel(2).contains("legacy"))
+    }
+
     @Test("A group title resolves user group name, then pane name, then agent title")
     func resolvedGroupTitles() {
         typealias N = TerminalNaming

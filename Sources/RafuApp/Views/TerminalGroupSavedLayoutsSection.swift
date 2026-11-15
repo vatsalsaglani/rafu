@@ -17,6 +17,25 @@ nonisolated enum TerminalGroupSavedLayoutsPresentation {
         if isLoading { return .loading }
         return recordCount == 0 ? .empty : .records
     }
+
+    /// Whether the section is open. The user's own choice wins; with no
+    /// choice, an empty library starts collapsed (one quiet header line) and
+    /// a non-empty one starts open. A load error always opens it, so the
+    /// message is never hidden.
+    static func isExpanded(userChoice: Bool?, state: State) -> Bool {
+        if case .error = state { return true }
+        if let userChoice { return userChoice }
+        return state == .records
+    }
+
+    /// The stored per-window choice: "" (none), "open", or "closed".
+    static func userChoice(fromStored raw: String) -> Bool? {
+        switch raw {
+        case "open": true
+        case "closed": false
+        default: nil
+        }
+    }
 }
 
 /// The saved-layout library is injected as already-observed workspace state.
@@ -26,57 +45,34 @@ nonisolated enum TerminalGroupSavedLayoutsPresentation {
 /// Each row opens on double-click or Return; its "···" menu holds Open,
 /// Rename…, and Delete…. Delete keeps its own confirmation because it removes
 /// the saved layout from the library.
+///
+/// It is the Terminals panel's one pinned footer, so it keeps the hairline
+/// above it. Its header is one collapsible line with a count; an empty
+/// library starts collapsed, so it costs one line, not a permanent block.
 struct TerminalGroupSavedLayoutsSection: View {
     @Bindable var session: WorkspaceSession
     @Environment(\.rafuTheme) private var theme
     @State private var renamingID: SavedTerminalGroupID?
     @State private var renameText = ""
     @State private var deletionCandidate: SavedTerminalGroupRecord?
+    /// Per window, so two windows keep their own open/closed choice.
+    @SceneStorage("terminals.savedGroups.expanded") private var storedExpansion = ""
 
     var body: some View {
         let state = TerminalGroupSavedLayoutsPresentation.state(
             hasWorkspace: session.rootURL != nil, isLoading: session.isTerminalGroupStoreLoading,
             error: session.terminalGroupStoreError, recordCount: session.savedTerminalGroups.count)
-        VStack(alignment: .leading, spacing: RafuMetrics.space2) {
+        let isExpanded = TerminalGroupSavedLayoutsPresentation.isExpanded(
+            userChoice: TerminalGroupSavedLayoutsPresentation.userChoice(
+                fromStored: storedExpansion),
+            state: state)
+        VStack(alignment: .leading, spacing: RafuMetrics.space1) {
             Divider().overlay(theme.palette.borderSubtle)
-            Text("Saved Terminal Groups")
-                .font(.caption.weight(.semibold))
-                .padding(.horizontal, RafuMetrics.utilityBodyInset)
-
-            switch state {
-            case .error(let error):
-                stateRow(
-                    "Saved Terminal Groups could not be loaded: \(error)",
-                    symbol: "exclamationmark.triangle")
-            case .workspaceRequired:
-                stateRow("Open a workspace to use saved Terminal Groups.", symbol: "folder")
-            case .loading:
-                stateRow("Loading Saved Terminal Groups…", symbol: "clock")
-            case .empty:
-                stateRow("No saved Terminal Groups.", symbol: "bookmark")
-            case .records:
-                ScrollView {
-                    LazyVStack(spacing: RafuMetrics.space1) {
-                        ForEach(session.savedTerminalGroups, id: \.id) { record in
-                            SavedTerminalGroupRowView(
-                                record: record,
-                                isRenaming: renamingID == record.id,
-                                renameText: $renameText,
-                                isBusy: session.isTerminalGroupStoreMutationInFlight,
-                                open: { session.openSavedTerminalGroup(record.id) },
-                                beginRename: { beginRename(record) },
-                                commitRename: { commitRename(record.id) },
-                                cancelRename: cancelRename,
-                                requestDelete: { deletionCandidate = record }
-                            )
-                        }
-                    }
-                }
-                .frame(maxHeight: 180)
-            }
+            sectionHeader(isExpanded: isExpanded)
+            if isExpanded { content(state) }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, RafuMetrics.space2)
+        .padding(.bottom, RafuMetrics.space1)
         // `SavedTerminalGroupRecord` is not `Identifiable`, so this keeps the
         // Boolean presentation and reads the candidate inside.
         .sheet(
@@ -102,6 +98,67 @@ struct TerminalGroupSavedLayoutsSection: View {
         }
     }
 
+    /// One button for the whole header line: a 9 pt chevron, the title and
+    /// the plain count.
+    private func sectionHeader(isExpanded: Bool) -> some View {
+        let count = session.savedTerminalGroups.count
+        return Button {
+            storedExpansion = isExpanded ? "closed" : "open"
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(theme.palette.textSecondary)
+                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                    .accessibilityHidden(true)
+                RafuSidebarSectionHeader(title: "Saved Terminal Groups", count: count)
+            }
+            .padding(.horizontal, RafuMetrics.sidebarTextInset)
+            .frame(maxWidth: .infinity, minHeight: 24, alignment: .leading)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .help(isExpanded ? "Collapse Saved Terminal Groups" : "Expand Saved Terminal Groups")
+        .accessibilityLabel("Saved Terminal Groups, \(count)")
+        .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
+        .accessibilityAddTraits(.isHeader)
+    }
+
+    @ViewBuilder
+    private func content(_ state: TerminalGroupSavedLayoutsPresentation.State) -> some View {
+        switch state {
+        case .error(let error):
+            stateRow(
+                "Saved Terminal Groups could not be loaded: \(error)",
+                symbol: "exclamationmark.triangle")
+        case .workspaceRequired:
+            stateRow("Open a workspace to use saved Terminal Groups.", symbol: "folder")
+        case .loading:
+            stateRow("Loading Saved Terminal Groups…", symbol: "clock")
+        case .empty:
+            stateRow("Save a group's layout from its ⋯ menu.", symbol: "bookmark")
+        case .records:
+            ScrollView {
+                LazyVStack(spacing: RafuMetrics.space1) {
+                    ForEach(session.savedTerminalGroups, id: \.id) { record in
+                        SavedTerminalGroupRowView(
+                            record: record,
+                            isRenaming: renamingID == record.id,
+                            renameText: $renameText,
+                            isBusy: session.isTerminalGroupStoreMutationInFlight,
+                            open: { session.openSavedTerminalGroup(record.id) },
+                            beginRename: { beginRename(record) },
+                            commitRename: { commitRename(record.id) },
+                            cancelRename: cancelRename,
+                            requestDelete: { deletionCandidate = record }
+                        )
+                    }
+                }
+            }
+            .frame(maxHeight: 180)
+        }
+    }
+
     private func beginRename(_ record: SavedTerminalGroupRecord) {
         renameText = record.name.rawValue
         renamingID = record.id
@@ -121,8 +178,8 @@ struct TerminalGroupSavedLayoutsSection: View {
         Label(text, systemImage: symbol)
             .font(.caption)
             .foregroundStyle(theme.palette.textMuted)
-            .frame(maxWidth: .infinity, minHeight: 36, alignment: .center)
-            .padding(.horizontal, RafuMetrics.utilityBodyInset)
+            .frame(maxWidth: .infinity, minHeight: 26, alignment: .leading)
+            .padding(.horizontal, RafuMetrics.sidebarTextInset)
             .accessibilityLabel(text)
     }
 }
@@ -145,24 +202,33 @@ private struct SavedTerminalGroupRowView: View {
 
     var body: some View {
         HStack(spacing: RafuMetrics.space2) {
-            VStack(alignment: .leading, spacing: 2) {
-                if isRenaming {
-                    TextField("Saved layout name", text: $renameText)
-                        .textFieldStyle(.plain)
-                        .font(.caption.weight(.medium))
-                        .onSubmit(commitRename)
-                        .onExitCommand(perform: cancelRename)
-                } else {
-                    Text(record.name.rawValue)
-                        .font(.caption.weight(.medium))
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                }
-                Text(TerminalNaming.paneCountLabel(record.panes.count))
-                    .font(.caption2)
-                    .foregroundStyle(theme.palette.textMuted)
+            // A leading glyph in the 16 pt slot aligns the name with the
+            // terminal rows above. A saved layout is inert: one line.
+            Image(systemName: "rectangle.split.2x1")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(theme.palette.textSecondary)
+                .frame(width: 16)
+                .accessibilityHidden(true)
+            if isRenaming {
+                TextField("Saved layout name", text: $renameText)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12))
+                    .onSubmit(commitRename)
+                    .onExitCommand(perform: cancelRename)
+            } else {
+                Text(record.name.rawValue)
+                    .font(.system(size: 12))
+                    .foregroundStyle(theme.palette.textPrimary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .layoutPriority(1)
             }
             Spacer(minLength: 0)
+            Text(TerminalNaming.paneCountLabel(record.panes.count))
+                .font(.system(size: 11).monospacedDigit())
+                .foregroundStyle(theme.palette.textMuted)
+                .lineLimit(1)
+                .fixedSize()
             Menu {
                 Button("Open", action: open)
                     .disabled(isBusy)
@@ -184,8 +250,9 @@ private struct SavedTerminalGroupRowView: View {
             .help("Actions for \(record.name.rawValue)")
             .accessibilityLabel("Actions for \(record.name.rawValue)")
         }
-        .padding(.horizontal, RafuMetrics.utilityBodyInset)
-        .padding(.vertical, RafuMetrics.space1)
+        .padding(.leading, RafuMetrics.sidebarTextInset)
+        .padding(.trailing, RafuMetrics.space1)
+        .frame(minHeight: 26)
         .background(isHovering ? theme.palette.hover : Color.clear)
         .contentShape(.rect)
         .onHover { isHovering = $0 }

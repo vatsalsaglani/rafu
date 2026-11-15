@@ -152,7 +152,7 @@ nonisolated enum ProcessResourcePresentation {
         switch kind {
         case .terminalShell: "terminal"
         case .agent: "person.crop.rectangle.stack"
-        case .agentTerminal: "terminal.badge"
+        case .agentTerminal: AgentSymbols.agentTerminal
         case .git: "arrow.triangle.branch"
         case .languageServer: "cpu"
         case .other: "gearshape"
