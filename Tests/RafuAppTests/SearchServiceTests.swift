@@ -220,6 +220,34 @@ func workspaceSearchOverNestedTreeIsStable() async throws {
     #expect(result.groups.allSatisfy { $0.relativePath.isContiguousUTF8 })
 }
 
+@Test("A directory symlink listed before sibling directories does not hide the first sibling")
+func workspaceSearchSymlinkBeforeSiblingsKeepsEveryDirectory() async throws {
+    let root = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    var expected: [String] = []
+    for directory in 0..<2 {
+        let relativeDirectory = "Modul\(directory)"
+        try FileManager.default.createDirectory(
+            at: root.appending(path: relativeDirectory), withIntermediateDirectories: true)
+        for file in 0..<5 {
+            let path = "\(relativeDirectory)/Datei\(file).txt"
+            try Data("Nadel".utf8).write(to: root.appending(path: path))
+            expected.append(path)
+        }
+    }
+    // `Link` sorts before `Modul0` and points at a sibling directory.
+    try FileManager.default.createSymbolicLink(
+        atPath: root.appending(path: "Link").path, withDestinationPath: "Modul1")
+
+    let result = try await WorkspaceSearchService().search(
+        WorkspaceSearchRequest(rootURL: root, query: "Nadel", options: [.caseSensitive]))
+
+    #expect(Set(result.groups.map(\.relativePath)) == Set(expected))
+    #expect(result.groups.count == expected.count)
+    #expect(result.statistics.skippedSymlinks == 1)
+}
+
 private func temporaryDirectory() throws -> URL {
     let url = FileManager.default.temporaryDirectory.appending(
         path: UUID().uuidString,

@@ -195,6 +195,31 @@ func symbolIndexFallsBackForNonGitWorkspaces() async throws {
     #expect(excluded.isEmpty)
 }
 
+@Test("A directory symlink listed before sibling directories does not hide the first sibling")
+func symbolIndexSymlinkBeforeSiblingsKeepsEveryDirectory() async throws {
+    let root = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let fileManager = FileManager.default
+    for directory in 0..<2 {
+        try fileManager.createDirectory(
+            at: root.appending(path: "Modul\(directory)"), withIntermediateDirectories: true)
+        try write(
+            "def kennung\(directory)():\n    pass\n",
+            to: root.appending(path: "Modul\(directory)/app.py"))
+    }
+    // `Link` sorts before `Modul0` and points at a sibling directory.
+    try fileManager.createSymbolicLink(
+        atPath: root.appending(path: "Link").path, withDestinationPath: "Modul1")
+
+    let index = WorkspaceSymbolIndex()
+    await index.build(rootURL: root)
+
+    let first = try await index.query(term: "kennung0", limit: 10)
+    #expect(first.map(\.name) == ["kennung0"])
+    let second = try await index.query(term: "kennung1", limit: 10)
+    #expect(second.map(\.name) == ["kennung1"])
+}
+
 @Test("The index skips files above the byte cap before reading them")
 func symbolIndexEnforcesFileByteCap() async throws {
     let root = try makeTemporaryDirectory()
