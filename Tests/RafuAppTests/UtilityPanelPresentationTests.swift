@@ -44,7 +44,7 @@ struct UtilityPanelPresentationTests {
         // navigator mode is a peer in the SAME left sidebar pane as Files,
         // so it shares Files' own sidebar tone rather than the former
         // right-panel elevated card tone.
-        #expect(navigator.contains(".background(theme.palette.sidebarBackground)"))
+        #expect(navigator.contains(".frostSpikeFrame(theme.palette.sidebarBackground)"))
         #expect(navigator.contains("SourceControlPanelView(session: session)"))
         #expect(
             navigator.components(separatedBy: "RafuUtilityPanelHeader(").count - 1 == 1
