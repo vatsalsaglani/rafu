@@ -1,10 +1,9 @@
-import OSLog
 import RafuWidgetShared
 import SwiftUI
 import WidgetKit
 
-/// SPIKE (widget packaging): the WidgetKit extension entry point. Built as a
-/// SwiftPM executable and assembled into `Contents/PlugIns/*.appex` by
+/// The WidgetKit extension entry point. Built as a SwiftPM executable and
+/// assembled into `Contents/PlugIns/RafuWidgets.appex` by
 /// `script/build_and_run.sh`.
 @main
 struct RafuWidgetsBundle: WidgetBundle {
@@ -13,26 +12,31 @@ struct RafuWidgetsBundle: WidgetBundle {
     }
 }
 
-let widgetLog = Logger(subsystem: "dev.vatsalsaglani.rafu.widgets", category: "timeline")
-
 /// The app variant this extension belongs to, from its own bundle id, so
-/// Rafu Lightning's widget never reads the release app's snapshot.
+/// Rafu Lightning's widget never reads the release app's snapshot or opens
+/// the release app.
 enum WidgetHostApp {
+    static var bundleIdentifier: String? { Bundle.main.bundleIdentifier }
+
     static var name: String {
-        let id = Bundle.main.bundleIdentifier ?? ""
-        return id.hasPrefix("dev.vatsalsaglani.rafu.lightning") ? "Rafu Lightning" : "Rafu"
+        RafuDeepLink.scheme(forBundleIdentifier: bundleIdentifier) == RafuDeepLink.lightningScheme
+            ? "Rafu Lightning" : "Rafu"
+    }
+
+    /// `rafu://usage` or `rafu-lightning://usage`.
+    static var usageURL: URL {
+        RafuDeepLink.usageURL(scheme: RafuDeepLink.scheme(forBundleIdentifier: bundleIdentifier))
     }
 }
 
 struct UsageEntry: TimelineEntry {
     let date: Date
     let snapshot: WidgetUsageSnapshot?
-    let isPlaceholder: Bool
 }
 
 struct UsageTimelineProvider: TimelineProvider {
     func placeholder(in context: Context) -> UsageEntry {
-        UsageEntry(date: .now, snapshot: .sample(now: .now), isPlaceholder: true)
+        UsageEntry(date: .now, snapshot: .sample(now: .now))
     }
 
     func getSnapshot(in context: Context, completion: @escaping (UsageEntry) -> Void) {
@@ -40,30 +44,22 @@ struct UsageTimelineProvider: TimelineProvider {
             completion(placeholder(in: context))
             return
         }
-        completion(UsageEntry(date: .now, snapshot: loadSnapshot(), isPlaceholder: false))
+        completion(UsageEntry(date: .now, snapshot: loadSnapshot()))
     }
 
+    /// Entries at each moment the rings change without new data
+    /// (`WidgetTimelinePlan`). The app reloads the timeline when a shown
+    /// value changes.
     func getTimeline(in context: Context, completion: @escaping (Timeline<UsageEntry>) -> Void) {
-        let now = Date.now
         let snapshot = loadSnapshot()
-        // One entry now plus hourly entries so the countdown and staleness
-        // age without a reload. The app reloads on real changes.
-        let entries = (0..<6).map { hour in
-            UsageEntry(
-                date: now.addingTimeInterval(Double(hour) * 3600), snapshot: snapshot,
-                isPlaceholder: false)
+        let entries = WidgetTimelinePlan.entryDates(snapshot: snapshot, now: .now).map {
+            UsageEntry(date: $0, snapshot: snapshot)
         }
         completion(Timeline(entries: entries, policy: .atEnd))
     }
 
     private func loadSnapshot() -> WidgetUsageSnapshot? {
-        let app = WidgetHostApp.name
-        let url = WidgetSnapshotStore.fileURL(appName: app)
-        let snapshot = WidgetSnapshotStore.read(appName: app)
-        widgetLog.notice(
-            "snapshot read app=\(app, privacy: .public) path=\(url.path, privacy: .public) ok=\(snapshot != nil, privacy: .public) home=\(NSHomeDirectory(), privacy: .public)"
-        )
-        return snapshot
+        WidgetSnapshotStore.read(appName: WidgetHostApp.name)
     }
 }
 
@@ -73,6 +69,7 @@ struct UsageRingsWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: Self.kind, provider: UsageTimelineProvider()) { entry in
             UsageRingsView(entry: entry)
+                .widgetURL(WidgetHostApp.usageURL)
                 .containerBackground(for: .widget) { Color(nsColor: .windowBackgroundColor) }
         }
         .configurationDisplayName("Agent usage rings")

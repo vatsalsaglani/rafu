@@ -715,6 +715,28 @@ final class NotchCompanionModel: NSObject {
         if section == .usage { refreshUsage() }
     }
 
+    /// Shows the usage surface for a `rafu://usage` widget link: the menu
+    /// bar card when the usage glance is in the menu bar, else the notch or
+    /// island panel on its Usage section, else Settings ▸ Usage
+    /// (`UsageDeepLinkTarget`). Presentation only: it reads usage
+    /// (TTL-gated) and never starts a process.
+    func revealUsage(openSettings: @MainActor () -> Void) {
+        let target = UsageDeepLinkTarget.resolve(
+            hasMenuBarItem: usageMenuBarItem != nil, hasPanel: panel != nil,
+            panelOffersUsage: visibleSections.contains(.usage))
+        switch target {
+        case .menuBarCard:
+            usageMenuBarItem?.revealCard()
+            select(.usage, host: .menuBar)
+        case .companionPanel:
+            select(.usage)
+            if hoverState != .pinned { clicked() }
+            refreshUsage()
+        case .settings:
+            openSettings()
+        }
+    }
+
     /// The menu bar card opens: Up next first when something waits for
     /// the person (`CompanionMenuSelection.initial`), and bells now land
     /// in its feed. Called by `UsageMenuBarItem` before the popover shows.
@@ -1119,7 +1141,12 @@ final class NotchCompanionModel: NSObject {
         let failed = fresh.isEmpty && !merged.staleProviderIDs.isEmpty
         usageSchedule.finish(at: usageNow(), succeeded: !failed)
         rearmUsageWake()
-        // Share the result with the WidgetKit extension.
+        publishWidgetSnapshot()
+    }
+
+    /// Shares the current usage and the ring settings with the WidgetKit
+    /// extension. It reloads the widget only when a shown value changed.
+    private func publishWidgetSnapshot() {
         widgetSnapshotPublisher.publish(
             snapshots: usageSnapshots, observedAt: usageObservedAt,
             stale: usageStaleProviderIDs, mode: usageDisplayMode, palette: usageRingPalette,
@@ -1130,12 +1157,14 @@ final class NotchCompanionModel: NSObject {
         guard mode != usageDisplayMode else { return }
         usageDisplayMode = mode
         usageDisplayModeStore.setMode(mode)
+        publishWidgetSnapshot()
     }
 
     func setUsageRingPalette(_ palette: UsageRingPalette) {
         guard palette != usageRingPalette else { return }
         usageRingPalette = palette
         usageRingPaletteStore.setPalette(palette)
+        publishWidgetSnapshot()
     }
 
     /// Everything one provider card needs, derived from the last refresh.

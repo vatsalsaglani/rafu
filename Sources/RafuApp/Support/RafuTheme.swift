@@ -225,6 +225,23 @@ nonisolated struct RafuTheme: Decodable, Sendable {
         return .monospacedSystemFont(ofSize: size, weight: weight)
     }
 
+    /// Status colours for a theme that does not set them.
+    static let defaultErrorHex = "#E06C75"
+    static let defaultWarningHex = "#E8894A"
+    static let defaultInfoHex = "#82A7F0"
+    static let defaultSuccessHex = "#7CC08A"
+
+    /// The usage ring and warning colours as hex, for the widget snapshot
+    /// (the extension never parses theme JSON). The same tokens and
+    /// fallbacks `palette` resolves.
+    var widgetInkSet: WidgetUsageSnapshot.InkSet {
+        WidgetUsageSnapshot.InkSet(
+            accent: ui.accent, info: ui.info ?? Self.defaultInfoHex,
+            success: ui.success ?? Self.defaultSuccessHex,
+            warning: ui.warning ?? Self.defaultWarningHex,
+            critical: ui.error ?? Self.defaultErrorHex)
+    }
+
     private static func makePalette(
         ui: UIColors,
         editor: EditorColors,
@@ -236,10 +253,10 @@ nonisolated struct RafuTheme: Decodable, Sendable {
             color(hex ?? fallback)
         }
 
-        let errorHex = ui.error ?? "#E06C75"
-        let warningHex = ui.warning ?? "#E8894A"
-        let infoHex = ui.info ?? "#82A7F0"
-        let successHex = ui.success ?? "#7CC08A"
+        let errorHex = ui.error ?? defaultErrorHex
+        let warningHex = ui.warning ?? defaultWarningHex
+        let infoHex = ui.info ?? defaultInfoHex
+        let successHex = ui.success ?? defaultSuccessHex
         let accentHex = ui.accent
 
         return RafuThemePalette(
