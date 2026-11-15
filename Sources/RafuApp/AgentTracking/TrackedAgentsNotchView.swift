@@ -29,7 +29,7 @@ struct TrackedAgentsNotchView: View {
 
 /// One outside agent: vendor icon, folder name, and state as a glyph plus a
 /// word, so state never rests on colour alone.
-private struct TrackedAgentNotchRow: View {
+struct TrackedAgentNotchRow: View {
     let row: NotchAgentRow
     @Environment(\.rafuTheme) private var theme
 

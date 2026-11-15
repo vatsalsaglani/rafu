@@ -286,3 +286,34 @@ nonisolated struct NotchWindowAgents: Equatable, Sendable {
             ensembles: ensembles, looseAgents: NotchAgentRow.byUrgency(loose))
     }
 }
+
+/// Up next's compact rows. Pure.
+nonisolated enum CompanionUpNextContent {
+    /// `upNext` without the sessions that already show a feed card, in the
+    /// given (urgency) order.
+    static func waitingRows(_ upNext: [NotchAgentRow], feedSessionIDs: Set<UUID>)
+        -> [NotchAgentRow]
+    {
+        upNext.filter { !feedSessionIDs.contains($0.id) }
+    }
+}
+
+/// What the Agents tab shows: the list, or one empty-state line. Pure.
+nonisolated enum CompanionAgentsContent: Equatable, Sendable {
+    case list
+    case empty(String)
+
+    /// The list when a window matches, or when agents outside Rafu run and
+    /// no filter is typed (outside agents are not filtered). Otherwise the
+    /// filter's no-match line, or the host's empty line.
+    static func resolve(editorCount: Int, outsideCount: Int, query: String, host: CompanionHost)
+        -> CompanionAgentsContent
+    {
+        let filtering = !query.trimmingCharacters(in: .whitespaces).isEmpty
+        if editorCount > 0 || (outsideCount > 0 && !filtering) { return .list }
+        if filtering { return .empty("No editors match “\(query)”") }
+        return host == .menuBar
+            ? .empty("No agents running. Start one in a terminal or an Ensemble.")
+            : .empty("No open editors")
+    }
+}

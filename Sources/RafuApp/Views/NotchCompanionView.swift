@@ -340,25 +340,31 @@ struct CompanionIslandWingsView: View {
     }
 }
 
-/// The open panel: a tab row (one tab per section the person turned on, plus
-/// a pin button) over the selected section's content. Fixed height, set by
-/// the window frame; each section scrolls inside it. On an island the panel
-/// offers Usage only, so it has no tab row; the Usage header carries a close
-/// button instead.
-struct CompanionPanelView: View {
+/// One section host for every companion surface (`CompanionHost`): a tab
+/// row over the selected section's content. The notch panel, the island
+/// card, and the menu bar card all use it, so each section has one view.
+/// Fixed height, set by the window or popover; each section scrolls inside
+/// it. The island card offers Usage only, so it has no tab row; the Usage
+/// header carries its close button instead. The notch panel's tab row ends
+/// in the pin button; the menu bar card's ends in a close button.
+struct CompanionSectionHost: View {
     let model: NotchCompanionModel
+    let host: CompanionHost
+    /// Closes the menu bar card. `nil` on the notch panel and island card,
+    /// which close through the model.
+    var close: (@MainActor () -> Void)? = nil
 
     var body: some View {
         VStack(spacing: 0) {
-            if model.surface != .island {
-                CompanionTabBar(model: model)
+            if host != .islandCard {
+                CompanionTabBar(model: model, host: host, close: close)
             }
             Group {
-                switch model.selectedSection {
-                case .ensembles: CompanionEnsemblesSectionView(model: model)
-                case .upNext: CompanionUpNextSectionView(model: model)
+                switch model.selection(for: host) {
+                case .ensembles: CompanionEnsemblesSectionView(model: model, host: host)
+                case .upNext: CompanionUpNextSectionView(model: model, host: host)
                 case .nowPlaying: CompanionNowPlayingSectionView(model: model)
-                case .usage: CompanionUsageSectionView(model: model)
+                case .usage: CompanionUsageSectionView(model: model, host: host)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -367,20 +373,65 @@ struct CompanionPanelView: View {
     }
 }
 
+/// The open notch panel (or island card): the shared section host.
+struct CompanionPanelView: View {
+    let model: NotchCompanionModel
+
+    var body: some View {
+        CompanionSectionHost(model: model, host: CompanionHost.panel(on: model.surface))
+    }
+}
+
 /// Cider's pill picker, as a row of tab buttons. Each tab is a real button
-/// with a title for VoiceOver; counts are text, not colour alone.
+/// with a title for VoiceOver; counts are text, not colour alone. Left and
+/// Right arrows move between tabs; on the menu bar card Command-1 to
+/// Command-3 select a tab.
 struct CompanionTabBar: View {
     let model: NotchCompanionModel
+    let host: CompanionHost
+    var close: (@MainActor () -> Void)? = nil
     @Environment(\.rafuTheme) private var theme
 
     private var ink: NotchInk { NotchInk(theme: theme) }
 
     var body: some View {
+        let sections = model.sections(for: host)
         HStack(spacing: RafuMetrics.space1) {
-            ForEach(model.visibleSections) { section in
-                tab(section)
+            ForEach(Array(sections.enumerated()), id: \.element) { index, section in
+                tab(section, index: index)
             }
             Spacer(minLength: RafuMetrics.space2)
+            trailingControl
+        }
+        .padding(.horizontal, RafuMetrics.space3)
+        .padding(.vertical, RafuMetrics.space2)
+        .onKeyPress(.leftArrow) { step(-1, in: sections) }
+        .onKeyPress(.rightArrow) { step(1, in: sections) }
+    }
+
+    private func step(_ offset: Int, in sections: [NotchSection]) -> KeyPress.Result {
+        let next = CompanionMenuSelection.step(
+            from: model.selection(for: host), in: sections, by: offset)
+        model.select(next, host: host)
+        return .handled
+    }
+
+    @ViewBuilder
+    private var trailingControl: some View {
+        if host == .menuBar {
+            Button {
+                close?()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(ink.secondary)
+                    .frame(width: 24, height: 24)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Close")
+            .accessibilityLabel("Close")
+        } else {
             Button {
                 model.clicked()
             } label: {
@@ -394,15 +445,13 @@ struct CompanionTabBar: View {
             .help(model.hoverState == .pinned ? "Unpin the notch" : "Pin the notch open")
             .accessibilityLabel(model.hoverState == .pinned ? "Unpin notch" : "Pin notch")
         }
-        .padding(.horizontal, RafuMetrics.space3)
-        .padding(.vertical, RafuMetrics.space2)
     }
 
-    private func tab(_ section: NotchSection) -> some View {
-        let selected = model.selectedSection == section
+    private func tab(_ section: NotchSection, index: Int) -> some View {
+        let selected = model.selection(for: host) == section
         let badge = badgeText(for: section)
         return Button {
-            model.select(section)
+            model.select(section, host: host)
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: section.symbol)
@@ -427,6 +476,7 @@ struct CompanionTabBar: View {
             .contentShape(Capsule(style: .continuous))
         }
         .buttonStyle(.plain)
+        .modifier(CompanionTabShortcut(index: index, enabled: host == .menuBar))
         .accessibilityLabel(section.title + (badge.map { ", " + $0.spoken } ?? ""))
         .accessibilityAddTraits(
             selected ? AccessibilityTraits([.isButton, .isSelected]) : AccessibilityTraits.isButton)
@@ -445,11 +495,27 @@ struct CompanionTabBar: View {
             return live > 0
                 ? Badge(text: "\(live)", spoken: "\(live) running", isAttention: false) : nil
         case .upNext:
-            let waiting = model.upNextRows.count
+            let waiting = model.upNextRows(for: host).count
             return waiting > 0
                 ? Badge(text: "\(waiting)", spoken: "\(waiting) waiting", isAttention: true) : nil
         case .nowPlaying, .usage:
             return nil
+        }
+    }
+}
+
+/// Command-1 to Command-9 on a tab, only on the menu bar card, whose
+/// popover is key while open; the notch panel never takes the shortcut.
+private struct CompanionTabShortcut: ViewModifier {
+    let index: Int
+    let enabled: Bool
+
+    func body(content: Content) -> some View {
+        if enabled, index < 9 {
+            content.keyboardShortcut(
+                KeyEquivalent(Character(String(index + 1))), modifiers: .command)
+        } else {
+            content
         }
     }
 }

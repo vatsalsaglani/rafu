@@ -2,8 +2,10 @@ import Foundation
 
 /// The sections of the open notch panel, in tab order. The set mirrors
 /// Cider's notch (agents, to-do, now playing, usage) with Rafu's own content:
-/// Ensembles instead of agents, and an "Up next" attention queue instead of
-/// to-dos.
+/// an "Agents" tab with the open windows, their Ensembles, and agents outside
+/// Rafu, and an "Up next" attention queue instead of to-dos. The `ensembles`
+/// case keeps its raw value, so the stored flags and the remembered tab
+/// survive the "Agents" title.
 nonisolated enum NotchSection: String, CaseIterable, Identifiable, Sendable {
     case ensembles
     case upNext
@@ -14,7 +16,7 @@ nonisolated enum NotchSection: String, CaseIterable, Identifiable, Sendable {
 
     var title: String {
         switch self {
-        case .ensembles: "Ensembles"
+        case .ensembles: "Agents"
         case .upNext: "Up next"
         case .nowPlaying: "Now Playing"
         case .usage: "Usage"
@@ -23,7 +25,7 @@ nonisolated enum NotchSection: String, CaseIterable, Identifiable, Sendable {
 
     var symbol: String {
         switch self {
-        case .ensembles: "square.stack.3d.up"
+        case .ensembles: "point.3.connected.trianglepath.dotted"
         case .upNext: "tray.full"
         case .nowPlaying: "music.note"
         case .usage: "gauge.with.dots.needle.33percent"
@@ -33,7 +35,8 @@ nonisolated enum NotchSection: String, CaseIterable, Identifiable, Sendable {
     /// One-line explanation for Settings.
     var summary: String {
         switch self {
-        case .ensembles: "Open Ensembles and the agents running in them."
+        case .ensembles:
+            "Open windows, their Ensembles, and the agents running in them and outside Rafu."
         case .upNext: "Agents that need you or have a reply ready, with quick replies."
         case .nowPlaying: "What is playing on this Mac, with transport controls."
         case .usage: "Agent usage limits and token totals."
@@ -44,7 +47,7 @@ nonisolated enum NotchSection: String, CaseIterable, Identifiable, Sendable {
     var defaultsKey: String { "notchSection.\(rawValue)" }
 
     /// The sections to offer given each section's flag. Never empty: with
-    /// every flag off the panel would have no content, so Ensembles stays.
+    /// every flag off the panel would have no content, so Agents stays.
     static func visible(flags: [NotchSection: Bool]) -> [NotchSection] {
         let shown = allCases.filter { flags[$0] ?? true }
         return shown.isEmpty ? [.ensembles] : shown
@@ -57,7 +60,25 @@ nonisolated enum NotchSection: String, CaseIterable, Identifiable, Sendable {
     static func offered(_ visible: [NotchSection], on surface: NotchCompanionSurface?)
         -> [NotchSection]
     {
-        surface == .island ? [.usage] : visible
+        offered(visible, host: CompanionHost.panel(on: surface))
+    }
+
+    /// The sections that `host` offers:
+    /// - the notch panel (or the plain-display pill): `visible` unchanged;
+    /// - the island card: Usage only (ADR 0037, decision 4);
+    /// - the menu bar card: Agents, Up next, and Usage from `visible`, never
+    ///   Now Playing, and always Usage, because the status item is the usage
+    ///   glance.
+    static func offered(_ visible: [NotchSection], host: CompanionHost) -> [NotchSection] {
+        switch host {
+        case .notchPanel:
+            return visible
+        case .islandCard:
+            return [.usage]
+        case .menuBar:
+            let menu: Set<NotchSection> = [.ensembles, .upNext, .usage]
+            return allCases.filter { menu.contains($0) && ($0 == .usage || visible.contains($0)) }
+        }
     }
 
     /// The tab to show: the remembered one when it is still offered,
@@ -65,6 +86,65 @@ nonisolated enum NotchSection: String, CaseIterable, Identifiable, Sendable {
     static func selection(remembered: NotchSection?, visible: [NotchSection]) -> NotchSection {
         if let remembered, visible.contains(remembered) { return remembered }
         return visible.first ?? .ensembles
+    }
+}
+
+/// The surface that shows the companion's sections. One set of section views
+/// serves every host (`CompanionSectionHost`); the host decides which
+/// sections it offers and which control closes it.
+nonisolated enum CompanionHost: Equatable, Sendable {
+    /// The open notch panel, or the panel under the plain-display pill.
+    case notchPanel
+    /// The card that opens from the capsule below a system Dynamic Island.
+    case islandCard
+    /// The popover of the usage status item in the menu bar.
+    case menuBar
+
+    /// The host of the open companion panel on `surface`.
+    static func panel(on surface: NotchCompanionSurface?) -> CompanionHost {
+        surface == .island ? .islandCard : .notchPanel
+    }
+
+    /// The host that shows outside agents (seen only through hooks) that
+    /// need the person, in its Up next section: the surface in use, never
+    /// two at once. The menu bar card when the usage glance is in the menu
+    /// bar; the notch panel on a notched Mac or the plain-display pill;
+    /// nothing on an island Mac with the pill below the island, whose card
+    /// shows Usage only.
+    static func outsideNotices(
+        surface: NotchCompanionSurface?, position: UsageGlancePosition
+    ) -> CompanionHost? {
+        switch surface {
+        case .island: position == .menuBar ? .menuBar : nil
+        case .notch, .pill: .notchPanel
+        case nil: nil
+        }
+    }
+}
+
+/// The tab the menu bar card shows when it opens. Pure.
+nonisolated enum CompanionMenuSelection {
+    /// Up next when something waits for the person, so the card opens on
+    /// what needs them; otherwise the remembered tab while it is offered;
+    /// otherwise the first offered section.
+    static func initial(
+        remembered: NotchSection?, offered: [NotchSection], attention: Int
+    ) -> NotchSection {
+        if attention > 0, offered.contains(.upNext) { return .upNext }
+        return NotchSection.selection(remembered: remembered, visible: offered)
+    }
+
+    /// The tab `offset` places from `current` in `offered`, kept at the
+    /// ends (Left on the first tab stays there). An unknown `current`
+    /// gives the first tab.
+    static func step(from current: NotchSection, in offered: [NotchSection], by offset: Int)
+        -> NotchSection
+    {
+        guard let index = offered.firstIndex(of: current) else {
+            return offered.first ?? current
+        }
+        let next = min(max(index + offset, 0), offered.count - 1)
+        return offered[next]
     }
 }
 
@@ -105,6 +185,7 @@ nonisolated struct NotchDisplayPreferenceStore: Sendable {
     static let musicConnectedKey = "notchNowPlayingConnected"
     static let systemNowPlayingKey = "notchNowPlayingSystemMedia"
     static let usageGlancePositionKey = "notchUsageGlancePosition"
+    static let menuBarSelectedSectionKey = "menuBarCompanionSection"
 
     private let suiteName: String?
 
@@ -166,6 +247,16 @@ nonisolated struct NotchDisplayPreferenceStore: Sendable {
 
     func setSelectedSection(_ section: NotchSection) {
         defaults.set(section.rawValue, forKey: Self.selectedSectionKey)
+    }
+
+    /// The menu bar card's own remembered tab, apart from the notch's.
+    func menuBarSelectedSection() -> NotchSection? {
+        defaults.string(forKey: Self.menuBarSelectedSectionKey).flatMap(
+            NotchSection.init(rawValue:))
+    }
+
+    func setMenuBarSelectedSection(_ section: NotchSection) {
+        defaults.set(section.rawValue, forKey: Self.menuBarSelectedSectionKey)
     }
 
     /// The person asked Rafu to read Music and Spotify. Until then Rafu sends

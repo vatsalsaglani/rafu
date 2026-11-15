@@ -1,39 +1,51 @@
 import AppKit
 import SwiftUI
 
-// The four sections of the open notch panel. Each reads only
-// `NotchCompanionModel` and scrolls inside the panel's fixed height; none
+// The sections of the companion (`CompanionSectionHost`). Each reads only
+// `NotchCompanionModel` and scrolls inside its host's fixed height; none
 // starts a process, sends input, or transmits anything on its own.
 
-// MARK: - Ensembles
+// MARK: - Agents
 
-/// Open windows, each with its open Ensembles and the agents running in them
-/// (and agents in terminals outside any Ensemble). Replaces Cider's Agents
-/// tab: Rafu's agents live in Ensemble nodes. Every row is a button that
-/// takes the person there.
+/// The "Agents" tab: open windows, each with its open Ensembles and the
+/// agents running in them (and agents in terminals outside any Ensemble),
+/// then agents outside Rafu seen through hooks. Every Rafu row is a button
+/// that takes the person there.
 struct CompanionEnsemblesSectionView: View {
     let model: NotchCompanionModel
+    var host: CompanionHost = .notchPanel
     @Environment(\.rafuTheme) private var theme
 
     private var ink: NotchInk { NotchInk(theme: theme) }
 
     var body: some View {
+        let content = CompanionAgentsContent.resolve(
+            editorCount: model.visibleEditorRows.count,
+            outsideCount: model.externalAgentRows.count,
+            query: model.searchQuery, host: host)
         VStack(spacing: 0) {
             if model.isSearchFieldVisible {
                 CompanionSearchFieldView(model: model)
             }
-            if model.visibleEditorRows.isEmpty {
-                Text(emptyStateText)
-                    .font(.system(size: 11))
-                    .foregroundStyle(ink.muted)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
+            switch content {
+            case .empty(let text):
+                VStack(spacing: RafuMetrics.space2) {
+                    Text(text)
+                        .font(.system(size: 11))
+                        .foregroundStyle(ink.muted)
+                        .multilineTextAlignment(.center)
+                    CompanionTrackingHintView(model: model, host: host)
+                }
+                .padding(.horizontal, RafuMetrics.space4)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            case .list:
                 ScrollView(.vertical) {
                     VStack(alignment: .leading, spacing: RafuMetrics.space3) {
                         ForEach(model.visibleEditorRows) { row in
                             CompanionWindowGroupView(model: model, row: row)
                         }
                         TrackedAgentsNotchView(model: model)
+                        CompanionTrackingHintView(model: model, host: host)
                     }
                     .padding(.horizontal, RafuMetrics.space3)
                     .padding(.bottom, RafuMetrics.space3)
@@ -42,11 +54,36 @@ struct CompanionEnsemblesSectionView: View {
                 .scrollIndicators(.automatic)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
+}
 
-    private var emptyStateText: String {
-        guard !model.searchQuery.isEmpty else { return "No open editors" }
-        return "No editors match “\(model.searchQuery)”"
+/// The menu bar card's one-line hint while Activity tracking is off: agents
+/// outside Rafu, their sub-agents, and refresh after a turn need it. Hidden
+/// on the notch, and once any provider is connected.
+struct CompanionTrackingHintView: View {
+    let model: NotchCompanionModel
+    let host: CompanionHost
+    @Environment(\.rafuTheme) private var theme
+    @Environment(\.openSettings) private var openSettings
+
+    var body: some View {
+        if host == .menuBar, AgentActivityStore.shared.connectedProviders.isEmpty {
+            HStack(spacing: RafuMetrics.space2) {
+                Text("Connect Activity tracking to see agents outside Rafu and their sub-agents.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(NotchInk(theme: theme).muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("Connect…") {
+                    SettingsPaneRouter.shared.request(.agents)
+                    NSApp.activate()
+                    openSettings()
+                }
+                .buttonStyle(RafuSecondaryButtonStyle(compact: true))
+                .help("Open Settings ▸ Agents to connect Activity tracking")
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 }
 
@@ -200,17 +237,19 @@ struct CompanionAgentRowView: View {
 
 /// Cider's To-do, repurposed: the attention queue. Cards for sessions with a
 /// pending feed entry (with inline reply), then compact rows for any other
-/// agent that needs you or has a reply ready. Opening one clears it.
+/// agent that needs you or has a reply ready, most urgent first. On the
+/// surface in use (`CompanionHost.outsideNotices`) the rows include agents
+/// outside Rafu, as information only. Opening a Rafu row clears it.
 struct CompanionUpNextSectionView: View {
     let model: NotchCompanionModel
+    var host: CompanionHost = .notchPanel
     @Environment(\.rafuTheme) private var theme
 
     private var ink: NotchInk { NotchInk(theme: theme) }
 
     var body: some View {
-        let waiting = model.upNextRows.filter { row in
-            !model.feedItems.contains { $0.sessionID == row.id }
-        }
+        let waiting = CompanionUpNextContent.waitingRows(
+            model.upNextRows(for: host), feedSessionIDs: Set(model.feedItems.map(\.sessionID)))
         if model.feedItems.isEmpty && waiting.isEmpty {
             VStack(spacing: RafuMetrics.space2) {
                 RafuMascotView(
@@ -233,7 +272,11 @@ struct CompanionUpNextSectionView: View {
                     if !waiting.isEmpty {
                         VStack(alignment: .leading, spacing: 2) {
                             ForEach(waiting) { row in
-                                CompanionAgentRowView(model: model, row: row)
+                                if row.windowID == nil {
+                                    TrackedAgentNotchRow(row: row)
+                                } else {
+                                    CompanionAgentRowView(model: model, row: row)
+                                }
                             }
                         }
                         .padding(.horizontal, RafuMetrics.space3)
@@ -406,9 +449,9 @@ struct CompanionNowPlayingSectionView: View {
 /// explanation live.
 struct CompanionUsageSectionView: View {
     let model: NotchCompanionModel
-    /// Closes the surface that hosts this section (the menu bar popover).
-    /// `nil` on the island card, which closes through the model.
-    var onClose: (@MainActor () -> Void)? = nil
+    /// The island card has no tab row, so only there does this header carry
+    /// a close button. The menu bar card closes from its tab row.
+    var host: CompanionHost = .notchPanel
     @Environment(\.rafuTheme) private var theme
     @Environment(\.openSettings) private var openSettings
 
@@ -435,12 +478,11 @@ struct CompanionUsageSectionView: View {
                 .disabled(model.isUsageRefreshing)
                 .help("Refresh usage")
                 .accessibilityLabel("Refresh usage")
-                // An island panel or the menu bar popover has no tab row and
-                // no pin, so the close control lives here; a tap on the
-                // capsule or the status item also closes it.
-                if onClose != nil || model.surface == .island {
+                // The island card has no tab row and no pin, so the close
+                // control lives here; a tap on the capsule also closes it.
+                if host == .islandCard {
                     Button {
-                        if let onClose { onClose() } else { model.escapePressed() }
+                        model.escapePressed()
                     } label: {
                         Image(systemName: "xmark")
                             .font(.system(size: 11, weight: .medium))

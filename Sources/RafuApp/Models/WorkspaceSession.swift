@@ -1094,11 +1094,13 @@ final class WorkspaceSession {
             // attention feed whenever its panel is open — pinned, or peeking
             // with hover-to-open on — and otherwise spawns the separate v1
             // drop-down; a bell never produces both. An island panel shows
-            // Usage only, so there every bell takes the drop-down.
+            // Usage only, so there every bell takes the drop-down — unless
+            // the menu bar card is open, which then takes the bell.
             let arbitration = CompanionHoverPolicy.companionArbitration(
                 hoverState: NotchCompanionModel.shared.hoverState,
                 peekShowsPanel: NotchCompanionModel.shared.opensOnHover,
-                feedAvailable: NotchCompanionModel.shared.isAttentionFeedAvailable)
+                feedAvailable: NotchCompanionModel.shared.isAttentionFeedAvailable,
+                menuPopoverShown: NotchCompanionModel.shared.isMenuPopoverShown)
             if arbitration.routeToFeed {
                 NotchCompanionModel.shared.pushFeedItem(
                     CompanionFeedItem(

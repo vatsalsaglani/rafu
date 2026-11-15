@@ -22,10 +22,10 @@ struct NotchSettingsSection: View {
 
     private var footerText: String {
         let base =
-            "Choose the sections the notch panel offers. Ensembles stays on if you turn every section off. Now Playing reads system media through the bundled adapter; with that off, it reads Music and Spotify only and asks macOS for permission the first time you connect it."
+            "Choose the sections the notch panel offers. Agents stays on if you turn every section off. Now Playing reads system media through the bundled adapter; with that off, it reads Music and Spotify only and asks macOS for permission the first time you connect it."
         guard isIsland else { return base }
         return base
-            + " On a Mac with a Dynamic Island, the companion shows Usage only: as a small pill below the island, or as an item in the menu bar. A click or a tap on either opens the usage details."
+            + " On a Mac with a Dynamic Island, the companion is a small pill below the island or an item in the menu bar. The pill opens usage details only. The menu bar item opens a card with Agents, Up next, and Usage, and shows how many agents need you."
     }
 
     var body: some View {
