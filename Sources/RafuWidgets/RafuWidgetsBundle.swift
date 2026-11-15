@@ -127,9 +127,14 @@ struct UsageBoardWidget: Widget {
     static let kind = "dev.vatsalsaglani.rafu.widgets.board"
 
     static var families: [WidgetFamily] {
-        if #available(macOS 27.0, *) {
-            return [.systemExtraLarge, .systemExtraLargePortrait]
-        }
+        // `systemExtraLargePortrait` exists for macOS only in the macOS 27
+        // SDK (Swift 6.4 toolchains). The macOS 26 SDK marks it unavailable,
+        // so a runtime check alone does not compile there (CI, release).
+        #if compiler(>=6.4)
+            if #available(macOS 27.0, *) {
+                return [.systemExtraLarge, .systemExtraLargePortrait]
+            }
+        #endif
         return [.systemExtraLarge]
     }
 

@@ -20,9 +20,12 @@ struct UsageBoardView: View {
     }
 
     private var isPortrait: Bool {
-        if #available(macOS 27.0, *) {
-            return family == .systemExtraLargePortrait
-        }
+        // See `UsageBoardWidget.families`: macOS 27 SDK only.
+        #if compiler(>=6.4)
+            if #available(macOS 27.0, *) {
+                return family == .systemExtraLargePortrait
+            }
+        #endif
         return false
     }
 
