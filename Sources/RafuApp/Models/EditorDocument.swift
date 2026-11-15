@@ -348,6 +348,11 @@ final class EditorDocument: Identifiable {
         isGuardOverridden = true
     }
 
+    /// How many `editDeltas()` subscribers are registered right now. A test
+    /// seam: a test waits for its subscriber to register before it records a
+    /// delta, instead of sleeping for a guessed time.
+    var editDeltaSubscriberCountForTesting: Int { editDeltaContinuations.count }
+
     /// Mints a fresh multicast stream of this document's edit deltas. Each
     /// call registers a new subscriber under its own id; the stream ends
     /// when the subscriber's consuming task is cancelled. Used by

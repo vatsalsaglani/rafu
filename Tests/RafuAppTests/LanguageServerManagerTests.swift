@@ -226,22 +226,6 @@ private actor TestSnapshotSource {
     }
 }
 
-/// Polls `predicate` on a short real sleep between checks — appropriate for
-/// waiting on a background timer/watchdog task's *real* wall-clock delay,
-/// unlike a tight `Task.yield()` spin (which suits near-instantaneous
-/// cross-task signaling, not a `Task.sleep`-based timer).
-private func waitUntil(
-    timeout: Duration = .seconds(2), pollInterval: Duration = .milliseconds(5),
-    _ predicate: () async -> Bool
-) async -> Bool {
-    let deadline = ContinuousClock.now.advanced(by: timeout)
-    while ContinuousClock.now < deadline {
-        if await predicate() { return true }
-        try? await Task.sleep(for: pollInterval)
-    }
-    return await predicate()
-}
-
 // MARK: - Lazy start
 
 @Test("ensureSession spawns lazily once, then reuses the live session")
@@ -421,14 +405,13 @@ func fastCrashesEscalateToManualRestart() async {
     // Measured directly under this file's full-suite parallel run, a single
     // one of these round trips can take from single-digit milliseconds up
     // to several hundred milliseconds under ordinary cooperative-thread-pool
-    // contention — with four crashes chained in one test, `waitUntil`'s
-    // 2-second default is not always enough headroom under heavier load,
-    // which is what previously made this specific test intermittently show
+    // contention — with four crashes chained in one test, a short fixed
+    // deadline is not always enough headroom under heavier load, which is
+    // what previously made this specific test intermittently show
     // "Expectation failed" with no actual product defect (the manager's own
     // state was always correct; only this test's `#expect` outraced its
-    // async signal). `crashRoundTripTimeout` gives every poll in this test
-    // real headroom instead.
-    let crashRoundTripTimeout = Duration.seconds(5)
+    // async signal). The shared `waitUntil` uses a generous 120 s wall-clock
+    // deadline instead.
 
     for crash in 1...3 {
         let session = await waitForSession(manager: manager, languageID: "swift")
@@ -439,7 +422,7 @@ func fastCrashesEscalateToManualRestart() async {
         // an earlier `.starting`/`.running` push can land after `.backingOff`
         // and stay `.last` until the next spawn. Look for this crash's own
         // `.backingOff` status rather than the newest entry.
-        let becameBackingOff = await waitUntil(timeout: crashRoundTripTimeout) {
+        let becameBackingOff = await waitUntil {
             await collector.statuses.contains {
                 $0.phase == .backingOff && $0.consecutiveCrashes == crash
             }
@@ -462,7 +445,7 @@ func fastCrashesEscalateToManualRestart() async {
     // entry; the manager's own authoritative state — queried directly via
     // `ensureSession` below — is what the rest of this test actually
     // verifies.
-    let becameDead = await waitUntil(timeout: crashRoundTripTimeout) {
+    let becameDead = await waitUntil {
         await collector.statuses.contains { $0.phase == .dead && $0.consecutiveCrashes == 4 }
     }
     #expect(becameDead)
@@ -482,7 +465,7 @@ func fastCrashesEscalateToManualRestart() async {
     // fresh `.ready` push can still be in flight the instant
     // `ensureSession` returns — poll for it rather than reading
     // `collector.statuses` once immediately.
-    let becameFreshReady = await waitUntil(timeout: crashRoundTripTimeout) {
+    let becameFreshReady = await waitUntil {
         let last = await collector.statuses.last
         return last?.phase == .ready && last?.consecutiveCrashes == 0
     }
@@ -781,18 +764,16 @@ func documentOpenedBeforeActivateReplaysOnLaterStart() async {
 
 // MARK: - Helpers
 
-/// Retries `ensureSession` until it succeeds (or a real-time budget is
-/// exhausted) — used after a crash where the manager may still be
+/// Retries `ensureSession` until it succeeds (or the shared wall-clock
+/// deadline passes) — used after a crash where the manager may still be
 /// cooling down.
 private func waitForSession(manager: LanguageServerManager, languageID: String) async
     -> LanguageServerSession?
 {
-    let deadline = ContinuousClock.now.advanced(by: .seconds(2))
-    while ContinuousClock.now < deadline {
-        if let session = await manager.ensureSession(languageID: languageID) {
-            return session
-        }
-        try? await Task.sleep(for: .milliseconds(5))
+    var found: LanguageServerSession?
+    _ = await waitUntil {
+        found = await manager.ensureSession(languageID: languageID)
+        return found != nil
     }
-    return await manager.ensureSession(languageID: languageID)
+    return found
 }

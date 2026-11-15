@@ -496,7 +496,7 @@ struct VoiceShowViewStreamingTests {
         dependencies.viewHost = { viewHost }
         let voice = VoiceSession(dependencies: dependencies)
         voice.toggleLatched()
-        try await waitUntil { voice.blobState == .listeningLatched }
+        try await until("condition") { voice.blobState == .listeningLatched }
 
         transport.push(
             #"{"type":"response.event","event":{"type":"response.output_item.added","item":{"id":"fc_1","type":"function_call","name":"show_view","arguments":""}}}"#
@@ -507,7 +507,7 @@ struct VoiceShowViewStreamingTests {
         transport.push(
             #"{"type":"response.event","event":{"type":"response.function_call_arguments.delta","item_id":"fc_1","delta":"\"root\":\"t\",\"elements\":{\"t\":{\"type\":\"Text\",\"props\":{\"text\":\"x\"},\"children\":[]}}}"}}"#
         )
-        try await waitUntil { viewHost.handles.first?.pushes == 2 }
+        try await until("condition") { viewHost.handles.first?.pushes == 2 }
         let handle = try #require(viewHost.handles.first)
         #expect(handle.title == "Failing tests")
         #expect(!handle.finished)
@@ -517,7 +517,7 @@ struct VoiceShowViewStreamingTests {
             #"{"type":"response.event","event":{"type":"response.output_item.done","item":{"id":"fc_1","type":"function_call","call_id":"call_1","name":"show_view","arguments":"{\"title\":\"Failing tests\",\"root\":\"t\",\"elements\":{\"t\":{\"type\":\"Text\",\"props\":{\"text\":\"x\"},\"children\":[]}}}"}}}"#
         )
         transport.push(#"{"type":"response.event","event":{"type":"response.completed"}}"#)
-        try await waitUntil { !transport.sent(type: "response.create").isEmpty }
+        try await until("condition") { !transport.sent(type: "response.create").isEmpty }
         #expect(handle.finished)
         #expect(!handle.cancelled)
         #expect(viewHost.creates == 0)
@@ -560,7 +560,7 @@ struct VoiceShowViewStreamingTests {
         dependencies.viewHost = { viewHost }
         let voice = VoiceSession(dependencies: dependencies)
         voice.toggleLatched()
-        try await waitUntil { voice.blobState == .listeningLatched }
+        try await until("condition") { voice.blobState == .listeningLatched }
 
         transport.push(
             #"{"type":"response.event","event":{"type":"response.output_item.added","item":{"id":"fc_1","type":"function_call","call_id":"call_1","name":"show_view","arguments":""}}}"#
@@ -568,11 +568,11 @@ struct VoiceShowViewStreamingTests {
         transport.push(
             #"{"type":"response.event","event":{"type":"response.function_call_arguments.delta","item_id":"fc_1","delta":"{\"title\":\"Half\",\"root\":"}}"#
         )
-        try await waitUntil { viewHost.handles.count == 1 }
+        try await until("condition") { viewHost.handles.count == 1 }
         #expect(voice.argumentStreamCount == 1)
         // Barge-in: the response ends without the function_call done event.
         transport.push(#"{"type":"response.event","event":{"type":"response.completed"}}"#)
-        try await waitUntil { viewHost.handles.first?.cancelled == true }
+        try await until("condition") { viewHost.handles.first?.cancelled == true }
         #expect(viewHost.handles.first?.finished == false)
         #expect(voice.argumentStreamCount == 0)
         await voice.close()
@@ -609,14 +609,14 @@ struct VoiceShowViewStreamingTests {
         dependencies.viewHost = { viewHost }
         let voice = VoiceSession(dependencies: dependencies)
         voice.toggleLatched()
-        try await waitUntil { voice.blobState == .listeningLatched }
+        try await until("condition") { voice.blobState == .listeningLatched }
 
         // Today's GPT-Live shape: only the finished call arrives.
         transport.push(
             #"{"type":"response.event","event":{"type":"response.output_item.done","item":{"type":"function_call","call_id":"call_2","name":"show_view","arguments":"{\"title\":\"Coverage\",\"root\":\"t\",\"elements\":{\"t\":{\"type\":\"Text\",\"props\":{\"text\":\"x\"},\"children\":[]}}}"}}}"#
         )
         transport.push(#"{"type":"response.event","event":{"type":"response.completed"}}"#)
-        try await waitUntil { !transport.sent(type: "response.create").isEmpty }
+        try await until("condition") { !transport.sent(type: "response.create").isEmpty }
         let row = try #require(voice.timeline.rows(lane: .tool).first)
         #expect(row.detail == "1 element; deltas: 0")
         #expect(viewHost.handles.isEmpty)
@@ -630,10 +630,10 @@ struct VoiceShowViewStreamingTests {
         transport.push(
             #"{"type":"response.event","event":{"type":"response.function_call_arguments.delta","item_id":"fc_9","delta":"{\"root\":\"t\","}}"#
         )
-        try await waitUntil { viewHost.handles.count == 1 }
+        try await until("condition") { viewHost.handles.count == 1 }
         #expect(board.cards.count == 2)
         transport.push(#"{"type":"response.event","event":{"type":"response.completed"}}"#)
-        try await waitUntil { viewHost.handles.first?.cancelled == true }
+        try await until("condition") { viewHost.handles.first?.cancelled == true }
         #expect(board.cards.count == 1)
         await voice.close()
     }
@@ -669,27 +669,16 @@ struct VoiceShowViewStreamingTests {
         dependencies.viewHost = { viewHost }
         let voice = VoiceSession(dependencies: dependencies)
         voice.toggleLatched()
-        try await waitUntil { voice.blobState == .listeningLatched }
+        try await until("condition") { voice.blobState == .listeningLatched }
         transport.push(
             #"{"type":"response.event","event":{"type":"response.output_item.added","item":{"id":"fc_1","type":"function_call","call_id":"call_1","name":"show_view"}}}"#
         )
         transport.push(
             #"{"type":"response.event","event":{"type":"response.function_call_arguments.delta","item_id":"fc_1","delta":"{\"title\":\"Half\",\"root\":"}}"#
         )
-        try await waitUntil { board.cards.count == 1 }
+        try await until("condition") { board.cards.count == 1 }
         await voice.close()
         #expect(viewHost.handles.first?.cancelled == true)
         #expect(board.cards.isEmpty)
     }
-}
-
-/// Bounded: yields until `condition` holds.
-@MainActor
-private func waitUntil(_ condition: @MainActor () -> Bool) async throws {
-    for _ in 0..<200_000 {
-        if condition() { return }
-        await Task.yield()
-    }
-    Issue.record("Timed out waiting")
-    throw CancellationError()
 }

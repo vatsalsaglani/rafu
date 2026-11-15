@@ -185,35 +185,21 @@ private func makeResolvedServer(languageID: String) -> ResolvedLanguageServer {
     )
 }
 
-private func waitUntil(
-    timeout: Duration = .seconds(2), pollInterval: Duration = .milliseconds(5),
-    _ predicate: @MainActor () async -> Bool
-) async -> Bool {
-    let deadline = ContinuousClock.now.advanced(by: timeout)
-    while ContinuousClock.now < deadline {
-        if await predicate() { return true }
-        try? await Task.sleep(for: pollInterval)
-    }
-    return await predicate()
-}
-
 /// `workspaceDidOpen(root:)` activates the manager via an independent,
 /// fire-and-forget `Task` (the frozen hook is non-async), so nothing
 /// guarantees it has run yet by the time a test calls
 /// `session(forLanguageID:)` immediately afterward. Retries until the
-/// manager has caught up (or a real-time budget is exhausted).
+/// manager has caught up (or the shared wall-clock deadline passes).
 @MainActor
 private func waitForSession(
     coordinator: LanguageIntelligenceCoordinator, languageID: String
 ) async -> LanguageServerSession? {
-    let deadline = ContinuousClock.now.advanced(by: .seconds(2))
-    while ContinuousClock.now < deadline {
-        if let session = await coordinator.session(forLanguageID: languageID) {
-            return session
-        }
-        try? await Task.sleep(for: .milliseconds(5))
+    var found: LanguageServerSession?
+    _ = await waitUntil {
+        found = await coordinator.session(forLanguageID: languageID)
+        return found != nil
     }
-    return await coordinator.session(forLanguageID: languageID)
+    return found
 }
 
 // MARK: - Tests
@@ -255,10 +241,11 @@ func editDeltaForwardsCurrentTextAndURI() async {
     coordinator.documentDidOpen(document)
 
     // `documentDidOpen` starts the `editDeltas()` subscription task
-    // independently (it's non-async); give it a real chance to register
-    // its continuation before recording a delta, or the delta is lost
-    // before anything is listening.
-    try? await Task.sleep(for: .milliseconds(20))
+    // independently (it's non-async); wait until it registered its
+    // continuation before recording a delta, or the delta is lost before
+    // anything is listening.
+    let subscribed = await waitUntil { document.editDeltaSubscriberCountForTesting == 1 }
+    #expect(subscribed)
 
     currentText = "let value = 2"
     document.recordEditDelta(editedRange: NSRange(location: 12, length: 1), changeInLength: 0)
@@ -444,7 +431,10 @@ func editDeltaSkipsForwardingWithNoLiveOrStartingServer() async {
     document.textSnapshotProvider = { currentText }
     coordinator.documentDidOpen(document)
 
-    try? await Task.sleep(for: .milliseconds(20))
+    // The negative check below only means something once the subscription
+    // exists, so wait for it.
+    let subscribed = await waitUntil { document.editDeltaSubscriberCountForTesting == 1 }
+    #expect(subscribed)
     currentText = "let value = 2"
     document.recordEditDelta(editedRange: NSRange(location: 12, length: 1), changeInLength: 0)
 

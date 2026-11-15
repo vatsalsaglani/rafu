@@ -3,24 +3,6 @@ import Testing
 
 @testable import RafuApp
 
-/// Not `@MainActor`-annotated — every call into `LanguageServersCatalogModel`
-/// (a `@MainActor` type) below crosses the actor boundary via an explicit
-/// `await`, which keeps these tests free of a `@MainActor` test function
-/// nesting the shared (non-`@Sendable`-closure) `withTemporaryDirectory`
-/// helper, something Swift 6's cross-isolation "sending value risks
-/// causing data races" check rejects.
-private func waitUntil(
-    timeout: Duration = .seconds(2), pollInterval: Duration = .milliseconds(5),
-    _ predicate: @MainActor () async -> Bool
-) async -> Bool {
-    let deadline = ContinuousClock.now.advanced(by: timeout)
-    while ContinuousClock.now < deadline {
-        if await predicate() { return true }
-        try? await Task.sleep(for: pollInterval)
-    }
-    return await predicate()
-}
-
 @Suite("Language servers catalog model")
 struct LanguageServersCatalogModelTests {
     @Test("Loading populates rows from the curated catalog and packs from ServerPack.all")
@@ -110,7 +92,7 @@ struct LanguageServersCatalogModelTests {
 
                 await gate.release()
 
-                let installed = await waitUntil {
+                let installed = await waitUntilOnMain {
                     if case .installed = model.userRows.first(where: { $0.id == "gated-tool" })?
                         .installState
                     {

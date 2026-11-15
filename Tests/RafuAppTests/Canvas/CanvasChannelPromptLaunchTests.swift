@@ -116,18 +116,6 @@ struct CanvasChannelPromptLaunchTests {
         #expect(!fixture.confirmer.isWatching(fixture.controller.id))
     }
 
-    /// Bounded: yields until `condition` holds.
-    private func until(
-        _ label: String, _ condition: @MainActor () -> Bool
-    ) async throws {
-        for _ in 0..<200_000 {
-            if condition() { return }
-            await Task.yield()
-        }
-        Issue.record("Timed out waiting for \(label)")
-        throw CancellationError()
-    }
-
     @Test(arguments: [CanvasAgentControlMode.off, .ask])
     func aLaunchInAnOffOrAskBoardWaitsButNeverReadsTheTerminal(
         mode: CanvasAgentControlMode
@@ -310,15 +298,6 @@ struct CanvasChannelPromptVoiceTests {
                 screen.slept()
                 try? await Task.sleep(for: .milliseconds(1))
             })
-    }
-
-    private func until(_ label: String, _ condition: @MainActor () -> Bool) async throws {
-        for _ in 0..<200_000 {
-            if condition() { return }
-            await Task.yield()
-        }
-        Issue.record("Timed out waiting for \(label)")
-        throw CancellationError()
     }
 
     @Test func aVoiceStartedClaudeInAnAllowBoardIsConfirmed() async throws {

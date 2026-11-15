@@ -72,17 +72,14 @@ private func installAttentionRig(
     return (notifier, hud, suiteName)
 }
 
-/// `notifyIfNeeded(for:)` posts from inside a detached `Task` — poll
-/// cooperatively (never a fixed sleep) until the expected count arrives or
-/// the bound is exhausted.
+/// `notifyIfNeeded(for:)` posts from inside a detached `Task` — poll until
+/// the expected count arrives or the wall-clock deadline passes (see
+/// `PollingSupport.swift`).
 @MainActor
 private func waitUntilPosted(
     _ spy: SpyTerminalAttentionNotifier, count: Int = 1
 ) async -> [TerminalAttentionNotification] {
-    for _ in 0..<20_000 {
-        if spy.posted.count >= count { break }
-        await Task.yield()
-    }
+    _ = await waitUntil { spy.posted.count >= count }
     return spy.posted
 }
 
