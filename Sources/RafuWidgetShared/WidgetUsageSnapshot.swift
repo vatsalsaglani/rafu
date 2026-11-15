@@ -16,6 +16,8 @@ import Foundation
 /// of the current limit window (`Window.daily`, `Window.windowStart`). The
 /// app derives it from its own sample log; the extension never reads that
 /// log. Both fields are optional, so v1 and v2 files still decode.
+/// `Window.dailyEstimated` (added with the Seven widget, still version 3)
+/// is optional too: a v3 file without it decodes as not estimated.
 public struct WidgetUsageSnapshot: Codable, Equatable, Sendable {
     public static let currentVersion = 3
     /// Versions `WidgetSnapshotStore.read` accepts.
@@ -110,10 +112,15 @@ public struct WidgetUsageSnapshot: Codable, Equatable, Sendable {
         /// each day after the app's last observation. Only on a provider's
         /// primary weekly window, and only when the app has a sample log.
         public var daily: [Double?]?
+        /// v3: `true` when the app spread a gap in its sample log over more
+        /// than one day (the log started after the window start, or Rafu
+        /// was closed), so `daily` is an estimate. `nil` (an older v3 file)
+        /// reads as `false`; see `isDailyEstimated`.
+        public var dailyEstimated: Bool?
 
         public init(
             label: String, usedPercent: Double, resetsAt: Date?, windowMinutes: Int?,
-            windowStart: Date? = nil, daily: [Double?]? = nil
+            windowStart: Date? = nil, daily: [Double?]? = nil, dailyEstimated: Bool? = nil
         ) {
             self.label = label
             self.usedPercent = usedPercent
@@ -121,7 +128,11 @@ public struct WidgetUsageSnapshot: Codable, Equatable, Sendable {
             self.windowMinutes = windowMinutes
             self.windowStart = windowStart
             self.daily = daily
+            self.dailyEstimated = dailyEstimated
         }
+
+        /// `dailyEstimated`, `false` when absent.
+        public var isDailyEstimated: Bool { dailyEstimated ?? false }
     }
 
     /// The theme colours the rings use, for a light and a dark desktop. A

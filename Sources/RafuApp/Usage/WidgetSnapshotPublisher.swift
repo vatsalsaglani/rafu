@@ -22,7 +22,8 @@ import WidgetKit
 final class WidgetSnapshotPublisher {
     nonisolated static let ringsKind = "dev.vatsalsaglani.rafu.widgets.rings"
     nonisolated static let hundredKind = "dev.vatsalsaglani.rafu.widgets.hundred"
-    nonisolated static let widgetKinds = [ringsKind, hundredKind]
+    nonisolated static let sevenKind = "dev.vatsalsaglani.rafu.widgets.seven"
+    nonisolated static let widgetKinds = [ringsKind, hundredKind, sevenKind]
     /// `defaults write dev.vatsalsaglani.rafu.lightning RafuWidgetSampleSnapshot -bool YES`
     /// writes demo data when no provider has a percentage.
     static let sampleDefaultsKey = "RafuWidgetSampleSnapshot"
@@ -143,6 +144,7 @@ final class WidgetSnapshotPublisher {
             else { continue }
             snapshot.providers[index].windows[windowIndex].windowStart = breakdown.windowStart
             snapshot.providers[index].windows[windowIndex].daily = breakdown.daily
+            snapshot.providers[index].windows[windowIndex].dailyEstimated = breakdown.estimated
         }
         return snapshot
     }

@@ -10,6 +10,7 @@ struct RafuWidgetsBundle: WidgetBundle {
     var body: some Widget {
         UsageRingsWidget()
         UsageHundredWidget()
+        UsageSevenWidget()
     }
 }
 
@@ -95,5 +96,25 @@ struct UsageHundredWidget: Widget {
             "Your weekly limit as 100 dots: what you used, what you used today, and what your pace adds by the reset."
         )
         .supportedFamilies([.systemSmall, .systemMedium])
+    }
+}
+
+/// One column for each day of the weekly limit window, one dot for each 1%
+/// of the limit, with a dashed line at an even daily pace. Same timeline as
+/// the Rings widget; its day-boundary entries move "today".
+struct UsageSevenWidget: Widget {
+    static let kind = "dev.vatsalsaglani.rafu.widgets.seven"
+
+    var body: some WidgetConfiguration {
+        StaticConfiguration(kind: Self.kind, provider: UsageTimelineProvider()) { entry in
+            UsageSevenView(entry: entry)
+                .widgetURL(WidgetHostApp.usageURL)
+                .containerBackground(for: .widget) { Color(nsColor: .windowBackgroundColor) }
+        }
+        .configurationDisplayName("Agent usage by day")
+        .description(
+            "Your weekly limit day by day: one dot for each 1% you used, against an even daily pace."
+        )
+        .supportedFamilies([.systemMedium, .systemLarge])
     }
 }

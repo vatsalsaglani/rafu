@@ -204,19 +204,31 @@ public struct UsageSampleLog: Codable, Equatable, Sendable {
 /// - The level at a day boundary is interpolated linearly between the
 ///   samples around it, so a gap (Rafu closed, provider turned off) is
 ///   spread over the days it covers instead of landing on one day.
+/// - The split is `estimated` when such an interpolation moved usage
+///   across a day boundary: two neighbouring points more than
+///   `estimateGap` apart, with a day boundary between them and a rise in
+///   the level. This covers a log that starts after the window start
+///   (the first span runs from the window start at 0) and a gap while
+///   Rafu was closed. A long gap with no rise, or one inside a single
+///   day, does not change any day's value, so it is not an estimate.
 public struct UsageDailyBreakdown: Equatable, Sendable {
     public static let dayLength: TimeInterval = 86_400
     public static let weeklyWindowMinutes = 10_080
     public static let days = 7
+    /// Neighbouring samples further apart than this are a gap.
+    public static let estimateGap: TimeInterval = 2 * 3_600
 
     public let windowStart: Date
     /// `days` values: used percent for each past day, today's so far, and
     /// `nil` for each day after the current observation.
     public let daily: [Double?]
+    /// `true` when a gap in the log was spread over more than one day.
+    public let estimated: Bool
 
-    public init(windowStart: Date, daily: [Double?]) {
+    public init(windowStart: Date, daily: [Double?], estimated: Bool = false) {
         self.windowStart = windowStart
         self.daily = daily
+        self.estimated = estimated
     }
 
     /// `nil` for a window that is not weekly, has no reset, or does not
@@ -271,7 +283,16 @@ public struct UsageDailyBreakdown: Equatable, Sendable {
         for day in 0...latest {
             daily[day] = max(0, levels[day + 1] - levels[day])
         }
-        return UsageDailyBreakdown(windowStart: windowStart, daily: daily)
+        let estimated = zip(points, points.dropFirst()).contains { lower, upper in
+            guard upper.time.timeIntervalSince(lower.time) > estimateGap,
+                upper.value > lower.value
+            else { return false }
+            // A day boundary strictly between the two points.
+            let lowerDay = Int(lower.time.timeIntervalSince(windowStart) / dayLength)
+            let boundary = windowStart.addingTimeInterval(Double(lowerDay + 1) * dayLength)
+            return boundary < upper.time
+        }
+        return UsageDailyBreakdown(windowStart: windowStart, daily: daily, estimated: estimated)
     }
 }
 
