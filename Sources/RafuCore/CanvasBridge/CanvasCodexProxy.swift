@@ -286,7 +286,9 @@ final class CanvasCodexProxy: Sendable {
             guard header.count < 8_192 else { throw ProxyError.malformedFrame }
             header.append(try Self.read(source, count: 1, deadline: handshakeDeadline))
         }
-        try Self.write(header, to: destination)
+        // The relay parses every frame as plain JSON text, so it must not let
+        // the TUI negotiate a compressed stream (RSV bits, binary frames).
+        try Self.write(outgoing ? Self.withoutCompressionOffer(header) : header, to: destination)
         var message = Data()
         var fragmented = false
         var messageDeadline: UInt64?
@@ -522,6 +524,23 @@ final class CanvasCodexProxy: Sendable {
             encoded.count <= 256
         else { return nil }
         return String(decoding: encoded, as: UTF8.self)
+    }
+
+    /// The upgrade request without the Codex compression offer
+    /// (`x-codex-app-server-compression`) and without any
+    /// `Sec-WebSocket-Extensions` line, so the server answers with plain text
+    /// frames this relay can check. Other lines pass unchanged.
+    static func withoutCompressionOffer(_ header: Data) -> Data {
+        let text = String(decoding: header, as: UTF8.self)
+        let lines = text.components(separatedBy: "\r\n")
+        let kept = lines.filter { line in
+            let name = line.split(separator: ":", maxSplits: 1).first
+                .map { $0.trimmingCharacters(in: .whitespaces).lowercased() }
+            return name != "x-codex-app-server-compression"
+                && name != "sec-websocket-extensions"
+        }
+        guard kept.count != lines.count else { return header }
+        return Data(kept.joined(separator: "\r\n").utf8)
     }
 
     private static func deadline() -> UInt64 {

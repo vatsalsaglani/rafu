@@ -7,6 +7,22 @@ import Testing
 
 @Suite(.serialized)
 struct CanvasCodexSessionTests {
+    @Test func relayRemovesTheCompressionOfferFromTheUpgrade() {
+        let request =
+            "GET /rpc HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\n"
+            + "X-Codex-App-Server-Compression: zstd-stream-v1\r\n"
+            + "Sec-WebSocket-Extensions: permessage-deflate\r\n"
+            + "Sec-WebSocket-Key: abc\r\n\r\n"
+        let result = String(
+            decoding: CanvasCodexProxy.withoutCompressionOffer(Data(request.utf8)), as: UTF8.self)
+        #expect(
+            result
+                == "GET /rpc HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\n"
+                + "Sec-WebSocket-Key: abc\r\n\r\n")
+        let plain = Data("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n".utf8)
+        #expect(CanvasCodexProxy.withoutCompressionOffer(plain) == plain)
+    }
+
     @Test func terminalUsesPrivateEndpointAndServerStopsOnExit() throws {
         let fixture = try Fixture()
         defer { fixture.remove() }
