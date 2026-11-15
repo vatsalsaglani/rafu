@@ -1,0 +1,12 @@
+swift-json-render
+Copyright 2026 Vatsal Saglani
+
+A native Swift runtime for the json-render specification.
+
+This product is a Swift implementation of the json-render specification by
+Vercel Labs (https://github.com/vercel-labs/json-render, Apache License 2.0).
+Parity fixtures under Tests/ParityFixtures/upstream are copied from that
+repository at a pinned commit and keep their original licence.
+
+Design ideas (the component macro and the JSON value and pointer types) are
+adapted, with credit, from rxtech-lab/json-render-swift (MIT License).

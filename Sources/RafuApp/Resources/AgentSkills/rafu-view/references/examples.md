@@ -9,7 +9,7 @@ Three complete `spec` objects for `view_render`. Each is valid against the Rafu 
   "root": "row",
   "elements": {
     "row": { "type": "Stack", "props": { "direction": "horizontal", "gap": "md" }, "children": ["tests", "time"] },
-    "tests": { "type": "Stat", "props": { "label": "Tests", "value": { "$state": "/tests" }, "intent": "success" }, "children": [] },
+    "tests": { "type": "Stat", "props": { "label": "Tests", "value": { "$state": "/tests" }, "intent": "good" }, "children": [] },
     "time": { "type": "Stat", "props": { "label": "Duration", "value": { "$state": "/seconds" }, "unit": "s" }, "children": [] }
   },
   "state": { "tests": 412, "seconds": 38 }

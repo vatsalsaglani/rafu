@@ -44,16 +44,20 @@ struct EnsembleSettingsSection: View {
                 Button("Install for Claude Code") {
                     startInstall(at: .claudeCode)
                 }
-                .help("Writes ~/.claude/skills/rafu-ensemble and ~/.claude/skills/rafu-view")
+                .help(
+                    "Writes rafu-ensemble, rafu-view and json-render-swift-use in ~/.claude/skills"
+                )
                 Button("Install for Codex") {
                     startInstall(at: .codex)
                 }
-                .help("Writes ~/.codex/skills/rafu-ensemble and ~/.codex/skills/rafu-view")
+                .help(
+                    "Writes rafu-ensemble, rafu-view and json-render-swift-use in ~/.codex/skills"
+                )
                 Button("Install to Folder…") {
                     isFolderImporterPresented = true
                 }
                 .help(
-                    "Choose another skills folder. Rafu creates rafu-ensemble and rafu-view inside it."
+                    "Choose another skills folder. Rafu creates rafu-ensemble, rafu-view and json-render-swift-use inside it."
                 )
                 if model.isInstalling {
                     ProgressView()
@@ -95,7 +99,7 @@ struct EnsembleSettingsSection: View {
             }
         }
         .fileDialogMessage(
-            "Choose a skills folder. Rafu creates rafu-ensemble and rafu-view inside it."
+            "Choose a skills folder. Rafu creates rafu-ensemble, rafu-view and json-render-swift-use inside it."
         )
         .fileDialogConfirmationLabel("Install Here")
         .sheet(isPresented: pendingReplacementPresented) {
@@ -103,7 +107,7 @@ struct EnsembleSettingsSection: View {
                 RafuConfirmPopup(
                     title: "Replace existing skill files?",
                     message:
-                        "Rafu replaces only the rafu-ensemble and rafu-view skill files after this confirmation.",
+                        "Rafu replaces only the rafu-ensemble, rafu-view and json-render-swift-use skill files after this confirmation.",
                     actions: [
                         .init(
                             "Replace \(pending.conflicts.count) Existing File(s)",
@@ -184,7 +188,7 @@ nonisolated enum EnsembleSkillCopy {
         "Teaches Claude Code and Codex to use an Ensemble: read the board, start a peer agent, link it, delegate work, share notes, draw and export diagrams, open and check apps, and show native views."
 
     static let footer =
-        "One install writes two skills, rafu-ensemble and rafu-view. Claude Code reads ~/.claude/skills/rafu-ensemble and ~/.claude/skills/rafu-view; Codex reads ~/.codex/skills/rafu-ensemble and ~/.codex/skills/rafu-view. For another agent, choose its skills folder; Rafu does not guess other vendor folders. Install again after a Rafu update to refresh the skills."
+        "One install writes three skills: rafu-ensemble, rafu-view and json-render-swift-use (the view spec language, Apache-2.0). Claude Code reads them in ~/.claude/skills/rafu-ensemble, ~/.claude/skills/rafu-view and ~/.claude/skills/json-render-swift-use; Codex reads ~/.codex/skills/rafu-ensemble, ~/.codex/skills/rafu-view and ~/.codex/skills/json-render-swift-use. For another agent, choose its skills folder; Rafu does not guess other vendor folders. Install again after a Rafu update to refresh the skills."
 }
 
 @MainActor
