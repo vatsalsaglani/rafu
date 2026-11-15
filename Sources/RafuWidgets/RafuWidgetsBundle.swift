@@ -11,6 +11,7 @@ struct RafuWidgetsBundle: WidgetBundle {
         UsageRingsWidget()
         UsageHundredWidget()
         UsageSevenWidget()
+        UsageBoardWidget()
     }
 }
 
@@ -116,5 +117,32 @@ struct UsageSevenWidget: Widget {
             "Your weekly limit day by day: one dot for each 1% you used, against an even daily pace."
         )
         .supportedFamilies([.systemMedium, .systemLarge])
+    }
+}
+
+/// Every connected agent on one board: each with its Hundred grid and its
+/// Seven columns. Extra large on macOS 14 and later; extra large portrait
+/// on macOS 27 only. Same timeline as the Rings widget.
+struct UsageBoardWidget: Widget {
+    static let kind = "dev.vatsalsaglani.rafu.widgets.board"
+
+    static var families: [WidgetFamily] {
+        if #available(macOS 27.0, *) {
+            return [.systemExtraLarge, .systemExtraLargePortrait]
+        }
+        return [.systemExtraLarge]
+    }
+
+    var body: some WidgetConfiguration {
+        StaticConfiguration(kind: Self.kind, provider: UsageTimelineProvider()) { entry in
+            UsageBoardView(entry: entry)
+                .widgetURL(WidgetHostApp.usageURL)
+                .containerBackground(for: .widget) { Color(nsColor: .windowBackgroundColor) }
+        }
+        .configurationDisplayName("Agent usage board")
+        .description(
+            "All your coding agents on one board: the weekly limit as 100 dots and day by day."
+        )
+        .supportedFamilies(Self.families)
     }
 }

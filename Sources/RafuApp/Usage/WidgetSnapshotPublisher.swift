@@ -23,7 +23,9 @@ final class WidgetSnapshotPublisher {
     nonisolated static let ringsKind = "dev.vatsalsaglani.rafu.widgets.rings"
     nonisolated static let hundredKind = "dev.vatsalsaglani.rafu.widgets.hundred"
     nonisolated static let sevenKind = "dev.vatsalsaglani.rafu.widgets.seven"
-    nonisolated static let widgetKinds = [ringsKind, hundredKind, sevenKind]
+    nonisolated static let boardKind = "dev.vatsalsaglani.rafu.widgets.board"
+    /// Every kind `RafuWidgetsBundle` registers; each publish reloads them all.
+    nonisolated static let widgetKinds = [ringsKind, hundredKind, sevenKind, boardKind]
     /// `defaults write dev.vatsalsaglani.rafu.lightning RafuWidgetSampleSnapshot -bool YES`
     /// writes demo data when no provider has a percentage.
     static let sampleDefaultsKey = "RafuWidgetSampleSnapshot"
