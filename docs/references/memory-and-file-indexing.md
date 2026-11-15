@@ -127,6 +127,16 @@
   `ServerInstaller`, `WorkspaceFileService`. Autorelease-pool context:
   [`autorelease-pools-in-swift-concurrency-loops.md`](autorelease-pools-in-swift-concurrency-loops.md).
 
+- **The workspace symbol index is lazy (D1, 2026-11-15).** Unlike the file-name
+  index, it does not build at workspace open, in `refreshWorkspace`, or on watcher
+  changes until the first `#` query or navigation command. After that it rebuilds
+  on refresh and patches on non-storm changes; memory-pressure shed and a workspace
+  change clear it. A rebuild resets first, so only one symbol set exists (57,242
+  symbols, about 4.9 MB live malloc in the Debug harness). Rules, cancellation and
+  numbers: [`workspace-symbol-index.md`](workspace-symbol-index.md) ("Lazy build").
+  The file-name index is still built eagerly and its session task still holds
+  `self` strongly (not fixed).
+
 ## Why it matters
 
 The plan budget is roughly under 150 MB idle resident memory for a local

@@ -115,6 +115,9 @@ seven-state vocabulary and never change the parent's state.
 - **Privacy.** The description crosses the private spool (folder 0700, file
   deleted on read), as the existing 600-character reply preview does. Afterwards
   it is in memory only: never logged, never persisted.
+  The user accepted this on 2026-11-15. The question was: "the sub-agent
+  description (at most 80 characters) goes through Rafu's private event folder on
+  disk for a moment ... acceptable?" The answer was "YES".
 - **UI.** `CompanionSubagentsView`: an "N sub-agents" chip on Rafu and outside
   agent rows in Agents and Up next. It expands to "type · model · description".
   It is a `Button`, so the keyboard reaches it. VoiceOver reads "3 sub-agents

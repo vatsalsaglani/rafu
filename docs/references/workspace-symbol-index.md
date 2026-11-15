@@ -35,13 +35,91 @@ The index does **not** maintain a secondary name index. Instead, the `SyntacticN
 
 ### Incremental updates and memory shedding
 
-- **Full rebuild:** triggered by `refreshWorkspace()` (workspace open, root re-list after FSEvents). 
+- **Lazy build (D1, 2026-11-15): the index no longer builds at workspace open.** See "Lazy build" below; the bullets here describe behaviour after the first demand.
+- **Full rebuild:** triggered by `refreshWorkspace()` (root re-list after FSEvents), only after the first demand. 
 - **Incremental rebuild:** `applyChanges` re-lists changed directories from `WorkspaceChangeSet.changedDirectoryRelativePaths`, re-parses changed files, and removes symbols for deleted files. 
 - **Storm ⇒ full rebuild:** FSEvents storm (>1,000 surviving paths or >200 changed directories) signals a full rebuild via the existing circuit breaker.
 - **Cancellation:** query is cancellable; a cancelled build leaves the prior state intact.
 - **Memory pressure shedding:** `respondToMemoryPressure` snapshot-sheds the symbol index alongside the filename index on memory-pressure warn/critical.
 
 Non-Sendable tree-sitter types (Parser, Tree, QueryCursor) never cross an await — all tree work is synchronous within one actor-confined step; no `@unchecked Sendable`.
+
+### Lazy build (D1, commit 593085a, 2026-11-15)
+
+Last verified: Swift 6.4.2, Xcode with macOS 27.2 SDK (26B118), Darwin 27.2.0,
+Mac17,13. User decision (answer "YES"): lazy symbol index. On `main` after menu
+step 4, D1 and the polling helper, both modes passed: 495 tests in 36 suites and
+3870 tests in 314 suites (parallel and `--no-parallel`). Tests:
+`WorkspaceSymbolIndexLazyTests` (6) and two new `WorkspaceSymbolIndexTests`. No
+device check yet.
+
+**When it builds.**
+
+- The index does not build at workspace open, in `refreshWorkspace`, or on watcher
+  changes until the first demand.
+- The first demand sets `symbolIndexRequested` through `ensureSymbolIndexReady()`.
+  Demand points: the palette `#` mode (`runWorkspaceSymbolQuery`) and
+  `navigate(kind:)` (Go to Definition, Go to Declaration, Find References). Hover
+  does not use the index.
+- After the first demand, `refreshWorkspace` (including storms) rebuilds fully; a
+  non-storm watcher change patches incrementally.
+- A memory-pressure shed or a workspace change (`resetFileTreeState`) clears the
+  flag.
+- Concurrent demands share one build: one in flight plus at most one trailing.
+
+**One symbol set, never two.** `WorkspaceSymbolIndex.build` calls `reset()` before
+parsing, so a rebuild never holds two full sets. Peak is 57,242 symbols, not
+114k. This resolves the D2 "two symbol sets" suspicion in
+[`autorelease-pools-in-swift-concurrency-loops.md`](autorelease-pools-in-swift-concurrency-loops.md).
+Cost: queries are empty during a rebuild ("Indexing..." in `#`; Go to Definition
+waits).
+
+**Cancellation.**
+
+- Checked per parsed file, after path collection, and before publish. A cancelled
+  build leaves the index idle and empty. `applyChanges` stops if reset or shed runs
+  at a suspension point.
+- Session tasks capture `[weak self, symbolIndex]` and take `self` only after the
+  build, so window close (deinit) cancels. Before, the task kept the session alive
+  for the whole build. Task tails check `Task.isCancelled` after their last await,
+  so a superseded task cannot clear a newer task. The Swift pattern is in
+  [`concurrency.md`](concurrency.md).
+
+**Go to Definition.** It starts the build alongside the LSP request (the LSP-first
+ladder is unchanged). On `.indexing` it shows the "Indexing symbols..." peek, waits
+on `waitForSymbolIndexBuild()` (continuations plus `withTaskCancellationHandler`,
+no polling; shed, reset and build end wake waiters) and resolves again up to 3
+times. Closing the peek or a new navigation cancels the wait.
+
+**Palette.** `CommandPaletteView.workspaceSymbolEmptyMessage(state:hasWorkspace:hasMatches:)`
+shows "Indexing symbols..." when a folder is open and the index is idle.
+
+**Numbers** (Debug harness, this repo, `malloc_zone_statistics`):
+
+| Measure | Value |
+|---|---|
+| One index | 57,242 symbols, about 4.9 MB live malloc |
+| Heap around one index | 1.82 MB, then 6.71 MB, then 1.84 MB after `reset` |
+| Each Debug build | 8.4 to 9.3 s CPU |
+
+`phys_footprint` changed by less than 0.4 MB in the harness because a warm-up build
+had already grown the heap, so footprint is not a good measure here.
+
+**Risks.**
+
+- During a storm rebuild, `#` shows "Indexing" and old results disappear.
+- The first Go to Definition with no LSP server waits for the full build.
+- The file-name index has the same strong-self task problem (not fixed).
+
+**Not done.** A palette progress count; a drop-after-idle timer.
+
+**Open follow-up: data-structure inefficiencies (known, not fixed).**
+
+- Go to Definition `lookup(name:)` scans all symbols linearly.
+- The `#` `query` flattens all symbols into transient matches on every keystroke.
+- `kind` is stored as a `String`.
+- `pathIndex` is duplicated.
+- Ranges are `NSRange`.
 
 ### Incremental apply: /var vs /private/var symlink nuance (durable)
 
@@ -141,7 +219,7 @@ This decision is testable (6 tests) and independent of which tier answered the r
 
 `WorkspaceSession.navigate(kind:)` orchestrates the full ladder walk:
 1. Builds a `NavigationRequest` from the selected document's live caret (`selectionProvider`) and the word at caret (`IdentifierUnderCaret`).
-2. Ensures the symbol index is warm (triggers build if needed).
+2. Ensures the symbol index is ready (`ensureSymbolIndexReady()`; starts the first build if needed, see "Lazy build").
 3. Resolves the request against `navigationLadder` in a cancellable `Task` (a second call cancels the prior task).
 4. Applies the `NavigationPresentation` outcome: `.jump` reuses `openWorkspaceSymbol`; `.results` sets `isNavigationPeekPresented` for sheet display.
 

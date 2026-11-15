@@ -262,10 +262,64 @@ list changes.
   cleared.
 - **Start fallback order.** The last folder if usable, then the starting folder
   if usable, then the existing refusal. Rafu does not substitute the workspace
-  root; this ADR forbids substitution and that rule is unchanged.
+  root; this ADR forbids substitution and that rule is unchanged. (Superseded
+  for a missing starting folder by the next amendment, 2026-11-15.)
 - **Unchanged.** Spawn is still lazy and still follows a visible user action.
   Restoration is still inert and starts no process. Rafu never sends `cd` to a
   live shell. Set Pane Starting Folder still sets only the future-start folder.
+
+## Amendment (2026-11-15): workspace-folder fallback and unsaved tabs restored
+
+User decisions of the same day (answer "YES" to each): a pane whose saved folder
+is gone starts in the workspace folder, and unsaved Terminal Group tabs return
+when the window reopens.
+
+**Workspace-folder fallback.** This supersedes "Rafu does not substitute the
+workspace root" in the amendment above and the substitution prohibition it cites.
+
+- **Start order.** Last folder, then starting folder, then workspace root.
+- **When the root is used.** Only when the starting folder is gone (`lstat`
+  returns ENOENT, `TerminalWorkspaceFolder.isMissing`) and the root is usable.
+- **Refusal stays for an unusable folder.** A folder that exists but is not
+  usable keeps the refusal: a symlink that escapes the workspace, a file, an
+  unreadable folder, or a dangling symlink at the path. This is a security rule;
+  the test "Start All rejects a saved symlink escape before it reveals or starts
+  a pane" pins it.
+- **Unchanged.** Remote workspaces. Restart Shell on an exited pane still refuses
+  when its starting folder is gone.
+- **Saved folder kept.** The starting folder stays in the record, so the pane
+  uses it again if the folder returns.
+- **Restoration.** It validates in the same order. A new codec case,
+  `.workspaceFolderFallback`, is startable. A pane with a working last folder and
+  a missing starting folder can start.
+- **Labels** read the session set `terminalPanesStartingInWorkspaceFolder`, never
+  the disk. Rafu fills the set during window and Ensemble restoration and clears
+  an entry when its pane starts. Stopped pane: "Start this pane when you are
+  ready. Its saved folder is gone, so it starts in the workspace folder."
+  Ensemble card: "Saved folder is gone. Starts in the workspace folder." A folder
+  deleted while the app runs uses the root at start, but the label changes only
+  after the next restore.
+- **API.** `TerminalStartFolderResolver.resolve` has a required `isMissing:`
+  argument.
+
+**Unsaved Terminal Group tabs are restored.** This supersedes the earlier
+"unsaved tabs are not restored" limit.
+
+- A group that has its own editor tab enters the window payload and the saved
+  editor layout. Panes, splits, names, starting folders, last folders, tab
+  position and selection return. All panes are stopped: no process and no
+  command.
+- Closed or hidden groups do not return. A group that belongs to an Ensemble, is
+  shown by a card, or has a card on any open board is restored by the board only.
+  A group whose saved layout was deleted while it was closed stays dropped.
+- No schema change: the open-tab record already allowed no saved layout.
+- Caps are unchanged. With more than 20 groups, insertion stops at 20 with the
+  existing bounded notice. Named layouts still strip the last folder. If the
+  saved-layout store cannot list layouts during restore, no group is restored
+  (unchanged). An old payload with no terminal field still gives "One saved
+  Terminal Group could not be restored."
+
+Details: [`terminal-last-working-folder.md`](../references/terminal-last-working-folder.md).
 
 Detail, the OSC 7 host rule and the capture points:
 [`terminal-last-working-folder.md`](../references/terminal-last-working-folder.md).

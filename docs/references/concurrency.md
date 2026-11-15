@@ -99,6 +99,31 @@ module.
    compare it inside `MainActor.assumeIsolated`. The site is
    `UsageMenuBarItem` (`popoverDidClose`).
 
+### Cancellable work owned by a session, and event-driven waiting (D1, 2026-11-15)
+
+- Applies to: `WorkspaceSession` symbol-index tasks, `waitForSymbolIndexBuild()`.
+  Last verified: Swift 6.4.2, Xcode with macOS 27.2 SDK (26B118), Darwin 27.2.0,
+  Mac17,13. On `main` both modes passed: 495 tests in 36 suites and 3870 tests in
+  314 suites.
+
+1. **`Task { [weak self] in guard let self ...; await longWork() }` keeps `self`
+   alive for the whole await**, so `deinit` cannot cancel the work. Capture the
+   actor (`[weak self, symbolIndex]`), await the work on it, and take `self` only
+   after the await. Then closing the window (deinit) cancels the build. Before the
+   fix the task kept the session alive for the whole build. The file-name index
+   still has this strong-self problem (not fixed).
+2. **A task tail must check `Task.isCancelled` after its last `await`**, so a
+   superseded task cannot clear state that a newer task now owns.
+3. **Event-driven waiter on `@MainActor`:** keep a dictionary of continuations and
+   wrap the wait in `withTaskCancellationHandler`. `onCancel` hops back with
+   `Task { @MainActor in ... }` to remove and resume the entry. It is race-safe
+   because registration runs in one main-actor job. No polling; shed, reset and
+   build end wake the waiters.
+4. **Timing-free cancellation test:** a child added to an already cancelled
+   `TaskGroup` starts cancelled.
+
+See [`workspace-symbol-index.md`](workspace-symbol-index.md) ("Lazy build").
+
 ## Verification
 
 ```bash

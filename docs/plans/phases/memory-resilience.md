@@ -15,8 +15,8 @@ tooltip. Evidence and numbers:
 [`autorelease-pools-in-swift-concurrency-loops.md`](../../references/autorelease-pools-in-swift-concurrency-loops.md).
 The implementor ran format, build and the full parallel suite green on the
 branch; the main gate (both modes) is run by the coordinator. The app-level
-footprint after the fix is pending. Deferred: D1 lazy symbol index (needs user
-approval), D2 find the 94k `CFString` objects with `MallocStackLogging`, D3 card
+footprint after the fix is pending. Deferred (D1 was done later the same day, see
+the D1 entry below): D1 lazy symbol index (needs user approval), D2 find the 94k `CFString` objects with `MallocStackLogging`, D3 card
 shadows only if Instruments shows them idle.
 
 **Work log, 2026-11-15 — D2 follow-up (merge 56369ec "enumerator pools, native
@@ -44,6 +44,24 @@ conversation plus a workspace refresh; expected fewer than about 25k `CFString`
 objects and one symbol array set (about 1.7k arrays, 3.4 MB); two sets means D1.
 The branch parallel suites were green; main gate run by coordinator. Details:
 [`autorelease-pools-in-swift-concurrency-loops.md`](../../references/autorelease-pools-in-swift-concurrency-loops.md).
+
+**Work log, 2026-11-15 — D1 lazy symbol index (commit 593085a).** User decision:
+YES. Toolchain: Swift 6.4.2, Xcode with macOS 27.2 SDK (26B118), Darwin 27.2.0,
+Mac17,13. The symbol index builds on first demand (palette `#`, Go to Definition,
+Go to Declaration, Find References), not at workspace open, refresh or watcher
+change; shed and workspace change clear it. A rebuild resets before parsing, so
+there are never two full symbol sets (57,242 symbols, about 4.9 MB live malloc in
+the Debug harness). This resolves the D2 "second symbol array set" suspicion for
+the symbol index. Window close now cancels a running build (the session task no
+longer keeps the session alive). Evidence: both modes on `main` passed, 495 tests
+in 36 suites and 3870 tests in 314 suites (parallel and `--no-parallel`). Not done:
+palette progress count; drop-after-idle timer. Open: data-structure
+inefficiencies (linear `lookup(name:)`, per-keystroke flatten in `#`, `String`
+kind, duplicated `pathIndex`, `NSRange`); the file-name index has the same
+strong-self task problem. Details:
+[`workspace-symbol-index.md`](../../references/workspace-symbol-index.md) ("Lazy
+build"). The owed user `heap` check still applies; the remaining 38 to 40k
+`CFString` gap is not explained by a second symbol set.
 
 Motivation: on 2026-07-14 the eager recursive file tree took a large monorepo
 to roughly 900 MB–1 GB resident. The fix (lazy per-directory tree plus a

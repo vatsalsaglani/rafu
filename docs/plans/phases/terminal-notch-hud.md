@@ -238,6 +238,37 @@ Owed device checks (not verified):
 - Mismatch between the content inset and the AppKit frame animation while the
   panel opens.
 
+### Menu bar card as a custom panel, step 4 (2026-11-15, commit 4eee050)
+
+Status: step 4 is done and merged to `main`. User decision: replace the
+`NSPopover` with a custom panel (approved directly; no hidden default flag).
+Decision: the "Phase B custom panel" amendment of
+[ADR 0037](../../decisions/0037-dynamic-island-macs.md). Facts:
+[`notch-companion.md`](../../references/notch-companion.md) rule 18,
+[`dynamic-island-macs.md`](../../references/dynamic-island-macs.md) item 8c.
+
+- `CompanionMenuPanel` (`Sources/RafuApp/Notch/CompanionMenuPanel.swift`): a
+  borderless `.nonactivatingPanel` hanging from the status item, 404 x 460 pt,
+  `CompanionOutline` `.open` for fill, clip, stroke and hit test. Pure
+  `CompanionMenuPanelGeometry` (placement) and `CompanionMenuPanelClosePolicy`.
+- Tests: `CompanionMenuPanelTests` (12).
+
+Verification (Swift 6.4.2, Xcode with macOS 27.2 SDK 26B118, Darwin 27.2.0,
+Mac17,13): on `main` after menu step 4, D1 and the polling helper, both modes
+passed: 495 tests in 36 suites and 3870 tests in 314 suites (parallel and
+`--no-parallel`). No device check yet; the user tests at the end.
+
+Owed device checks (not verified; these replace the popover checks listed in the
+two sections above):
+
+- Typing a reply and Command-1 to Command-3 while another app is frontmost.
+- Whether the status bar window takes key on click (the lost-key rule could close
+  then reopen the card).
+- Top-edge shadow during the morph.
+- VoiceOver dialog and focus return to the status item.
+- An auto-hidden menu bar (the card stays until a click outside).
+- `.moveToActiveSpace` plus `.fullScreenAuxiliary` behaviour.
+
 ## Vision
 
 The notch stops being dead space and becomes Rafu's **always-on companion

@@ -315,7 +315,7 @@ The pure policy decides shown, width and motion; the modifier only draws.
 | Notch panel | Open, and on the widened strip while attention waits (Cider "peek") |
 | Island card | Open (shape unchanged; the open card now has the border) |
 | Attention drop-down | While an event shows |
-| Menu bar card | Always while shown (inset 2, radius 12, inside the `NSPopover`) |
+| Menu bar card | Always while shown. Since Phase B (rule 18) it is the open-top stroke of `CompanionOutline` `.open` on `CompanionMenuPanel`; the earlier inset 2, radius 12 border inside the `NSPopover` is gone |
 
 - Colours come from tokens: warning at low opacity, warning, accent at 0.65,
   warning at low opacity. 1 pt wide; 2 pt during a sweep.
@@ -364,10 +364,66 @@ hidden. The last message is the hook preview (see
 Not done: the plan's 32 pt "Open Rafu" footer, and a short commit sha (no sha
 exists for an agent outside Rafu).
 
+**18. Menu bar card as a custom panel (Phase B, 2026-11-15, commit 4eee050).**
+Last verified: Swift 6.4.2, Xcode with macOS 27.2 SDK (26B118), Darwin 27.2.0,
+Mac17,13. On `main` after menu step 4, D1 and the polling helper, both test modes
+passed: 495 tests in 36 suites and 3870 tests in 314 suites (parallel and
+`--no-parallel`). NOT checked on a device. Decision: the "Phase B custom panel"
+amendment of [ADR 0037](../decisions/0037-dynamic-island-macs.md). The card is
+`CompanionMenuPanel` (`Sources/RafuApp/Notch/CompanionMenuPanel.swift`), not an
+`NSPopover`.
+
+- **Shape.** `CompanionOutline` `.open` (12 pt shoulders, 22 pt bottom radius):
+  one path fills, clips, strokes (`companionGlowBorder` open-top stroke) and
+  hit-tests (`NotchHUDPassthroughHostingView.hitOutline`). Size 404 x 460 pt (380
+  content plus 2 x 12 shoulders). Tokens `popoverBorderInset` and
+  `popoverBorderRadius` are removed.
+- **Placement (pure `CompanionMenuPanelGeometry`).**
+  - Screen: the one holding the centre of the status item window, else the most
+    overlap.
+  - Top edge: `min(statusItemWindow.minY, visibleFrame.maxY)`. The bar is 45 pt
+    on the island Mac, 37 pt on a notched Mac, 24 pt on an external display. With
+    an auto-hidden or full-screen bar it is the bottom of the shown item.
+  - Centred under the item; the body keeps 8 pt from the visible sides; never
+    past the screen frame. A short screen gives a shorter card and the sections
+    scroll. A display change moves the card under the item and does not close it.
+- **Morph.** `CompanionMenuRevealShape` grows from a 36 pt nub with a 0.14 s fade
+  both ways. Reduce Motion: a 0.12 s fade only.
+- **Key focus.** `canBecomeKey` is true, `becomesKeyOnlyIfNeeded` is false, the
+  panel calls `makeKeyAndOrderFront`, and nothing calls `NSApp.activate`, so the
+  Dock and activation are unchanged. Level `.popUpMenu`; behaviours
+  `[.moveToActiveSpace, .fullScreenAuxiliary, .transient, .ignoresCycle]`.
+- **Close policy (pure `CompanionMenuPanelClosePolicy`).** A click in another app
+  (global monitor: left, right, other mouse-down); a click in another Rafu window
+  (local monitor; it ignores the status item's own window so its toggle does not
+  close and reopen the card); Escape; the close button; a second status item
+  click; loss of key; a Space change; `com.apple.screenIsLocked`;
+  `sessionDidResignActive`; status item removal.
+- **One close path.** Every close goes through `closeCard`, which calls
+  `model.menuPopoverDidClose()` at once. ADR 0016 holds: feed cards drop at the
+  start of the close, not after the fade. Each open builds a new panel. The model
+  API keeps the "popover" names (`isMenuPopoverShown`, `menuPopoverWillShow`,
+  `menuPopoverDidClose`) for parity.
+- **Accessibility.** Window title "Rafu", subrole `.dialog`, label "Rafu". On
+  close with VoiceOver, a `.layoutChanged` notification with the status item
+  button returns focus.
+- **No hidden default flag.** The user approved the change directly.
+- **Testing nuance.** In `RafuAppTests`, `#expect(cgFloat == 982 - 37)` failed
+  although both sides printed 945: the literal arithmetic inferred a non-CGFloat
+  type. Write `CGFloat(...)` around the literal arithmetic. Tests:
+  `CompanionMenuPanelTests` (12).
+
+Owed device checks (not verified): typing a reply and Command-1 to Command-3
+while another app is frontmost; whether the status bar window takes key on click
+(the lost-key rule could then close and reopen the card); the top-edge shadow
+during the morph; the VoiceOver dialog and focus return; an auto-hidden bar (the
+card stays until a click outside); `.moveToActiveSpace` with
+`.fullScreenAuxiliary` behaviour.
+
 Owed device checks (not verified):
 
 - Shoulders on a notched Mac, including the 464 pt open frame.
-- The menu bar card border inset inside the popover.
+- (Closed by Phase B, rule 18: the popover border inset no longer exists.)
 - Instruments energy while the border sweeps: the budget is under 2 % CPU. If it
   is over, the fallback is "sweep only on events" (drop the slow working sweep).
 - Click pass-through beside the shoulders.

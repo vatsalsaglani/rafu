@@ -154,6 +154,18 @@ both `supportedFamilies` and every `family ==` comparison need
 `if #available(macOS 27.0, *)`. Four kinds are registered now; the publisher
 reloads all of them (`WidgetSnapshotPublisher.widgetKinds`).
 
+## Amendment 2026-11-15: Codex rollout backfill
+
+Commit 9c7e7b2. The Hundred and Seven widgets can show earlier days of a Codex
+week because Rafu reads its own user's Codex rollout files once a day
+(`~/.codex`, read only, bounded) and merges weekly-window samples into the usage
+sample log as backfill records. The extension still never reads the log or
+`~/.codex`; the data path, signing and packaging are unchanged. Only the Codex
+provider, only when it has a snapshot, only from a staged bundle. Backfill
+records never change live ones, and the log format stays version 1 (an optional
+`"b"` key). Limits, gates and the merge rule:
+[`usage-sample-log.md`](../references/usage-sample-log.md).
+
 ## Phased plan
 
 W0 to W4 and the daily usage log are tracked in

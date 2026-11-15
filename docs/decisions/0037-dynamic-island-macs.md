@@ -250,8 +250,63 @@ amendment above do not change.
 Facts and tokens: [`notch-companion.md`](../references/notch-companion.md) rules
 13 to 17. Not device-verified; the owed checks are in the phase document.
 
+## Amendment 2026-11-15: Phase B custom panel (menu bar card)
+
+The user approved this change directly (answer "YES"); there is no hidden default
+flag. It supersedes the `NSPopover` details of decision 4 in the section
+amendment above and the 2 pt inset border in the visuals amendment. Tokens
+`popoverBorderInset` and `popoverBorderRadius` are removed. Decisions 1 to 3 and
+5 to 8 and the section list are unchanged.
+
+1. **The card is a custom panel, not an `NSPopover`.** `CompanionMenuPanel`
+   (`Sources/RafuApp/Notch/CompanionMenuPanel.swift`) is a borderless
+   `.nonactivatingPanel` that hangs from the status item.
+2. **One shape.** `CompanionOutline` `.open` (12 pt shoulders, 22 pt bottom
+   radius). One path fills, clips, strokes (`companionGlowBorder` open-top
+   stroke) and hit-tests (`NotchHUDPassthroughHostingView.hitOutline`). Size is
+   404 x 460 pt: 380 content plus 2 x 12 shoulders.
+3. **Placement** is the pure `CompanionMenuPanelGeometry`:
+   - Screen: the one that holds the centre of the status item window, else the
+     one with the most overlap.
+   - Top edge: `min(statusItemWindow.minY, visibleFrame.maxY)`. This is the 45 pt
+     bar on the island Mac, 37 pt on a notched Mac, 24 pt on an external display.
+     With an auto-hidden or full-screen bar, it is the bottom of the shown item.
+   - Centred under the item. The body keeps 8 pt from the visible sides and never
+     passes the screen frame. A short screen gives a shorter card and the sections
+     scroll.
+   - A display change moves the card under the item; it does not close it.
+4. **Morph.** `CompanionMenuRevealShape` grows from a 36 pt nub with a 0.14 s fade
+   both ways. With Reduce Motion: a 0.12 s fade only.
+5. **Key focus.** `canBecomeKey` is true, `becomesKeyOnlyIfNeeded` is false, and
+   the panel calls `makeKeyAndOrderFront`. It does not call `NSApp.activate`, so
+   the Dock and activation do not change. Window level is `.popUpMenu`;
+   collection behaviour is `[.moveToActiveSpace, .fullScreenAuxiliary,
+   .transient, .ignoresCycle]`.
+6. **Close policy** is the pure `CompanionMenuPanelClosePolicy`. The card closes
+   on: a click in another app (global monitor: left, right and other mouse-down);
+   a click in another Rafu window (local monitor; it ignores the status item's own
+   window so its toggle does not close and reopen the card); Escape; the close
+   button; a second status item click; loss of key; a Space change;
+   `com.apple.screenIsLocked`; `sessionDidResignActive`; status item removal.
+7. **Every close goes through `closeCard`.** It calls
+   `model.menuPopoverDidClose()` at once. ADR 0016 still holds: feed cards are
+   dropped at the start of the close, not after the fade. Each open builds a new
+   panel. The model API keeps the "popover" names (`isMenuPopoverShown`,
+   `menuPopoverWillShow`, `menuPopoverDidClose`) for parity.
+8. **Accessibility.** Window title "Rafu", subrole `.dialog`, label "Rafu". On
+   close with VoiceOver on, a `.layoutChanged` notification with the status item
+   button returns focus.
+
+Not device-verified: see "Owed device checks" in
+[`terminal-notch-hud.md`](../plans/phases/terminal-notch-hud.md). Facts:
+[`notch-companion.md`](../references/notch-companion.md) rule 18 and
+[`dynamic-island-macs.md`](../references/dynamic-island-macs.md) item 8c.
+
 ## Related paths
 
+- `Sources/RafuApp/Notch/CompanionMenuPanel.swift` (`CompanionMenuPanel`,
+  `CompanionMenuPanelGeometry`, `CompanionMenuPanelClosePolicy`,
+  `CompanionMenuRevealShape`)
 - `Sources/RafuApp/Terminal/NotchHUDGeometry.swift`
 - `Sources/RafuApp/Terminal/NotchIslandGeometry.swift`
 - `Sources/RafuApp/Terminal/NotchCompanionGeometry.swift`

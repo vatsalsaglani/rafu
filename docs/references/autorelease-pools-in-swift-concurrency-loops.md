@@ -39,6 +39,7 @@ Where the pools are:
 | `AgentHistoryMessageSearch` | one session |
 | `WorkspaceSymbolIndex` `buildSymbols` and `applyDirectoryChange` | one file |
 | `WorkspaceFileNameIndex.enumeratedPaths` (non-git fallback), `WorkspaceSymbolIndex.enumeratedPaths`, `WorkspaceSearchService.scan` | one enumerator step (D2 follow-up, 2026-11-15) |
+| Codex rollout backfill scan (commit 9c7e7b2) | one 256 KiB chunk, and one enumerator step |
 
 Strings that are kept after the pool must be native, not bridged. A bridged
 `String` can pin the `NSString` it came from, so the pool frees nothing. Kept
@@ -112,9 +113,14 @@ the fixes about 100 to 125 MB; debug after the fixes about 120 to 145 MB.
 
 Deferred, not done:
 
-- D1: a lazy symbol index. It rebuilds on each workspace refresh today
-  (`WorkspaceSession.swift` near lines 2857, 3445, 3464, 3476). It needs user
-  approval.
+- D1: done 2026-11-15 (commit 593085a, user approved). The symbol index now
+  builds on first demand and resets before each rebuild, so there is one symbol
+  set, never two (57,242 symbols, about 4.9 MB live malloc in the Debug harness).
+  See [`workspace-symbol-index.md`](workspace-symbol-index.md) ("Lazy build").
+  This rules out a second symbol set as the cause of the unexplained 38 to 40k
+  `CFString` objects below; the cause stays unknown (likely undrained autoreleased
+  objects at sampling time; not verified). Before D1 the index rebuilt on each
+  workspace refresh.
 - D2: investigated (see below); about 38 to 40k of the 94k stay unexplained.
 - D3: the Ensemble card shadow drawables, only if Instruments shows them idle.
 
@@ -157,8 +163,13 @@ heap -s -q --forkCorpse $(pgrep -x RafuLightning) | grep -E "CFString|WorkspaceS
 ```
 
 Expected: fewer than about 25k `CFString` objects and one set of symbol arrays
-(about 1.7k arrays, 3.4 MB). Two sets points to D1 (the symbol index rebuilds on
-each workspace refresh).
+(about 1.7k arrays, 3.4 MB). Since D1, the symbol arrays exist only after the
+first `#` query or navigation command, and a rebuild never holds two sets.
+
+Codex usage backfill (commit 9c7e7b2) adds two more pool sites: one autorelease
+pool per 256 KiB chunk and one per enumerator step in the rollout scan; it never
+calls `skipDescendants()`. See
+[`usage-sample-log.md`](usage-sample-log.md) ("Codex rollout backfill").
 
 Debug note: a debug build uses more memory than a release build, so the debug
 number is not the release number. `DebugBuildNote` ("This is a debug build. It

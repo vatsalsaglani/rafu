@@ -30,8 +30,43 @@ live-only".
   strips it.
 
 **Start fallback order.** Last folder if usable, then starting folder if usable,
-then the existing refusal. Rafu does not substitute the workspace root (ADR 0023
-forbids substitution).
+then the workspace root (ADR 0023 amendment 2, 2026-11-15, supersedes the earlier
+"no root substitution" rule).
+
+- The root is used only when the starting folder is gone (`lstat` ENOENT,
+  `TerminalWorkspaceFolder.isMissing`) and the root is usable.
+- A folder that exists but is not usable keeps the refusal: a symlink that
+  escapes the workspace, a file, an unreadable folder, or a dangling symlink at
+  the path. This is a security rule. The test "Start All rejects a saved symlink
+  escape before it reveals or starts a pane" pins it.
+- Remote workspaces are unchanged. Restart Shell on an exited pane is unchanged:
+  it still refuses when its starting folder is gone.
+- The saved starting folder is kept, so the pane uses it again if it returns.
+- `TerminalStartFolderResolver.resolve` has a required `isMissing:` argument.
+- Restoration validates in the same order. The codec has a new startable case,
+  `.workspaceFolderFallback`. A pane with a working last folder and a missing
+  starting folder can start.
+- Labels read the session set `terminalPanesStartingInWorkspaceFolder` (filled
+  during window and Ensemble restoration, cleared when the pane starts), never
+  the disk. Stopped pane: "Start this pane when you are ready. Its saved folder is
+  gone, so it starts in the workspace folder." Ensemble card: "Saved folder is
+  gone. Starts in the workspace folder." A folder deleted while the app runs uses
+  the root at start, but the label changes only after the next restore.
+
+**Unsaved Terminal Group tabs are restored** (ADR 0023 amendment 2).
+
+- A group with its own editor tab enters the window payload and the saved editor
+  layout. Panes, splits, names, starting folders, last folders, tab position and
+  selection return. All panes are stopped; no process and no command.
+- Closed or hidden groups do not return. Ensemble groups, groups a card shows,
+  and groups with a card on any open board are restored by the board only. A group
+  whose saved layout was deleted while it was closed stays dropped.
+- No schema change: the open-tab record already allowed no saved layout.
+- Caps are unchanged: with more than 20 groups, insertion stops at 20 with the
+  existing bounded notice. Named layouts still strip the last folder. If the
+  saved-layout store cannot list layouts during restore, no group is restored
+  (unchanged). An old payload with no terminal field still gives "One saved
+  Terminal Group could not be restored."
 
 **Where the folder comes from.**
 
@@ -68,8 +103,10 @@ exited controller keeps its last value.
 
 ## Known limits
 
-- Unsaved Terminal Group tabs are not restored (this was already so).
-- Restart Shell on an exited pane uses the original start folder.
+- Restart Shell on an exited pane uses the original start folder and still
+  refuses if that folder is gone.
+- The "starts in the workspace folder" label switches only after the next
+  restore when a folder is deleted while the app runs.
 - A `cd` in an Ensemble terminal marks the board dirty at the next
   `refreshResources`. The saved indicator is unaffected.
 - A live pane after Set Pane Starting Folder records the shell's current folder
@@ -78,7 +115,16 @@ exited controller keeps its last value.
 ## Reproduction or evidence
 
 - `TerminalLastWorkingFolderTests` covers normalisation, the OSC 7 host rule,
-  the codec strip, and the start fallback order.
+  the codec strip, and the start fallback order (updated for the root fallback).
+- `TerminalWorkspaceFolderFallbackTests` and `TerminalUnsavedGroupRestorationTests`
+  are new. `TerminalGroupRestorationIntegrationTests` and
+  `TerminalGroupSessionIntegrationTests` are updated: "A shared Delete refresh
+  detaches another window..." now expects the detached group in the payload with
+  no saved layout.
+- Verified (2026-11-15, Swift 6.4.2, Xcode with macOS 27.2 SDK 26B118, Darwin
+  27.2.0, Mac17,13): the Terminals branch passed parallel 495 tests and 3861
+  tests in 316 suites. Main gate for the Terminals merge (4fe79a0): run by the
+  coordinator. No device check of the fallback or the unsaved-tab restore yet.
 - Manual: user confirmed in Rafu Lightning that a shell folder is restored.
 
 ## Verification
@@ -91,8 +137,8 @@ swift test --filter TerminalLastWorkingFolderTests
 
 ## Related code, ADRs, and phases
 
-- ADR [0023](../decisions/0023-terminal-groups-and-saved-layouts.md) (2026-11-15
-  amendment); ADR [0004](../decisions/0004-embedded-terminal.md) cross-reference.
+- ADR [0023](../decisions/0023-terminal-groups-and-saved-layouts.md) (both
+  2026-11-15 amendments); ADR [0004](../decisions/0004-embedded-terminal.md) cross-reference.
 - Phase: [`terminal-groups.md`](../plans/phases/terminal-groups.md).
 - Notes: [`terminal-signals-and-shell-catalog.md`](terminal-signals-and-shell-catalog.md),
   [`terminal-agent-identity.md`](terminal-agent-identity.md).

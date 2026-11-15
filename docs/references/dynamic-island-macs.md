@@ -147,6 +147,22 @@ through `CompanionSectionHost`; decision text in the 2026-11-15 amendment of
   suites (`--no-parallel`) on `main`, macOS 27.2 SDK (26B118). Not checked on the
   device: see "Not verified".
 
+**8c. The menu bar card is now a custom panel (Phase B, 2026-11-15).** Items 8
+and 8a describe the `NSPopover` (360 x 380, then 380 x 460 pt). That popover is
+gone: the status item now shows `CompanionMenuPanel`, a borderless
+`.nonactivatingPanel` of 404 x 460 pt that hangs from the status item. Its top
+edge is `min(statusItemWindow.minY, visibleFrame.maxY)` (45 pt bar here), so it
+hangs under the item on this island Mac. Statements above about `popoverDidClose`,
+`makeKey()` on the popover window and the popover being rebuilt on each open now
+read: every close goes through `closeCard` and calls `menuPopoverDidClose()` at
+once; each open builds a new panel; a click in the status item's own window does
+not close it through the local monitor (the item's toggle does). The panel takes
+key without `NSApp.activate`. Full rule set, close policy, placement and the
+`CGFloat` test nuance: [`notch-companion.md`](notch-companion.md) rule 18; decision:
+the "Phase B custom panel" amendment of ADR 0037. Evidence: both test modes on
+`main` passed (495 tests in 36 suites and 3870 tests in 314 suites; parallel and
+`--no-parallel`; Swift 6.4.2, macOS 27.2 SDK 26B118). Not checked on the device.
+
 **9. The macOS 27 "»" overflow (NOTCHED Macs).** The status-item window is at
 layer 25. A companion panel at `.statusBar` covers the overflow items that
 expand beside the notch. Rule: on macOS 27 or later (`osMajorVersion`,
@@ -248,16 +264,20 @@ amendment of ADR 0037. Not checked on a device: the popover border inset.
 
 ## Not verified
 
-- Menu bar card border inset inside the popover, and the glow border energy on
-  the island card (Instruments; budget under 2 % CPU while sweeping).
-- Escape closing the status-item popover. A status-item click does not activate
-  Rafu, so the popover may not get key focus. The code calls `makeKey()` on the
-  popover window after `show` and adds `onExitCommand`; the result was not
-  checked.
-- Menu bar card (2026-11-15): popover key status for reply typing; Command-1 to
-  Command-3 and the arrow keys; the dot on the template ring image; whether 380 x
-  460 pt fits below the 45 pt menu bar; status item redraw frequency (guarded by
-  the `Drawn` compare; a profile is owed).
+Items about the popover are superseded by item 8c; the owed checks for the custom
+panel are listed there and in `notch-companion.md` rule 18.
+
+- The glow border energy on the island card (Instruments; budget under 2 % CPU
+  while sweeping).
+- Menu bar card, custom panel: typing a reply and Command-1 to Command-3 while
+  another app is frontmost; whether the status bar window takes key on click (the
+  lost-key rule could close and reopen the card); the top-edge shadow during the
+  morph; the VoiceOver dialog and focus return; an auto-hidden bar; Space and
+  full-screen behaviour.
+- Menu bar card (2026-11-15): the dot on the template ring image; status item
+  redraw frequency (guarded by the `Drawn` compare; a profile is owed).
+- Old popover items, no longer applicable: border inset, popover key status,
+  Escape closing the popover.
 - The overflow "»" fix and the leading-wing rule on a notched Mac on macOS 27.
 - Full-screen Spaces, for both the pill and the status item.
 - "Below the Dynamic Island" visual match (colour seam with the system island)

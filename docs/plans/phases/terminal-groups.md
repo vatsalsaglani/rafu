@@ -314,8 +314,37 @@ tests in 294 suites); the user confirmed the shell-folder restore in Rafu
 Lightning on macOS 27.2 (Mac17,13). Known limits and the capture rules are in
 [`terminal-last-working-folder.md`](../../references/terminal-last-working-folder.md).
 
-Open: unsaved Terminal Group tabs are still not restored; Restart Shell on an
-exited pane uses the original start folder.
+Open at that time: unsaved Terminal Group tabs were not restored; Restart Shell on
+an exited pane uses the original start folder. The first is closed by the entry
+below.
+
+### 2026-11-15: workspace-folder fallback and unsaved tabs restored (264fe9b, e305185)
+
+Delivered on `main` (merge 4fe79a0). User decisions (answer "YES" to each): a pane
+whose saved folder is gone starts in the workspace folder; unsaved Terminal Group
+tabs are restored when the window reopens. ADR 0023 has a second 2026-11-15
+amendment that supersedes "Rafu does not substitute the workspace root".
+
+- Start order: last folder, starting folder, workspace root. The root is used only
+  when the starting folder is gone (`lstat` ENOENT) and the root is usable. An
+  existing but unusable folder (symlink escape, file, unreadable, dangling
+  symlink) still refuses. Remote workspaces and Restart Shell are unchanged.
+- Restoration validates in the same order (new codec case
+  `.workspaceFolderFallback`). Labels read the session set
+  `terminalPanesStartingInWorkspaceFolder`, never the disk.
+- Unsaved groups with their own editor tab return, all panes stopped. Ensemble
+  groups, groups shown by a card, and groups with a card on an open board are
+  restored by the board only. No schema change. Caps unchanged.
+- New tests: `TerminalWorkspaceFolderFallbackTests`,
+  `TerminalUnsavedGroupRestorationTests`. Updated:
+  `TerminalLastWorkingFolderTests`, `TerminalGroupRestorationIntegrationTests`,
+  `TerminalGroupSessionIntegrationTests`.
+
+Evidence (Swift 6.4.2, Xcode with macOS 27.2 SDK 26B118, Darwin 27.2.0, Mac17,13):
+on the branch, parallel 495 tests and 3861 tests in 316 suites. Main gate for the
+Terminals merge: run by the coordinator. No device check yet; the user tests at
+the end. Facts and limits:
+[`terminal-last-working-folder.md`](../../references/terminal-last-working-folder.md).
 
 ## Explicit non-goals
 

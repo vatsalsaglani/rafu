@@ -84,6 +84,94 @@ actor and attaches the split in a detached task, writes the snapshot, then reloa
 both widget kinds. Write tasks chain: each waits for the previous one and is not
 cancelled, so the newest snapshot is written last.
 
+## Codex rollout backfill (commit 9c7e7b2, 2026-11-15)
+
+Last verified: Swift 6.4.2, Xcode with macOS 27.2 SDK (26B118), Darwin 27.2.0,
+Mac17,13. On the branch the parallel suite passed 523 tests in 40 suites and 3850
+tests in 314 suites. Main gate: run by the coordinator. Tests:
+`CodexRolloutBackfillTests` (28 in 4 suites). No GUI check yet.
+
+The live log starts empty after install and only grows while Rafu runs. Codex
+writes rate-limit snapshots into its rollout files, so Rafu reads them once a day
+to fill in the earlier part of the weekly window.
+
+**Verified line shape.** One JSON object per line:
+
+```json
+{"timestamp": "<ISO-8601 with fractional seconds>", "ordinal": 0, "type": "event_msg",
+ "payload": {"type": "token_count", "rate_limits": {"limit_id": "...", "limit_name": "...",
+   "primary": {"used_percent": 0, "window_minutes": 300, "resets_at": 0},
+   "secondary": {"used_percent": 0, "window_minutes": 10080, "resets_at": 0},
+   "credits": null, "plan_type": "..."}}}
+```
+
+`resets_at` is epoch seconds.
+
+**Which window.** The weekly window is the one with `window_minutes == 10080`. It
+is `primary` when there is no 5 h window, and `secondary` when `primary` is 300.
+It maps to provider `codex`, window label `"7d"`. Rules:
+
+- Accept `limit_id` "codex" or absent. Skip other ids (for example
+  `codex_bengalfox`).
+- A `rate_limits` that is not an object is skipped.
+- The decoder reads only `timestamp`, `used_percent`, `window_minutes`,
+  `resets_at`, `limit_id` and the payload type. `Sample` has no string fields.
+- One sample per 15-minute bucket.
+
+**Gates.**
+
+- The Codex provider has a snapshot. With the provider off, rollouts are never
+  read.
+- Staged bundle only (same rule as the log file).
+- At most once a day: `UserDefaults` key `RafuUsageCodexBackfillLastRun`, set only
+  when a run finishes. The first publish triggers it.
+- It runs in a detached utility task. Cancellation is checked between entries and
+  between chunks.
+
+**Limits.**
+
+| Limit | Value |
+|---|---|
+| Files | 40, newest first |
+| Tail per file | 8 MiB (the cut first line is dropped) |
+| Total read | 128 MiB |
+| Line | 64 KiB cap; a longer line is skipped without being kept |
+| Directory entries | 50,000 |
+| Chunk | 256 KiB |
+
+One autorelease pool per chunk and per enumerator step; `skipDescendants()` is
+never called (see
+[`memory-and-file-indexing.md`](memory-and-file-indexing.md)).
+
+**File ranking.** Modification day, then the start stamp in the file name
+(`rollout-YYYY-MM-DDThh-mm-ss`), then mtime. On this machine all 261 rollout files
+had the same modification day, so the name stamp decided. Real files reach 240 MB
+with lines of 15 MB, which is why the tail and line caps exist.
+
+**Merge (`UsageSampleLog.mergeBackfill`).**
+
+- Add a backfill sample only when no record of the same provider and window lies
+  within 15 minutes. Live records win, and a second run adds nothing (idempotent).
+- Exception: keep it when both `resetsAt` values are known and differ by more than
+  10 minutes (a reset boundary).
+- Ignore a sample older than 35 days, more than 60 s in the future, or non-finite.
+- At most 1,000 samples per merge. Live records are never changed.
+- `UsageSampleRecord.isBackfill` uses key `"b"`, written only when true. An old log
+  reads every record as live; `formatVersion` stays 1.
+- A changed log clears `lastFingerprint`, so the next publish reloads the widgets.
+- The estimated flag needs no rule change: sparse backfill reads as estimated, and
+  15-minute-dense backfill reads as exact.
+
+**Evidence.** A real-data Debug run took 0.06 s and produced 9 samples over 2 days.
+
+**Limits to remember.**
+
+- Only the last 8 MiB of each file is read.
+- Other `limit_id` values are skipped.
+- More than 40 files touched on the same day can drop an old resumed session.
+- A backfill sample within 15 minutes of the first live sample after launch is
+  dropped.
+
 ## Hundred widget ("Agent usage dots")
 
 Kind `dev.vatsalsaglani.rafu.widgets.hundred`, small and medium. Pure
@@ -114,7 +202,8 @@ Kind `dev.vatsalsaglani.rafu.widgets.hundred`, small and medium. Pure
   percent change or the 15-minute keep-alive reload.
 - Gaps and a log that starts mid-window are interpolated. W2 did not mark them;
   W3 marks them with the estimated flag (rule above).
-- The log grows only while Rafu runs. The Codex rollout backfill is not done.
+- The log grows only while Rafu runs, apart from the Codex rollout backfill (next
+  section). It has the limits listed there.
 - The log is not deleted when a provider is turned off. Records expire after 35
   days.
 
@@ -137,6 +226,7 @@ result to a `let` first. See [`concurrency.md`](concurrency.md).
 ## Verification
 
 ```bash
+swift test --filter CodexRolloutBackfillTests
 swift test --filter UsageSampleLogTests
 swift test --filter WidgetHundredTests
 swift test --filter UsageDailyEstimateTests

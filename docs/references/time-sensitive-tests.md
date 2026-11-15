@@ -51,14 +51,47 @@ Rules:
 - The directory-notification failure deadline is 120 s. The test still waits
   for the real notification.
 
-## Same pattern, not failing yet
+## Shared polling helper (commit b4ed608, 2026-11-15)
 
-Not changed in this pass. Fix them when one of them fails under load:
+The "same pattern, not failing yet" suites are now fixed. One shared file,
+`Tests/RafuAppTests/PollingSupport.swift`, replaces the private copies. Do not add
+private copies.
 
-- `LSPNavigationProviderTests`
-- `LanguageServerSessionTests`
-- `TerminalAttentionTests` (20,000-yield budget)
-- `CanvasLiveBridgeTests` (1,000-yield budget)
+- `TestPolling` holds the constants: 120 s deadline; up to 1,000 yields, then 1 ms
+  sleeps; it stops early on cancellation.
+- `waitUntil(timeout:isolation:_:) -> Bool`: the predicate runs on the caller's
+  actor (`#isolation`).
+- `until(_ label, ...) async throws`: on timeout it records an issue and throws
+  `CancellationError`.
+- `waitUntilOnMain(...)`: for tests that are not `@MainActor` and read
+  `@MainActor` state.
+
+Suites moved to the helper: `LSPNavigationProviderTests`,
+`LanguageServerSessionTests`, `TerminalAttentionTests`, `CanvasLiveBridgeTests`,
+`CanvasAgentActionsTests`, `ViewToolsPolicyTests`, `CanvasAgentConfigureTests`,
+`CanvasChannelPromptLaunchTests`, `VoiceSessionIntegrationTests`,
+`VoiceShowViewTests`, `TerminalEditorTabTests`, `LanguageServerManagerTests`,
+`LanguageIntelligenceCoordinatorTests`, `LanguageServerTrustFlowTests`,
+`LanguageServersCatalogModelTests`, `WorkspaceTrustSettingsModelTests`.
+
+- Negative assertions keep a bounded yield drain (`drainPendingTasks`,
+  `holdsAfterDrain`, and the two `Task.yield()` calls in the Voice closed-session
+  test), because "nothing happens" has no event to wait for.
+- A fixed 20 ms `Task.sleep` that waited for a subscriber raced the subscription
+  task. Wait on observable state instead. The seam is
+  `EditorDocument.editDeltaSubscriberCountForTesting` (read-only).
+
+**Real-time timer tests left unchanged** (the delay is the behaviour under test):
+`LanguageServerManagerTests` idle timeout (60 ms with 30, 45 and 120 ms sleeps),
+`LanguageIntelligenceCoordinatorTests` 50 and 100 ms negative waits,
+`MultiCaretUndoDiagnosticTests`, `LauncherRequestRouterTests` (2 s connection
+count) and `CanvasBoardDropRoutingTests` (10 ms). Fix one of them when it fails
+under load.
+
+Stress evidence (Swift 6.4.2, Xcode with macOS 27.2 SDK 26B118, Darwin 27.2.0,
+Mac17,13): 3 parallel runs with 30 `yes` processes plus ambient load of about 70 to
+95, each 495 tests and 3850 tests, all green. Main gate after the later merges:
+495 tests in 36 suites and 3870 tests in 314 suites, parallel and `--no-parallel`.
 
 ## Why it matters
 
@@ -91,6 +124,8 @@ swift test --filter "<exact test name>"   # isolation
 - `VoiceSession.Dependencies.now` (the voice session sources) and
   `VoiceManualClock` plus the `until` helper (the test target); search with
   `rg -n "VoiceManualClock|func until" Tests`
+- `Tests/RafuAppTests/PollingSupport.swift` (`TestPolling`, `waitUntil`, `until`,
+  `waitUntilOnMain`)
 - [`concurrency.md`](concurrency.md),
   [`ensemble-headless-test-rigs.md`](ensemble-headless-test-rigs.md) (bound
   awaits; real-socket flows)
