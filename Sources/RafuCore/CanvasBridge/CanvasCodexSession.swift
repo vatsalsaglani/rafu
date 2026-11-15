@@ -184,8 +184,22 @@ public nonisolated enum CanvasCodexSession {
             }
             phase = .proxy
             let frontend = directory + "/terminal"
+            // A reconnected TUI back on the prepared thread restores a link lost
+            // in transport. The app checks the endpoint, thread and reason again.
+            var resume: (@Sendable () throws -> Void)?
+            if let thread = preparedThread {
+                let request = CanvasBridgeRequest(
+                    token: token, operation: "resume", provider: "codex", threadID: thread,
+                    endpoint: endpoint)
+                resume = {
+                    guard try exchange(request).error == nil else {
+                        throw SessionError.deliveryFailed
+                    }
+                }
+            }
             let proxy = try CanvasCodexProxy(
-                frontend: frontend, backend: endpoint, threadID: preparedThread ?? ""
+                frontend: frontend, backend: endpoint, threadID: preparedThread ?? "",
+                resume: resume
             ) { reason in
                 let request = CanvasBridgeRequest(
                     token: token, operation: "suspend", provider: "codex", endpoint: endpoint,
@@ -228,9 +242,17 @@ public nonisolated enum CanvasCodexSession {
             _ = try? exchange(
                 CanvasBridgeRequest(
                     token: token, operation: "release", provider: "codex", endpoint: endpoint))
-            if let loss = proxy.lostLink {
+            switch proxy.outcome {
+            case .intact:
+                break
+            case .lost(let loss):
                 report(
                     "Rafu: The Ensemble link to this Codex session was lost (\(loss.rawValue)). Run codex again to reconnect."
+                )
+            case .restored(let count, let first):
+                let times = count == 1 ? "once" : "\(count) times"
+                report(
+                    "Rafu: The Ensemble link to this Codex session dropped \(times) (first: \(first.rawValue)) and reconnected."
                 )
             }
             return status
