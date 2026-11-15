@@ -197,6 +197,33 @@ The bridge gains one operation, `launch`, sent by the `claude` wrapper before it
 replaces itself with Claude. Existing operations and their shapes are unchanged.
 See [`../references/canvas-live-sessions.md`](../references/canvas-live-sessions.md).
 
+## Amendment (2026-11-15): the Codex relay survives a dropped TUI connection
+
+The user saw Codex in an Ensemble terminal print "Reconnecting to server…" and
+then "Reconnect failed". The relay stopped listening after the first accept, and
+nothing restored the link after a drop. This amendment changes the suspension
+rules above for Codex.
+
+- The relay listener lives for the whole supervisor run. One TUI connection is
+  active; a newer connection replaces it without counting as a loss. A failed
+  connection closes only itself.
+- A connection failure still suspends the route at once with reason
+  `transportLost`. A new bridge operation, `resume`, clears it. The relay sends
+  `resume` once per connection, when the reconnected TUI sends a request with
+  `params.threadId` equal to the bound thread. The app clears the suspension
+  only for provider codex, the same endpoint, the same thread, and reason
+  `transportLost`; it refuses every other case.
+- A changed conversation (`sessionChanged`) is final: it is never resumed, and
+  an explicit `sessionChanged` overrides an earlier `transportLost`.
+- The relay removes the compression offer from the forwarded upgrade request,
+  because its frame checks need a plain-text stream.
+- Security: any same-user process that reaches the 0700 relay directory can
+  replace the active connection. Each connection gets the full frame checks.
+
+Evidence, limits and open questions:
+[`../references/ensemble-bridge-resilience.md`](../references/ensemble-bridge-resilience.md),
+"Codex relay reconnect (2026-11-15)".
+
 ## Amendment (2026-11-12): agent starts without a visible card, and messages to a starting peer
 
 By the user's direction ("until the user starts the terminal it doesn't start

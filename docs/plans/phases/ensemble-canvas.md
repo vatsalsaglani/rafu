@@ -742,6 +742,32 @@ sections 9 and 11; ADR 0024 Amendment 1; ADR 0023 and ADR 0025 notes.
   terminal in Allow and in Ask; five or more live Ensemble terminals at once;
   relaunch with more than 20 terminal cards; Edit > Undo after an agent close.
 
+## Status (2026-11-15, Codex relay keeps listening and resumes the link after a reconnect)
+
+User report: Codex in an Ensemble terminal showed "Reconnecting to server…", then
+"Automatic reconnect timed out … Reconnect failed". Commits `b949dda` and
+`2e47ddd`, merge `621a96a`. Decision: ADR 0026 Amendment (2026-11-15). Details:
+`docs/references/ensemble-bridge-resilience.md`, "Codex relay reconnect".
+
+- **Cause.** The relay cancelled its listener on the first accept (the TUI's
+  reconnect got `ECONNREFUSED`), one IO failure ended both workers, and nothing
+  resumed the link after `suspend(transportLost)`.
+- **Delivered.** Listener lives for the supervisor run; per-connection state;
+  newest connection wins; link states live / lostInTransport / sessionChanged;
+  new bridge operation `resume`; exit line from the outcome; cause
+  `terminalClosed`; a masked close frame from `CanvasCodexRPC.deinit`; the relay
+  strips `x-codex-app-server-compression` and `Sec-WebSocket-Extensions`.
+- **Tests.** Five relay tests (the reconnect test fails on the old code with
+  `ECONNREFUSED`; the large-notification test also passes on old code), plus
+  `CanvasLiveBridgeTests` resume rules. Parallel on the branch before `2e47ddd`:
+  528 tests in 40 suites and 3895 in 317. Main gates, parallel and
+  `--no-parallel`: 529 tests in 40 suites and 3903 tests in 318 suites passed in each mode; `build_and_run.sh --verify` passed (Apple Swift 6.4.2, macOS 27.2).
+- **Open.** The drop trigger is unproven (compression negotiation, now removed;
+  the 10 s write and frame deadlines). Not proven that codex-cli 0.169.0 sends
+  `thread/resume` after a reconnect; if not, the link is live again at the next
+  request with the bound `threadId`. Manual check in Rafu Lightning: drop the
+  Codex connection and confirm the TUI reconnects and the link shows live.
+
 ## Status (2026-11-15, a user add starts the shell; the lease follows the card; wheel scroll in cards)
 
 Three user-reported defects, fixed in commits `7a22232` (terminals) and `7ffab02`
