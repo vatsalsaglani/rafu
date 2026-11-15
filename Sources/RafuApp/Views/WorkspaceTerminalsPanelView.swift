@@ -75,6 +75,18 @@ struct WorkspaceTerminalsPanelView: View {
     @State private var groupRenameText = ""
     @State private var renamingPaneID: TerminalPaneID?
     @State private var paneRenameText = ""
+    /// The native list's single selection: the keyboard cursor. It follows
+    /// the current terminal; Up and Down move it without opening anything,
+    /// and Return or Space opens the selected row. Its tags come from
+    /// `TerminalsPanelListModel` and never change when a title changes.
+    @State private var listSelection: String?
+    /// Per window: the Terminal Groups whose pane rows are hidden. Groups
+    /// start expanded, so only collapsed ones are stored.
+    @SceneStorage(TerminalsPanelListModel.expansionStorageKey)
+    private var storedCollapsedGroups = ""
+    /// Per window, so two windows keep their own open/closed choice for the
+    /// Saved Terminal Groups section ("" none, "open", "closed").
+    @SceneStorage("terminals.savedGroups.expanded") private var storedSavedExpansion = ""
 
     var body: some View {
         // Derived ONCE per body evaluation, never per-row inside a `ForEach`
@@ -93,6 +105,11 @@ struct WorkspaceTerminalsPanelView: View {
             canvasOwnedGroupIDs: session.canvasCardTerminalGroupIDs
         )
         let managerItemCount = rows.count { $0.isManagerItem }
+        let listRows = TerminalsPanelListModel.visibleRows(
+            rows,
+            collapsedGroupIDs: TerminalsPanelListModel.collapsedGroupIDs(
+                fromStored: storedCollapsedGroups))
+        let currentRowID = TerminalsPanelListModel.currentRowID(listRows)
         // No permanent Start Agent card and no divider: Start Agent is a
         // header action (and a button in the empty state) that opens the
         // same popover.
@@ -100,10 +117,10 @@ struct WorkspaceTerminalsPanelView: View {
             header(count: managerItemCount)
             if rows.isEmpty {
                 emptyState
+                savedOnlyList
             } else {
-                hierarchyList(rows)
+                terminalList(listRows)
             }
-            TerminalGroupSavedLayoutsSection(session: session)
         }
         // Load-bearing per AGENTS' panel-top-alignment rule (see
         // `GitInspectorView`'s identical comment): `.frame(maxHeight:
@@ -111,6 +128,11 @@ struct WorkspaceTerminalsPanelView: View {
         // (few/no sessions) would float the header + list stack to the
         // vertical middle instead of pinning to the top.
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        // The selection follows the terminal shown in the editor.
+        .onChange(of: currentRowID, initial: true) { _, current in
+            listSelection = TerminalsPanelListModel.selectionFollowingCurrent(
+                current, selection: listSelection, rows: listRows)
+        }
         .task(id: AgentProbeIdentity(root: session.rootURL, token: agentProbeToken)) {
             guard let root = session.rootURL else {
                 agentTerminalOptions = []
@@ -238,67 +260,216 @@ struct WorkspaceTerminalsPanelView: View {
         }
     }
 
-    /// One row per group (its panes become indented rows under it) and one
-    /// row per legacy session. `.pane` rows render nothing on their own.
-    private func hierarchyList(_ rows: [TerminalsPanelModel.HierarchyRow]) -> some View {
-        // Grouped ONCE per render, never per card inside the `ForEach`.
-        var panesByGroup: [TerminalGroupID: [TerminalsPanelModel.TerminalPaneRow]] = [:]
-        for case .pane(let pane) in rows { panesByGroup[pane.groupID, default: []].append(pane) }
-        let cardRows = rows.filter(\.isManagerItem)
-        return ScrollView {
-            LazyVStack(spacing: 2) {
-                ForEach(cardRows) { row in
-                    switch row {
-                    case .group(let group):
-                        TerminalGroupManagerRowView(
-                            row: group,
-                            panes: panesByGroup[group.id] ?? [],
-                            isRenaming: renamingGroupID == group.id,
-                            renameText: $groupRenameText,
-                            renamingPaneID: renamingPaneID,
-                            paneRenameText: $paneRenameText,
-                            paneActions: paneActions,
-                            reveal: { session.revealTerminalGroupWhereItLives(group.id) },
-                            hide: { session.hideTerminalGroup(group.id) },
-                            beginRename: { beginGroupRename(group) },
-                            commitRename: { commitGroupRename(group.id) },
-                            cancelRename: cancelGroupRename,
-                            saveLayout: session.isTerminalGroupStoreMutationInFlight
-                                ? nil : { session.requestTerminalGroupSaveAs(group.id) },
-                            updateSavedLayout: session.isTerminalGroupStoreMutationInFlight
-                                || !group.isSaved
-                                ? nil : { session.requestTerminalGroupSave(group.id) },
-                            startAll: group.hasRestartablePane
-                                ? { session.startAllRestartableTerminalPanes(in: group.id) } : nil,
-                            close: { session.requestTerminalGroupClose(group.id) },
-                            session: session
-                        )
-                    case .pane:
-                        // Drawn as an indented row inside its group's row.
-                        EmptyView()
-                    case .legacy(let legacy, let isCurrent):
-                        TerminalSessionRowView(
-                            row: legacy,
-                            isCurrent: isCurrent,
-                            isRenaming: renamingID == legacy.id,
-                            renameText: $renameText,
-                            reveal: { session.revealTerminalSession(legacy.id) },
-                            hide: legacy.isParked
-                                ? nil : { session.hideTerminalSession(legacy.id) },
-                            close: { session.closeTerminalSession(legacy.id) },
-                            beginRename: { beginRename(legacy) },
-                            commitRename: { commitRename(legacy.id) },
-                            cancelRename: cancelRename,
-                            resetName: { session.renameTerminalSession(legacy.id, to: nil) },
-                            setColor: { color in session.setTerminalSessionColor(legacy.id, color) }
-                        )
-                    }
-                }
+    /// The native list (direction A, "Quiet list"): one row per group, its
+    /// panes as indented rows under it while it is expanded, one row per
+    /// legacy session, then the Saved Terminal Groups section. One Tab stop;
+    /// Up and Down move the selection, Return or Space opens, Left and Right
+    /// close and open a group (`TerminalsPanelListModel.action`).
+    private func terminalList(_ listRows: [TerminalsPanelListModel.Row]) -> some View {
+        List(selection: $listSelection) {
+            ForEach(listRows) { row in
+                listRow(row)
+                    .tag(row.id)
+                    .listRowInsets(TerminalPanelRowMetrics.listRowInsets)
+                    .listRowSeparator(.hidden)
             }
-            // Rows pad 6 pt inside, so the text starts on the 10 pt edge.
-            .padding(.horizontal, TerminalPanelRowMetrics.outerInset)
-            .padding(.bottom, RafuMetrics.space2)
+            savedSection
         }
+        .terminalsPanelListStyle(theme: theme)
+        .onKeyPress(keys: [.return, .space, .leftArrow, .rightArrow]) { press in
+            handleKey(press.key, rows: listRows)
+        }
+        .accessibilityLabel("Terminals")
+    }
+
+    /// With no terminal rows, the Saved section is the panel's one pinned
+    /// footer under the empty state, so it keeps the hairline above it. Its
+    /// list is sized to its rows (`footerHeight`), so the empty state keeps
+    /// the remaining space and stays centred in it.
+    private var savedOnlyList: some View {
+        let state = TerminalGroupSavedLayoutsPresentation.state(
+            hasWorkspace: session.rootURL != nil, isLoading: session.isTerminalGroupStoreLoading,
+            error: session.terminalGroupStoreError, recordCount: session.savedTerminalGroups.count)
+        let isExpanded = isSavedSectionExpanded(state)
+        return VStack(spacing: 0) {
+            Divider().overlay(theme.palette.borderSubtle)
+            List(selection: $listSelection) {
+                savedSection
+            }
+            .terminalsPanelListStyle(theme: theme)
+            .onKeyPress(keys: [.return, .space, .leftArrow, .rightArrow]) { press in
+                handleKey(press.key, rows: [])
+            }
+            .accessibilityLabel("Saved Terminal Groups")
+            .frame(
+                height: TerminalGroupSavedLayoutsPresentation.footerHeight(
+                    state: state, isExpanded: isExpanded,
+                    recordCount: session.savedTerminalGroups.count))
+        }
+        .padding(.bottom, RafuMetrics.space1)
+    }
+
+    private var savedSection: some View {
+        TerminalGroupSavedLayoutsSection(
+            session: session, storedExpansion: $storedSavedExpansion, selection: $listSelection)
+    }
+
+    private func isSavedSectionExpanded(_ state: TerminalGroupSavedLayoutsPresentation.State)
+        -> Bool
+    {
+        TerminalGroupSavedLayoutsPresentation.isExpanded(
+            userChoice: TerminalGroupSavedLayoutsPresentation.userChoice(
+                fromStored: storedSavedExpansion),
+            state: state)
+    }
+
+    @ViewBuilder
+    private func listRow(_ row: TerminalsPanelListModel.Row) -> some View {
+        switch row {
+        case .group(let group, let panes, let isDisclosable, let isExpanded):
+            TerminalGroupManagerRowView(
+                row: group,
+                panes: panes,
+                isSelected: listSelection == row.id,
+                isDisclosable: isDisclosable,
+                isExpanded: isExpanded,
+                isRenaming: renamingGroupID == group.id,
+                renameText: $groupRenameText,
+                paneActions: paneActions,
+                select: { listSelection = row.id },
+                setExpanded: { expand in setGroup(group.id, expanded: expand) },
+                reveal: { session.revealTerminalGroupWhereItLives(group.id) },
+                hide: { session.hideTerminalGroup(group.id) },
+                beginRename: { beginGroupRename(group) },
+                commitRename: { commitGroupRename(group.id) },
+                cancelRename: cancelGroupRename,
+                saveLayout: session.isTerminalGroupStoreMutationInFlight
+                    ? nil : { session.requestTerminalGroupSaveAs(group.id) },
+                updateSavedLayout: session.isTerminalGroupStoreMutationInFlight
+                    || !group.isSaved
+                    ? nil : { session.requestTerminalGroupSave(group.id) },
+                startAll: group.hasRestartablePane
+                    ? { session.startAllRestartableTerminalPanes(in: group.id) } : nil,
+                close: { session.requestTerminalGroupClose(group.id) },
+                session: session
+            )
+        case .pane(let pane):
+            TerminalPaneRowView(
+                row: pane,
+                agentStatus: paneAgentStatus(for: pane),
+                isSelected: listSelection == row.id,
+                isRenaming: renamingPaneID == pane.id,
+                renameText: $paneRenameText,
+                select: { listSelection = row.id },
+                actions: paneActions
+            )
+        case .legacy(let legacy, let isCurrent):
+            TerminalSessionRowView(
+                row: legacy,
+                isCurrent: isCurrent,
+                isSelected: listSelection == row.id,
+                isRenaming: renamingID == legacy.id,
+                renameText: $renameText,
+                select: { listSelection = row.id },
+                reveal: { session.revealTerminalSession(legacy.id) },
+                hide: legacy.isParked
+                    ? nil : { session.hideTerminalSession(legacy.id) },
+                close: { session.closeTerminalSession(legacy.id) },
+                beginRename: { beginRename(legacy) },
+                commitRename: { commitRename(legacy.id) },
+                cancelRename: cancelRename,
+                resetName: { session.renameTerminalSession(legacy.id, to: nil) },
+                setColor: { color in session.setTerminalSessionColor(legacy.id, color) }
+            )
+        }
+    }
+
+    private func paneAgentStatus(for pane: TerminalsPanelModel.TerminalPaneRow) -> AgentCardStatus?
+    {
+        guard
+            let snapshot = session.terminal.terminalGroup(pane.groupID)?.panes.first(where: {
+                $0.id == pane.id
+            })
+        else { return nil }
+        return CanvasCardCommands.agentCardStatus(pane: snapshot, in: session)
+    }
+
+    // MARK: Keyboard and expansion
+
+    /// Whether any inline rename field is open. Keys then belong to the field.
+    private var isRenaming: Bool {
+        renamingID != nil || renamingGroupID != nil || renamingPaneID != nil
+    }
+
+    private func handleKey(_ key: KeyEquivalent, rows: [TerminalsPanelListModel.Row])
+        -> KeyPress.Result
+    {
+        guard !isRenaming else { return .ignored }
+        let mapped: TerminalsPanelListModel.Key
+        switch key {
+        case .return: mapped = .returnKey
+        case .space: mapped = .space
+        case .leftArrow: mapped = .leftArrow
+        case .rightArrow: mapped = .rightArrow
+        default: return .ignored
+        }
+        let savedState = TerminalGroupSavedLayoutsPresentation.state(
+            hasWorkspace: session.rootURL != nil, isLoading: session.isTerminalGroupStoreLoading,
+            error: session.terminalGroupStoreError, recordCount: session.savedTerminalGroups.count)
+        let action = TerminalsPanelListModel.action(
+            for: mapped, selection: listSelection, rows: rows,
+            isSavedExpanded: isSavedSectionExpanded(savedState))
+        switch action {
+        case .open(let id):
+            openRow(id, rows: rows)
+        case .expand(let groupID):
+            setGroup(groupID, expanded: true)
+        case .collapse(let groupID):
+            setGroup(groupID, expanded: false)
+        case .select(let id):
+            listSelection = id
+        case .setSavedExpanded(let expand):
+            storedSavedExpansion = expand ? "open" : "closed"
+        case .none:
+            return .ignored
+        }
+        return .handled
+    }
+
+    /// Return and Space: the same action as a click on the row.
+    private func openRow(_ id: String, rows: [TerminalsPanelListModel.Row]) {
+        if TerminalsPanelListModel.isSavedLayoutRowID(id) {
+            guard !session.isTerminalGroupStoreMutationInFlight,
+                let record = session.savedTerminalGroups.first(where: {
+                    TerminalsPanelListModel.savedRowID($0.id) == id
+                })
+            else { return }
+            session.openSavedTerminalGroup(record.id)
+            return
+        }
+        switch rows.first(where: { $0.id == id }) {
+        case .group(let group, _, _, _): session.revealTerminalGroupWhereItLives(group.id)
+        case .pane(let pane): paneActions.revealAndFocus(pane)
+        case .legacy(let legacy, _): session.revealTerminalSession(legacy.id)
+        case nil: break
+        }
+    }
+
+    /// Writes the per-window expansion. A collapse first moves a selected
+    /// pane of that group to the group row, so no hidden row stays selected.
+    private func setGroup(_ groupID: TerminalGroupID, expanded: Bool) {
+        let collapsed = TerminalsPanelListModel.collapsedGroupIDs(
+            fromStored: storedCollapsedGroups)
+        if !expanded {
+            listSelection = TerminalsPanelListModel.selectionAfterCollapsing(
+                groupID,
+                paneIDs: session.terminal.terminalGroup(groupID)?.panes.map(\.id) ?? [],
+                selection: listSelection)
+        }
+        let next = TerminalsPanelListModel.toggled(
+            groupID, expand: expanded, in: collapsed,
+            liveGroupIDs: Set(session.terminal.terminalGroups.map(\.id)))
+        storedCollapsedGroups = TerminalsPanelListModel.storedValue(collapsedGroupIDs: next)
     }
 
     /// Every pane action names its exact pane; rename state stays on the
@@ -581,6 +752,48 @@ private enum TerminalPanelRowMetrics {
     static let twoLineHeight: CGFloat = 40
     static let paneRowHeight: CGFloat = 22
     static let paneIndent: CGFloat = 22
+    /// The group chevron sits in the 8 pt before the identity icon, so a
+    /// disclosable group keeps the same text edge as every other row.
+    static let disclosureWidth: CGFloat = 8
+    /// The list row owns the 4 pt outer inset; rows pad 6 pt inside, so the
+    /// text starts on the 10 pt sidebar edge. 1 pt above and below keeps the
+    /// 2 pt gap the stacked rows had.
+    static let listRowInsets = EdgeInsets(
+        top: 1, leading: outerInset, bottom: 1, trailing: outerInset)
+}
+
+extension View {
+    /// The Terminals panel's native list: `.plain` like the Files tree (rows
+    /// draw their own hover; no sidebar insets), no scroll background so the
+    /// sidebar (or the frosted window) shows through, overlay scrollers, and
+    /// the system selection tinted with the theme's `selection` token.
+    fileprivate func terminalsPanelListStyle(theme: RafuTheme) -> some View {
+        listStyle(.plain)
+            .environment(\.defaultMinListRowHeight, TerminalPanelRowMetrics.paneRowHeight)
+            .scrollContentBackground(.hidden)
+            .background(OverlayScrollerConfigurator(knobStyle: theme.isDark ? .light : .dark))
+            .tint(theme.palette.selection)
+    }
+}
+
+/// Under Increase Contrast the selected row also gets a `borderStrong`
+/// hairline, so selection never rests on a low-contrast fill alone.
+private struct TerminalRowSelectionHairline: ViewModifier {
+    let isSelected: Bool
+
+    @Environment(\.rafuTheme) private var theme
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    func body(content: Content) -> some View {
+        content.overlay {
+            if isSelected && contrast == .increased {
+                RoundedRectangle(cornerRadius: TerminalPanelRowMetrics.radius, style: .continuous)
+                    .strokeBorder(theme.palette.borderStrong, lineWidth: RafuMetrics.hairline)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
+        }
+    }
 }
 
 /// The 16 pt trailing status glyph. An agent pane uses `AgentActivityGlyph`
@@ -621,7 +834,7 @@ private struct TerminalStatusGlyph: View {
 }
 
 /// The trailing `ellipsis` menu shown over the status slot on hover and on
-/// keyboard focus. The same items are in the row's context menu, so nothing
+/// the list selection. The same items are in the row's context menu, so nothing
 /// is reachable only by hovering.
 private struct TerminalRowActionsMenu<Items: View>: View {
     let label: String
@@ -652,21 +865,29 @@ private struct TerminalRowActionsMenu<Items: View>: View {
 /// One Terminal Group as a two-line row: the identity mark (the focused
 /// pane's agent mark, else a terminal glyph), the title over the second line
 /// (abnormal status word · agent · folder · placement), and a 16 pt status
-/// glyph. The drag grip and the ⋯ menu are hover/focus overlays, so they take
-/// no width from the title. A group with more than one pane lists its panes
-/// as indented rows under it. The group row is the drag source.
+/// glyph. The drag grip and the ⋯ menu are hover/selection overlays, so they
+/// take no width from the title. A group with more than one pane is a
+/// disclosure row: its chevron sits before the identity icon, and the panel
+/// lists its panes as indented list rows under it while it is expanded. The
+/// group row is the drag source.
 ///
-/// Selection is the `selection` fill (with a hairline under Increase
-/// Contrast); the amber border is reserved for attention.
+/// Selection is the list's own selection (tinted with the theme `selection`
+/// token, plus a hairline under Increase Contrast); the amber border is
+/// reserved for attention. The current group is semibold.
 private struct TerminalGroupManagerRowView: View {
     let row: TerminalsPanelModel.TerminalGroupRow
     /// This group's panes, in pane order (`TerminalsPanelModel.hierarchyRows`).
     let panes: [TerminalsPanelModel.TerminalPaneRow]
+    /// Whether the list selection is this row.
+    let isSelected: Bool
+    /// More than one pane: the row has a chevron and pane rows.
+    let isDisclosable: Bool
+    let isExpanded: Bool
     let isRenaming: Bool
     @Binding var renameText: String
-    let renamingPaneID: TerminalPaneID?
-    @Binding var paneRenameText: String
     let paneActions: TerminalPaneActions
+    let select: () -> Void
+    let setExpanded: (Bool) -> Void
     let reveal: () -> Void
     let hide: () -> Void
     let beginRename: () -> Void
@@ -682,8 +903,8 @@ private struct TerminalGroupManagerRowView: View {
     let session: WorkspaceSession
 
     @Environment(\.rafuTheme) private var theme
-    @FocusState private var isFocused: Bool
     @State private var isHovering = false
+    @FocusState private var isRenameFieldFocused: Bool
     @ScaledMetric(relativeTo: .body) private var scaledMinimumHeight: CGFloat =
         TerminalPanelRowMetrics.twoLineHeight
     /// This row's own identity for the dimmed source ghost while it is
@@ -693,51 +914,34 @@ private struct TerminalGroupManagerRowView: View {
 
     var body: some View {
         let focused = focusedPane
-        let focusedStatus = focused.flatMap {
+        let agentStatus = focused.flatMap {
             CanvasCardCommands.agentCardStatus(pane: $0, in: session)
         }
-        VStack(alignment: .leading, spacing: 0) {
-            groupRow(focused: focused, agentStatus: focusedStatus)
-            if panes.count > 1 {
-                ForEach(panes) { pane in
-                    TerminalPaneRowView(
-                        row: pane,
-                        agentStatus: paneAgentStatus(for: pane),
-                        isRenaming: renamingPaneID == pane.id,
-                        renameText: $paneRenameText,
-                        actions: paneActions
-                    )
-                }
-            }
-        }
-    }
-
-    private func groupRow(focused: TerminalPaneSnapshot?, agentStatus: AgentCardStatus?)
-        -> some View
-    {
         surface(content(focused: focused, agentStatus: agentStatus))
             // One tap handler (docs/references/swiftui-macos-click-latency.md):
-            // reveal at once; the second click of a double-click also renames.
+            // select and reveal at once; the second click of a double-click
+            // also renames. Not a `Button`, so `.onDrag` keeps the press.
             .onTapGesture {
+                select()
                 reveal()
                 if TabClickIntent.current() == .selectAndRename { beginRename() }
             }
-            .focusable()
-            .focused($isFocused)
-            .onKeyPress(.return) {
-                reveal()
-                return .handled
-            }
             .onHover { isHovering = $0 }
-            // The ⋯ menu is hover- and focus-revealed; the same items are
+            // The ⋯ menu is hover- and selection-revealed; the same items are
             // here, so nothing is reachable only by hovering.
             .contextMenu { actions }
             .help(tooltip)
             .accessibilityElement(children: .contain)
             .accessibilityLabel("Terminal Group, \(row.rowTitle)")
             .accessibilityValue(accessibilityValue(agentStatus))
-            .accessibilityAddTraits(row.isCurrent ? .isSelected : [])
+            .accessibilityAddTraits(row.isCurrent ? [.isButton, .isSelected] : .isButton)
+            .accessibilityAction { reveal() }
             .accessibilityAction(named: "Reveal") { reveal() }
+            .accessibilityActions {
+                if isDisclosable {
+                    Button(isExpanded ? "Collapse" : "Expand") { setExpanded(!isExpanded) }
+                }
+            }
             .accessibilityAction(named: "Close Group") { close() }
     }
 
@@ -769,19 +973,44 @@ private struct TerminalGroupManagerRowView: View {
             ) { actions }
         }
         .overlay(alignment: .leading) {
-            // The whole row is the drag source; the grip is only a hint.
-            Image(systemName: "line.3.horizontal")
-                .font(.system(size: 7, weight: .medium))
-                .foregroundStyle(theme.palette.textMuted)
-                .offset(x: -TerminalPanelRowMetrics.rowPadding - 1)
-                .opacity(isHovering ? 1 : 0)
-                .allowsHitTesting(false)
-                .accessibilityHidden(true)
+            if isDisclosable {
+                disclosureChevron
+            } else {
+                // The whole row is the drag source; the grip is only a hint.
+                Image(systemName: "line.3.horizontal")
+                    .font(.system(size: 7, weight: .medium))
+                    .foregroundStyle(theme.palette.textMuted)
+                    .offset(x: -TerminalPanelRowMetrics.rowPadding - 1)
+                    .opacity(isHovering ? 1 : 0)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
         }
     }
 
-    /// Geometry, hover fill, the shared manager-row resolver (selection fill,
-    /// attention border, contrast hairline), and the drag source.
+    /// The group's disclosure chevron, in the 8 pt before the identity icon.
+    /// Its own tap wins over the row's, so it only opens or closes the panes.
+    /// No animation: a disclosure is a frequent, immediate action. The row's
+    /// accessibility value and its Expand/Collapse action carry the state.
+    private var disclosureChevron: some View {
+        Image(systemName: "chevron.right")
+            .font(.system(size: 8, weight: .semibold))
+            .foregroundStyle(theme.palette.textSecondary)
+            .rotationEffect(.degrees(isExpanded ? 90 : 0))
+            .frame(
+                width: TerminalPanelRowMetrics.disclosureWidth,
+                height: TerminalPanelRowMetrics.iconSlot + 8
+            )
+            .contentShape(.rect)
+            .onTapGesture { setExpanded(!isExpanded) }
+            .offset(x: -TerminalPanelRowMetrics.disclosureWidth)
+            .help(isExpanded ? "Collapse Panes" : "Expand Panes")
+            .accessibilityHidden(true)
+    }
+
+    /// Geometry, hover fill, the shared manager-row resolver (attention
+    /// border), the contrast hairline for the selected row, and the drag
+    /// source. The selection fill is the list's own selection.
     private func surface(_ content: some View) -> some View {
         content
             .padding(.horizontal, TerminalPanelRowMetrics.rowPadding)
@@ -796,13 +1025,15 @@ private struct TerminalGroupManagerRowView: View {
             .contentShape(.rect)
             .background(
                 RoundedRectangle(cornerRadius: TerminalPanelRowMetrics.radius, style: .continuous)
-                    .fill(isHovering && !row.isCurrent ? theme.palette.hover : Color.clear)
+                    .fill(isHovering && !isSelected ? theme.palette.hover : Color.clear)
             )
+            // `isCurrent: false`: the list draws the selection fill, so the
+            // resolver contributes only the attention border here.
             .rafuTerminalSurfaceBorder(
-                context: .managerRow(
-                    isCurrent: row.isCurrent, needsAttention: row.attentionCount > 0),
+                context: .managerRow(isCurrent: false, needsAttention: row.attentionCount > 0),
                 radius: TerminalPanelRowMetrics.radius
             )
+            .modifier(TerminalRowSelectionHairline(isSelected: isSelected))
             .opacity(session.dragInFlight == dragToken ? 0.4 : 1)
             // Carries only the group's id over the private `rafuEnsembleDrag`
             // type, exactly like an Agent History row — never a title, path, or
@@ -828,9 +1059,13 @@ private struct TerminalGroupManagerRowView: View {
     private var titleLine: some View {
         HStack(spacing: 5) {
             if isRenaming {
+                // Focused on appear: inside a `List` the field does not take
+                // focus by itself, and the list would keep the keys.
                 TextField("Group name", text: $renameText)
                     .textFieldStyle(.plain)
                     .font(.system(size: 13))
+                    .focused($isRenameFieldFocused)
+                    .onAppear { isRenameFieldFocused = true }
                     .onSubmit(commitRename)
                     .onExitCommand(perform: cancelRename)
             } else {
@@ -883,8 +1118,9 @@ private struct TerminalGroupManagerRowView: View {
         .accessibilityHidden(true)
     }
 
-    /// The ⋯ menu covers the status glyph on hover or keyboard focus.
-    private var showsActions: Bool { isHovering || isFocused }
+    /// The ⋯ menu covers the status glyph on hover or when the list selects
+    /// the row (the keyboard cursor).
+    private var showsActions: Bool { isHovering || isSelected }
 
     /// The pane status the group's shell glyph shows: the focused pane's
     /// for one pane; for more, live while any pane runs.
@@ -935,6 +1171,10 @@ private struct TerminalGroupManagerRowView: View {
             Divider()
             TerminalPaneMenuItems(row: pane, actions: paneActions, includesPaneIdentity: false)
         }
+        if isDisclosable {
+            Divider()
+            Button(isExpanded ? "Collapse Panes" : "Expand Panes") { setExpanded(!isExpanded) }
+        }
         Divider()
         Button("Reveal", action: reveal)
         if !row.isParked { Button("Hide Group", action: hide) }
@@ -949,19 +1189,12 @@ private struct TerminalGroupManagerRowView: View {
         return group.panes.first { $0.id == group.focusedPaneID } ?? group.panes.first
     }
 
-    private func paneAgentStatus(for pane: TerminalsPanelModel.TerminalPaneRow) -> AgentCardStatus?
-    {
-        guard
-            let snapshot = session.terminal.terminalGroup(row.id)?.panes.first(where: {
-                $0.id == pane.id
-            })
-        else { return nil }
-        return CanvasCardCommands.agentCardStatus(pane: snapshot, in: session)
-    }
-
-    /// The full status in words, in every state (the glyph is hidden).
+    /// The full status in words, in every state (the glyph is hidden). A
+    /// disclosure row says "Expanded" or "Collapsed" first.
     private func accessibilityValue(_ agentStatus: AgentCardStatus?) -> String {
-        var values = [row.context, TerminalNaming.paneCountLabel(row.paneCount), row.stateLabel]
+        var values: [String] = []
+        if isDisclosable { values.append(isExpanded ? "Expanded" : "Collapsed") }
+        values += [row.context, TerminalNaming.paneCountLabel(row.paneCount), row.stateLabel]
         if let agentStatus { values.append(agentStatus.word) }
         if row.livePaneCount > 0 { values.append("\(row.livePaneCount) live") }
         if row.isCurrent { values.append("Current") }
@@ -1023,19 +1256,23 @@ private struct TerminalPaneMenuItems: View {
 /// One pane of a multi-pane group as an indented 22 pt row: its ordinal (the
 /// pane order, from 1), the colour dot, the name, the folder when it differs
 /// from the group's, an abnormal status word, and the 16 pt status glyph.
-/// Clicking reveals the group and focuses the pane. The ⋯ menu (hover and
-/// focus) and the context menu carry the pane's menu; renaming swaps the name
-/// for a field. The focused pane is semibold with the `.isSelected` trait.
+/// It is its own list row under its group. Clicking (or Return on the
+/// selected row) reveals the group and focuses the pane. The ⋯ menu (hover
+/// and selection) and the context menu carry the pane's menu; renaming swaps
+/// the name for a field. The focused pane is semibold with the `.isSelected`
+/// trait.
 private struct TerminalPaneRowView: View {
     let row: TerminalsPanelModel.TerminalPaneRow
     let agentStatus: AgentCardStatus?
+    /// Whether the list selection is this row.
+    let isSelected: Bool
     let isRenaming: Bool
     @Binding var renameText: String
+    let select: () -> Void
     let actions: TerminalPaneActions
 
     @Environment(\.rafuTheme) private var theme
     @State private var isHovering = false
-    @FocusState private var isFocused: Bool
     @FocusState private var isRenameFieldFocused: Bool
     @ScaledMetric(relativeTo: .body) private var scaledMinimumHeight: CGFloat =
         TerminalPanelRowMetrics.paneRowHeight
@@ -1056,16 +1293,7 @@ private struct TerminalPaneRowView: View {
                     .onSubmit { actions.commitRename(row) }
                     .onExitCommand(perform: actions.cancelRename)
             } else {
-                Button {
-                    actions.revealAndFocus(row)
-                } label: {
-                    label.contentShape(.rect)
-                }
-                .buttonStyle(.plain)
-                .focused($isFocused)
-                .accessibilityLabel("Pane \(row.ordinal), \(row.rowTitle)")
-                .accessibilityValue(accessibilityValue)
-                .accessibilityAddTraits(row.isFocused ? .isSelected : [])
+                label
             }
             TerminalStatusGlyph(
                 agentStatus: agentStatus, paneStatus: row.status, hasAttention: row.hasAttention
@@ -1085,13 +1313,28 @@ private struct TerminalPaneRowView: View {
                 base: TerminalPanelRowMetrics.paneRowHeight, scaledHeight: scaledMinimumHeight),
             alignment: .leading
         )
+        .contentShape(.rect)
         .background(
             RoundedRectangle(cornerRadius: TerminalPanelRowMetrics.radius, style: .continuous)
-                .fill(isHovering ? theme.palette.hover : Color.clear)
+                .fill(isHovering && !isSelected ? theme.palette.hover : Color.clear)
         )
+        .modifier(TerminalRowSelectionHairline(isSelected: isSelected))
+        // One tap handler, as on the group row: plain content, not a
+        // `Button`, so a click is never held back inside the list.
+        .onTapGesture {
+            guard !isRenaming else { return }
+            select()
+            actions.revealAndFocus(row)
+        }
         .onHover { isHovering = $0 }
         .contextMenu { TerminalPaneMenuItems(row: row, actions: actions) }
         .help(tooltip)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Pane \(row.ordinal), \(row.rowTitle)")
+        .accessibilityValue(accessibilityValue)
+        .accessibilityAddTraits(row.isFocused ? [.isButton, .isSelected] : .isButton)
+        .accessibilityAction { actions.revealAndFocus(row) }
+        .accessibilityAction(named: "Reveal and Focus") { actions.revealAndFocus(row) }
     }
 
     private var label: some View {
@@ -1125,7 +1368,7 @@ private struct TerminalPaneRowView: View {
         return text.isEmpty ? nil : "· " + text
     }
 
-    private var showsActions: Bool { isHovering || isFocused }
+    private var showsActions: Bool { isHovering || isSelected }
 
     private var tooltip: String {
         var lines = [row.rowTitle, row.subtitle]
@@ -1147,14 +1390,17 @@ private struct TerminalPaneRowView: View {
 
 /// One ungrouped terminal session as a tuned two-line row, like a group row.
 /// Every action is reachable from BOTH the row's trailing ellipsis menu (on
-/// hover and focus) and its context menu (AGENTS: no icon-only-
+/// hover and selection) and its context menu (AGENTS: no icon-only-
 /// context-menu-exclusive actions) — both feed off the same `actions`
 /// view builder, mirroring `GitWorktreeRow`.
 private struct TerminalSessionRowView: View {
     let row: TerminalSessionRow
     let isCurrent: Bool
+    /// Whether the list selection is this row.
+    let isSelected: Bool
     let isRenaming: Bool
     @Binding var renameText: String
+    let select: () -> Void
     let reveal: () -> Void
     /// `nil` when the row is already parked — there is no tab left to hide.
     let hide: (() -> Void)?
@@ -1169,7 +1415,6 @@ private struct TerminalSessionRowView: View {
     @FocusState private var isRenameFieldFocused: Bool
     @State private var isColorPickerPresented = false
     @State private var isHovering = false
-    @FocusState private var isFocused: Bool
     @ScaledMetric(relativeTo: .body) private var scaledMinimumHeight: CGFloat =
         TerminalPanelRowMetrics.twoLineHeight
     /// Seeded lazily from the active theme rather than eagerly from the system
@@ -1267,28 +1512,27 @@ private struct TerminalSessionRowView: View {
         .contentShape(.rect)
         .background(
             RoundedRectangle(cornerRadius: TerminalPanelRowMetrics.radius, style: .continuous)
-                .fill(isHovering && !isCurrent ? theme.palette.hover : Color.clear)
+                .fill(isHovering && !isSelected ? theme.palette.hover : Color.clear)
         )
+        // `isCurrent: false`: the list draws the selection fill, so the
+        // resolver contributes only the attention border here.
         .rafuTerminalSurfaceBorder(
             context: .managerRow(
-                isCurrent: isCurrent,
+                isCurrent: false,
                 needsAttention: row.needsAttention
             ),
             radius: TerminalPanelRowMetrics.radius
         )
+        .modifier(TerminalRowSelectionHairline(isSelected: isSelected))
         // One tap handler. A second `onTapGesture(count: 2)` would make the
         // system hold every single click for the double-click interval before
-        // it revealed the row. Reveal at once; a double-click (the second
-        // click has `clickCount == 2`) also edits the name in place.
+        // it revealed the row. Select and reveal at once; a double-click (the
+        // second click has `clickCount == 2`) also edits the name in place.
+        // Return and Space come from the list (`TerminalsPanelListModel`).
         .onTapGesture {
+            select()
             reveal()
             if TabClickIntent.current() == .selectAndRename { beginRename() }
-        }
-        .focusable()
-        .focused($isFocused)
-        .onKeyPress(.return) {
-            reveal()
-            return .handled
         }
         .onHover { isHovering = $0 }
         .popover(isPresented: $isColorPickerPresented, arrowEdge: .trailing) {
@@ -1392,7 +1636,7 @@ private struct TerminalSessionRowView: View {
     /// The panel title, with a duplicate ordinal from the model.
     private var title: String { row.panelTitle ?? row.presentedTitle }
 
-    private var showsActions: Bool { isHovering || isFocused }
+    private var showsActions: Bool { isHovering || isSelected }
 
     private var tooltip: String {
         TerminalNaming.subtitle([title, row.shellName, row.directoryLabel])

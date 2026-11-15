@@ -193,7 +193,10 @@ struct TerminalManagerSourceContractTests {
         #expect(panel.contains("AgentLauncherModel.checkingLine(agentCount: rows.count)"))
         #expect(!panel.contains("LazyVGrid"))
         #expect(panel.contains("Text(row.rowTitle)"))
-        #expect(panel.contains("LazyVStack(spacing: 2)"))
+        // Native list (direction A): the stacked `LazyVStack` became a
+        // `List(selection:)`; the rows keep their 40 pt two-line anatomy.
+        #expect(!panel.contains("LazyVStack"))
+        #expect(panel.contains("List(selection: $listSelection)"))
         #expect(panel.contains("static let twoLineHeight: CGFloat = 40"))
         #expect(!panel.contains("base: 48"))
         #expect(!panel.contains("cardBackground"))
@@ -278,7 +281,11 @@ struct TerminalManagerSourceContractTests {
     func savedLayoutRowsUseMenuAndDoubleClick() throws {
         let saved = try Self.source("Sources/RafuApp/Views/TerminalGroupSavedLayoutsSection.swift")
 
-        #expect(saved.contains(".onTapGesture(count: 2)"))
+        // Inside the native list a row has one tap handler: a click selects at
+        // once, and the click count opens on a double-click. A lone
+        // `onTapGesture(count: 2)` would hold the list's single click back.
+        #expect(!saved.contains(".onTapGesture(count: 2)"))
+        #expect(saved.contains("TabClickIntent.current() == .selectAndRename"))
         #expect(saved.contains(#"Button("Open", action: open)"#))
         #expect(saved.contains(#"Button("Rename…", action: beginRename)"#))
         #expect(saved.contains(#"Button("Delete…", role: .destructive, action: requestDelete)"#))

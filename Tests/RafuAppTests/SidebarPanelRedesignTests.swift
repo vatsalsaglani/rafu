@@ -99,11 +99,21 @@ struct SidebarPanelRedesignTests {
         #expect(panel.contains("TextField(\"Group name\""))
         #expect(panel.contains("TextField(\"Pane name\""))
         #expect(panel.contains("TextField(\"Name\""))
-        // The Saved footer keeps its one hairline and collapses when empty.
+        // The Saved section collapses when empty. It is a section of the
+        // native list, so it scrolls with the rows and has no hairline there;
+        // only with no terminals is it a pinned footer, and then the panel
+        // draws the one hairline above it. The panel owns the per-window
+        // choice because it also sizes that footer.
         let saved = try Self.source("Sources/RafuApp/Views/TerminalGroupSavedLayoutsSection.swift")
-        #expect(saved.contains("Divider().overlay(theme.palette.borderSubtle)"))
+        #expect(!saved.contains("Divider().overlay"))
         #expect(saved.contains("TerminalGroupSavedLayoutsPresentation.isExpanded("))
-        #expect(saved.contains("@SceneStorage("))
+        #expect(saved.contains("Section {"))
+        let footer = try Self.section(
+            of: panel, from: "private var savedOnlyList: some View",
+            to: "private var savedSection: some View")
+        #expect(footer.contains("Divider().overlay(theme.palette.borderSubtle)"))
+        #expect(footer.contains("TerminalGroupSavedLayoutsPresentation.footerHeight("))
+        #expect(panel.contains("@SceneStorage(\"terminals.savedGroups.expanded\")"))
     }
 
     @Test("Section headers are Title Case with a plain count")

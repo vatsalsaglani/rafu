@@ -326,7 +326,10 @@ struct TerminalGroupManagerHierarchyTests {
         #expect(source.contains("session.requestTerminalGroupClose(group.id)"))
         #expect(source.contains("session.revealTerminalGroupWhereItLives(pane.groupID)"))
         #expect(source.contains("session.focusTerminalPane(pane.id, in: pane.groupID)"))
-        #expect(source.contains("TerminalGroupSavedLayoutsSection(session: session)"))
+        // The Saved section is now list content; the panel passes its
+        // per-window expansion and the list selection.
+        #expect(source.contains("TerminalGroupSavedLayoutsSection("))
+        #expect(source.contains("session: session, storedExpansion: $storedSavedExpansion"))
     }
 
     private func source(_ path: String, file: StaticString = #filePath) throws -> String {
