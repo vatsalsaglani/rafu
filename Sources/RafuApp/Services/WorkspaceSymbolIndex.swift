@@ -63,6 +63,14 @@ actor WorkspaceSymbolIndex {
     private var totalSymbolCount = 0
     private(set) var state: State = .idle
 
+    /// Test hooks. `startedBuildCount` counts `build(rootURL:)` calls that got
+    /// past the cancellation check; `peakRetainedSymbolCount` is the most
+    /// symbols this actor ever held at once (published plus in-progress
+    /// build). A full rebuild drops the old generation first, so this stays
+    /// at one generation's count and never reaches two.
+    private(set) var startedBuildCount = 0
+    private(set) var peakRetainedSymbolCount = 0
+
     init(
         symbolCap: Int = WorkspaceSymbolIndex.maximumSymbols,
         fileByteCap: Int = WorkspaceSymbolIndex.maximumFileBytes,
@@ -77,14 +85,18 @@ actor WorkspaceSymbolIndex {
 
     // MARK: - Build
 
-    /// Rebuilds the index from scratch. Accumulates into locals and only
-    /// publishes at the end, so a cancelled build leaves the prior
-    /// paths/symbols/state untouched — the session always re-requests a fresh
-    /// build for a superseded one.
+    /// Rebuilds the index from scratch. The previous generation is dropped
+    /// FIRST, so the actor never holds two full symbol sets at once (about
+    /// 2 x 60k names on this repository). Queries during the build therefore
+    /// see an empty index; the palette shows "Indexing symbols…" and Go to
+    /// Definition waits for the build. A cancelled build leaves the index
+    /// empty and `.idle`, so the next demand builds it again.
     func build(rootURL: URL) async {
+        reset()
+        guard !Task.isCancelled else { return }
         state = .building
+        startedBuildCount += 1
         do {
-            try Task.checkCancellation()
             // Resolve the root once and use it for path collection, directory
             // listing, and file reads alike, so every stored relative path is
             // computed against the same (symlink-resolved) root. macOS's
@@ -93,9 +105,10 @@ actor WorkspaceSymbolIndex {
             // not — the exact hazard `WorkspaceFileNameIndex` guards against.
             let resolvedRoot = rootURL.resolvingSymlinksInPath().standardizedFileURL
             let relativePaths = try await collectPaths(rootURL: resolvedRoot)
+            try Task.checkCancellation()
             try await buildSymbols(rootURL: resolvedRoot, relativePaths: relativePaths)
         } catch is CancellationError {
-            return
+            reset()
         } catch {
             publishEmpty()
         }
@@ -144,6 +157,9 @@ actor WorkspaceSymbolIndex {
                     forRelativePath: relativePath),
                 let grammar = grammars[grammarID]
             else { continue }
+            // Per parsed file: a workspace close or shed stops the parse
+            // promptly instead of after the whole tree.
+            try Task.checkCancellation()
 
             let fileURL = rootURL.appending(path: relativePath)
             let remaining = symbolCap - total
@@ -179,12 +195,16 @@ actor WorkspaceSymbolIndex {
                 WorkspaceSymbol(name: $0.name, kind: $0.kind, pathIndex: pathIndex, range: $0.range)
             }
             total += extracted.count
+            peakRetainedSymbolCount = max(peakRetainedSymbolCount, totalSymbolCount + total)
             if total >= symbolCap {
                 isTruncated = true
                 break
             }
         }
 
+        // `reset()` can interleave at the suspension points above (a workspace
+        // close or a memory-pressure shed); never publish a superseded build.
+        try Task.checkCancellation()
         paths = newPaths
         pathIndexByPath = newPathIndexByPath
         symbolsByPath = newSymbolsByPath
@@ -214,7 +234,12 @@ actor WorkspaceSymbolIndex {
         let grammars = await resolveGrammars()
         for dir in dirs {
             await applyDirectoryChange(dir, rootURL: resolvedRoot, grammars: grammars)
+            // A `reset()` or `shed()` that ran at a suspension point wins:
+            // never patch an index that was dropped (it would publish a
+            // partial set as `.ready`).
+            guard case .ready = state else { return }
         }
+        peakRetainedSymbolCount = max(peakRetainedSymbolCount, totalSymbolCount)
         state = .ready(
             count: totalSymbolCount,
             isTruncated: wasTruncated || totalSymbolCount >= symbolCap
@@ -233,11 +258,13 @@ actor WorkspaceSymbolIndex {
             children = try await fileService.listDirectory(
                 rootURL: rootURL, relativeDirectoryPath: directory)
         } catch {
+            guard case .ready = state else { return }
             // The directory itself is gone: drop everything indexed under it.
             for path in previouslyIndexed { removeFile(path) }
             return
         }
 
+        guard case .ready = state else { return }
         var seen: Set<String> = []
         for child in children where !child.isDirectory {
             // Build the relative key from the known directory plus the file

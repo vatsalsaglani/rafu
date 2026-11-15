@@ -404,6 +404,19 @@ final class WorkspaceSession {
     @ObservationIgnored
     private var symbolIndexRebuildQueued = false
 
+    /// Set by the first real demand (`ensureSymbolIndexReady()`: the palette's
+    /// `#` mode or Go to Definition). Until then no refresh or watcher event
+    /// builds or patches the symbol index, so an unused index costs no memory
+    /// and no startup parse. Cleared again when the workspace changes or a
+    /// memory-pressure shed drops the index.
+    @ObservationIgnored
+    private var symbolIndexRequested = false
+
+    /// Callers of `waitForSymbolIndexBuild()`, resumed when the in-flight
+    /// build (and any trailing rebuild) finishes or is cancelled.
+    @ObservationIgnored
+    private var symbolIndexWaiters: [UUID: CheckedContinuation<Void, Never>] = [:]
+
     /// The navigation ladder for the open workspace: syntactic tier over the
     /// symbol index, then the bounded text-search fallback. Rebuilt whenever a
     /// workspace opens (a fresh `rootURL`). The editor-cursor seam that RUNS
@@ -2618,7 +2631,9 @@ final class WorkspaceSession {
         symbolIndexRebuildTask?.cancel()
         symbolIndexRebuildTask = nil
         symbolIndexRebuildQueued = false
+        symbolIndexRequested = false
         symbolIndexState = .idle
+        resumeSymbolIndexWaiters()
         Task { await symbolIndex.shed() }
         symbolIndexGeneration += 1
     }
@@ -2856,7 +2871,9 @@ final class WorkspaceSession {
             if gitSnapshot == nil { resetGitWorkbenchState() }
             reconcileGitSelection()
             requestFileIndexRebuild()
-            requestSymbolIndexRebuild()
+            // Lazy (memory D1): rebuild only an index someone already asked
+            // for; the first `#` query or Go to Definition builds it.
+            if symbolIndexRequested { requestSymbolIndexRebuild() }
         } catch is CancellationError {
             return
         } catch {
@@ -3057,17 +3074,33 @@ final class WorkspaceSession {
             symbolName: identifier.word
         )
 
-        // The syntactic tier reads the workspace-symbol index; make sure an
-        // idle (e.g. memory-pressure-shed) index rebuilds before resolving,
-        // exactly like the command palette's `#` mode.
+        // The syntactic tier reads the workspace-symbol index. It is built
+        // lazily (memory D1): the first Go to Definition or `#` query starts
+        // the build, here in parallel with the LSP tier's request.
         ensureSymbolIndexReady()
 
         navigationTask?.cancel()
         navigationTask = Task(name: "Navigate \(kind)") { [weak self] in
             guard let self else { return }
-            let answer = try? await ladder.resolve(request)
+            var outcome = NavigationPresentation.outcome(
+                for: try? await ladder.resolve(request), kind: kind)
+            // The syntactic tier answered "indexing": show that state, wait
+            // for the build, and resolve again. Bounded, because a trailing
+            // rebuild or a shed can restart the build; dismissing the peek or
+            // a newer navigation cancels the wait.
+            var rounds = 0
+            while outcome == .peek(.indexing), rounds < Self.navigationIndexWaitRounds {
+                rounds += 1
+                presentNavigationPeek(.indexing)
+                await waitForSymbolIndexBuild()
+                guard !Task.isCancelled, isNavigationPeekPresented,
+                    navigationPeekContent == .indexing
+                else { return }
+                outcome = NavigationPresentation.outcome(
+                    for: try? await ladder.resolve(request), kind: kind)
+            }
             if Task.isCancelled { return }
-            switch NavigationPresentation.outcome(for: answer, kind: kind) {
+            switch outcome {
             case .jump(let candidate):
                 navigateToSymbolCandidate(candidate)
             case .peek(let content):
@@ -3075,6 +3108,10 @@ final class WorkspaceSession {
             }
         }
     }
+
+    /// How many symbol-index builds one Go to Definition waits for before it
+    /// leaves the "Indexing symbols…" peek on screen.
+    private static let navigationIndexWaitRounds = 3
 
     /// The LSP tier is the only consumer of `languageID`, so this returns
     /// lane 2's canonical LSP id (`.tsx` → "typescriptreact", `.rs` → "rust",
@@ -3257,15 +3294,49 @@ final class WorkspaceSession {
         try await symbolIndex.query(term: term, limit: limit)
     }
 
-    /// Symbol-index counterpart to `ensureFileIndexReady()`: rebuilds an idle
-    /// index (e.g. one a memory-pressure shed emptied) the moment the
-    /// palette's `#` mode needs it again, with no background poll or timer.
+    /// The only trigger that builds the symbol index (memory D1): the
+    /// palette's `#` mode and Go to Definition call it. Builds an idle index
+    /// (never built, or emptied by a memory-pressure shed) and marks it
+    /// requested, so later refreshes and watcher events keep it current.
+    /// Idempotent: concurrent demands share the one in-flight build.
     func ensureSymbolIndexReady() {
-        guard rootURL != nil, symbolIndexState == .idle, symbolIndexRebuildTask == nil else {
-            return
-        }
+        guard rootURL != nil else { return }
+        symbolIndexRequested = true
+        guard symbolIndexState == .idle, symbolIndexRebuildTask == nil else { return }
         requestSymbolIndexRebuild()
     }
+
+    /// Suspends until the in-flight symbol-index build (and any trailing
+    /// rebuild) finishes. Returns at once when no build runs, and early when
+    /// the calling task is cancelled or the build is cancelled (workspace
+    /// change, memory-pressure shed). Event-driven: no poll, no timer.
+    func waitForSymbolIndexBuild() async {
+        guard symbolIndexState == .building, symbolIndexRebuildTask != nil else { return }
+        let id = UUID()
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                if Task.isCancelled || symbolIndexState != .building {
+                    continuation.resume()
+                } else {
+                    symbolIndexWaiters[id] = continuation
+                }
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in
+                self?.symbolIndexWaiters.removeValue(forKey: id)?.resume()
+            }
+        }
+    }
+
+    private func resumeSymbolIndexWaiters() {
+        let waiters = symbolIndexWaiters
+        symbolIndexWaiters = [:]
+        for waiter in waiters.values { waiter.resume() }
+    }
+
+    /// Test hooks for the lazy symbol index.
+    var symbolIndexForTesting: WorkspaceSymbolIndex { symbolIndex }
+    var symbolIndexTaskForTesting: Task<Void, Never>? { symbolIndexRebuildTask }
 
     /// Constructs the navigation ladder for `rootURL`. The syntactic tier sits
     /// above the bounded text tier.
@@ -3393,7 +3464,9 @@ final class WorkspaceSession {
         symbolIndexRebuildTask?.cancel()
         symbolIndexRebuildTask = nil
         symbolIndexRebuildQueued = false
+        symbolIndexRequested = false
         symbolIndexState = .idle
+        resumeSymbolIndexWaiters()
         Task { await symbolIndex.reset() }
     }
 
@@ -3436,28 +3509,45 @@ final class WorkspaceSession {
             return
         }
         symbolIndexState = .building
-        symbolIndexRebuildTask = Task(name: "Rebuild workspace symbol index") { [weak self] in
-            guard let self else { return }
+        // The task holds the session weakly across the build, so closing the
+        // window deinits the session, which cancels this task and the build
+        // drops its partial set.
+        symbolIndexRebuildTask = Task(name: "Rebuild workspace symbol index") {
+            [weak self, symbolIndex] in
             await symbolIndex.build(rootURL: rootURL)
-            symbolIndexState = await symbolIndex.currentState
+            let state = await symbolIndex.currentState
+            // A cancelled build was superseded by a reset, a shed, or a
+            // close, which already cleared this task and the state; touching
+            // them here would clobber a newer build's task.
+            guard let self, !Task.isCancelled else { return }
+            symbolIndexState = state
             symbolIndexGeneration += 1
             symbolIndexRebuildTask = nil
-            if symbolIndexRebuildQueued {
-                symbolIndexRebuildQueued = false
-                requestSymbolIndexRebuild()
-            }
+            finishSymbolIndexTask()
+        }
+    }
+
+    /// Shared tail of a finished build or patch: start the queued trailing
+    /// rebuild, or wake the Go to Definition waiters when none is queued.
+    private func finishSymbolIndexTask() {
+        if symbolIndexRebuildQueued {
+            symbolIndexRebuildQueued = false
+            requestSymbolIndexRebuild()
+        } else {
+            resumeSymbolIndexWaiters()
         }
     }
 
     /// Incrementally patches the symbol index for a non-storm working-tree
-    /// change. When a (re)build is already in flight, it queues a trailing
-    /// full rebuild rather than racing a patch against it; when the index is
-    /// not yet `.ready` (never built or shed), it requests a full build, which
-    /// is the correct response and is coalesced.
-    private func requestSymbolIndexIncrementalUpdate(
+    /// change. A no-op until the first demand (`symbolIndexRequested`). When a
+    /// (re)build is already in flight, it queues a trailing full rebuild
+    /// rather than racing a patch against it; when a requested index is not
+    /// yet `.ready`, it requests a full build, which is coalesced.
+    func requestSymbolIndexIncrementalUpdate(
         changedDirectoryRelativePaths dirs: Set<String>
     ) {
-        guard let rootURL else { return }
+        // Lazy (memory D1): an index nobody asked for is not built here.
+        guard let rootURL, symbolIndexRequested else { return }
         if symbolIndexRebuildTask != nil {
             symbolIndexRebuildQueued = true
             return
@@ -3466,17 +3556,16 @@ final class WorkspaceSession {
             requestSymbolIndexRebuild()
             return
         }
-        symbolIndexRebuildTask = Task(name: "Update workspace symbol index") { [weak self] in
-            guard let self else { return }
+        symbolIndexRebuildTask = Task(name: "Update workspace symbol index") {
+            [weak self, symbolIndex] in
             await symbolIndex.applyChanges(
                 changedDirectoryRelativePaths: dirs, rootURL: rootURL)
-            symbolIndexState = await symbolIndex.currentState
+            let state = await symbolIndex.currentState
+            guard let self, !Task.isCancelled else { return }
+            symbolIndexState = state
             symbolIndexGeneration += 1
             symbolIndexRebuildTask = nil
-            if symbolIndexRebuildQueued {
-                symbolIndexRebuildQueued = false
-                requestSymbolIndexRebuild()
-            }
+            finishSymbolIndexTask()
         }
     }
 

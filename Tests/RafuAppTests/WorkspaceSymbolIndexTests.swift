@@ -355,6 +355,53 @@ func symbolIndexResetAndShed() async throws {
     #expect(try await index.query(term: "here", limit: 10).isEmpty)
 }
 
+@Test("A rebuild drops the old generation first: never two symbol sets at once")
+func symbolIndexRebuildNeverHoldsTwoGenerations() async throws {
+    let root = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    try write(
+        "func one() {}\nfunc two() {}\nfunc three() {}\nfunc four() {}\n",
+        to: root.appending(path: "A.swift"))
+    try write("func five() {}\nfunc six() {}\n", to: root.appending(path: "B.swift"))
+
+    let index = WorkspaceSymbolIndex()
+    await index.build(rootURL: root)
+    guard case .ready(let count, _) = await index.currentState else {
+        Issue.record("Expected a ready state")
+        return
+    }
+    #expect(count == 6)
+    #expect(await index.peakRetainedSymbolCount == count)
+
+    // A second full build over the same tree: if the old generation stayed
+    // live until the swap, the peak would reach 2 x count.
+    await index.build(rootURL: root)
+    #expect(await index.currentState == .ready(count: count, isTruncated: false))
+    #expect(await index.peakRetainedSymbolCount == count)
+    #expect(await index.startedBuildCount == 2)
+}
+
+@Test("A cancelled build leaves an empty, idle index")
+func symbolIndexCancelledBuildIsIdleAndEmpty() async throws {
+    let root = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    try write("func here() {}\n", to: root.appending(path: "A.swift"))
+
+    let index = WorkspaceSymbolIndex()
+    await index.build(rootURL: root)
+    #expect(try await index.query(term: "here", limit: 10).map(\.name) == ["here"])
+
+    // A child added to a cancelled group starts cancelled, so the build sees
+    // the cancellation deterministically (no race with a fast build).
+    await withTaskGroup(of: Void.self) { group in
+        group.cancelAll()
+        group.addTask { await index.build(rootURL: root) }
+    }
+
+    #expect(await index.currentState == .idle)
+    #expect(try await index.query(term: "here", limit: 10).isEmpty)
+}
+
 @Test("Symbol ranker is cancellable")
 func symbolRankerRespectsCancellation() async {
     let candidates = (0..<50_000).map {
