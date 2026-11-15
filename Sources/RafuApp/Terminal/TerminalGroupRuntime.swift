@@ -691,7 +691,11 @@ nonisolated struct TerminalGroupRuntime: Sendable {
     private func splitPane(id: TerminalPaneID, from source: TerminalPaneSnapshot) throws
         -> TerminalPaneSnapshot
     {
-        let profile = source.startAvailability == .available ? source.launchProfile : nil
+        // A new split starts fresh: it takes the source's shell and starting
+        // folder, not the folder the source's shell was last in.
+        let profile =
+            source.startAvailability == .available
+            ? source.launchProfile?.withoutLastWorkingFolder : nil
         return try TerminalPaneSnapshot(
             id: id, sessionID: nil, explicitUserName: nil, reportedTitle: nil,
             runtimeKind: .ordinaryShell, themeColor: source.themeColor, status: .stopped,

@@ -50,6 +50,14 @@ nonisolated protocol TerminalProcessInspecting: Sendable {
     /// process is gone or not readable. Can allocate a large argv buffer:
     /// call it off the main actor.
     func describe(processID: Int32) -> TerminalProcessDescription?
+    /// The current directory of `processID`, or `nil` when the process is
+    /// gone or not readable. One `proc_pidinfo` call; never blocks.
+    func currentDirectory(processID: Int32) -> String?
+}
+
+extension TerminalProcessInspecting {
+    /// A fake that does not model folders reports none.
+    func currentDirectory(processID: Int32) -> String? { nil }
 }
 
 /// Pure mapping from a process description to a foreground state.
@@ -215,6 +223,24 @@ nonisolated struct DarwinTerminalProcessInspector: TerminalProcessInspecting {
 
         return TerminalProcessDescription(
             name: name, executablePath: path, arguments: Self.arguments(of: processID))
+    }
+
+    /// `PROC_PIDVNODEPATHINFO` returns the process's current and root
+    /// directory vnodes; only the current directory's path is read. A shell
+    /// is the user's own child, so no extra permission is needed.
+    func currentDirectory(processID: Int32) -> String? {
+        guard processID > 1 else { return nil }
+        var info = proc_vnodepathinfo()
+        let size = Int32(MemoryLayout<proc_vnodepathinfo>.size)
+        guard proc_pidinfo(processID, PROC_PIDVNODEPATHINFO, 0, &info, size) == size else {
+            return nil
+        }
+        let path = withUnsafeBytes(of: &info.pvi_cdir.vip_path) { raw -> String in
+            let bytes = raw.bindMemory(to: UInt8.self)
+            let length = bytes.firstIndex(of: 0) ?? bytes.count
+            return String(decoding: bytes.prefix(length), as: UTF8.self)
+        }
+        return path.hasPrefix("/") ? path : nil
     }
 
     /// `KERN_PROCARGS2` is `argc` (Int32), the exec path, NUL padding,

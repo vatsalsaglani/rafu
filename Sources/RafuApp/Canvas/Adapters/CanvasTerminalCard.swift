@@ -207,8 +207,10 @@ struct CanvasTerminalCard: View {
     /// Not running: one centred block with the next step (review C6).
     private func notRunningBlock(_ pane: TerminalPaneSnapshot, id: TerminalGroupID) -> some View {
         let shell = pane.launchProfile.map { CanvasCardPresentation.shellName($0.shell) }
+        // The folder Start Shell uses: the last working folder, else the
+        // starting folder (restoration already dropped a missing one).
         let folder = pane.launchProfile.map {
-            CanvasCardPresentation.folderName($0.startingFolder.rawValue)
+            CanvasCardPresentation.folderName($0.preferredStartFolder.rawValue)
         }
         return VStack(spacing: 10) {
             Image(systemName: "apple.terminal")

@@ -1343,7 +1343,7 @@ final class WorkspaceSession {
             focused.startAvailability == .available,
             let safeProfile = focused.launchProfile
         {
-            profile = safeProfile
+            profile = safeProfile.withoutLastWorkingFolder
         } else {
             // Classified and unavailable panes never donate a profile. Their
             // split is a fresh ordinary shell at the bounded workspace root.
@@ -1493,8 +1493,7 @@ final class WorkspaceSession {
             let pane = terminal.terminalGroup(groupID)?.panes.first(where: { $0.id == paneID }),
             let profile = pane.launchProfile,
             let rootURL,
-            terminalFolder(for: resolvedTerminalDirectory(profile.startingFolder, rootURL: rootURL))
-                != nil,
+            let startFolder = terminalStartFolder(for: profile, rootURL: rootURL),
             let shell = resolvedShell(for: profile.shell)
         else {
             presentTerminalGroupError("The saved terminal folder is no longer available.")
@@ -1506,8 +1505,7 @@ final class WorkspaceSession {
             _ = try terminal.startPane(
                 paneID,
                 instantiation: .ordinaryShell(
-                    startingDirectory: resolvedTerminalDirectory(
-                        profile.startingFolder, rootURL: rootURL),
+                    startingDirectory: resolvedTerminalDirectory(startFolder, rootURL: rootURL),
                     shell: shell, profile: profile))
             if background {
                 hostCanvasTerminalView(paneID)
@@ -1576,9 +1574,7 @@ final class WorkspaceSession {
         var instantiations: [TerminalPaneID: TerminalGroupControllerInstantiation] = [:]
         for pane in restartable {
             guard let profile = pane.launchProfile,
-                terminalFolder(
-                    for: resolvedTerminalDirectory(profile.startingFolder, rootURL: rootURL))
-                    != nil,
+                let startFolder = terminalStartFolder(for: profile, rootURL: rootURL),
                 let shell = resolvedShell(for: profile.shell)
             else {
                 presentTerminalGroupError("A saved terminal profile is no longer available.")
@@ -1586,8 +1582,7 @@ final class WorkspaceSession {
             }
             if pane.status == .stopped {
                 instantiations[pane.id] = .ordinaryShell(
-                    startingDirectory: resolvedTerminalDirectory(
-                        profile.startingFolder, rootURL: rootURL),
+                    startingDirectory: resolvedTerminalDirectory(startFolder, rootURL: rootURL),
                     shell: shell, profile: profile)
             }
         }
@@ -1950,22 +1945,18 @@ final class WorkspaceSession {
 
     private func terminalFolder(for path: String) -> TerminalWorkspaceRelativePath? {
         guard let rootURL else { return nil }
-        let root = rootURL.resolvingSymlinksInPath().standardizedFileURL
-        let candidate = URL(fileURLWithPath: path, isDirectory: true)
-            .resolvingSymlinksInPath().standardizedFileURL
-        var isDirectory: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: candidate.path, isDirectory: &isDirectory),
-            isDirectory.boolValue,
-            FileManager.default.isReadableFile(atPath: candidate.path)
-        else { return nil }
-        let rootPath = root.path
-        let candidatePath = candidate.path
-        guard candidatePath == rootPath || candidatePath.hasPrefix(rootPath + "/") else {
-            return nil
+        return TerminalWorkspaceFolder.relative(path: path, root: rootURL)
+    }
+
+    /// The folder a stopped ordinary shell starts in: its last working folder
+    /// while that is still a directory inside the workspace, else its
+    /// starting folder. `nil` when neither is usable.
+    private func terminalStartFolder(
+        for profile: TerminalPaneLaunchProfile, rootURL: URL
+    ) -> TerminalWorkspaceRelativePath? {
+        TerminalStartFolderResolver.resolve(profile) { folder in
+            terminalFolder(for: resolvedTerminalDirectory(folder, rootURL: rootURL)) != nil
         }
-        let relative = String(candidatePath.dropFirst(rootPath.count))
-            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        return TerminalWorkspaceRelativePath(relative)
     }
 
     private func resolvedTerminalDirectory(
@@ -5831,22 +5822,29 @@ final class WorkspaceSession {
         let root = workspaceRoot.resolvingSymlinksInPath().standardizedFileURL
         let rootPath = root.path
         let approvedShellPaths = Set(availableTerminalShells.map(\.path))
-        return TerminalGroupRestorationCodec { profile in
-            let folder = root.appending(path: profile.startingFolder.rawValue)
-                .resolvingSymlinksInPath().standardizedFileURL
-            var isDirectory: ObjCBool = false
-            guard FileManager.default.fileExists(atPath: folder.path, isDirectory: &isDirectory),
-                isDirectory.boolValue,
-                FileManager.default.isReadableFile(atPath: folder.path),
-                folder.path == rootPath || folder.path.hasPrefix(rootPath + "/")
-            else { return .missingFolder }
-            switch profile.shell {
-            case .preferredShell:
-                return approvedShellPaths.isEmpty ? .unapprovedShell : .available
-            case .approvedShellPath(let path):
-                return approvedShellPaths.contains(path) ? .available : .unapprovedShell
-            }
-        }
+        return TerminalGroupRestorationCodec(
+            validateProfile: { profile in
+                let folder = root.appending(path: profile.startingFolder.rawValue)
+                    .resolvingSymlinksInPath().standardizedFileURL
+                var isDirectory: ObjCBool = false
+                guard
+                    FileManager.default.fileExists(atPath: folder.path, isDirectory: &isDirectory),
+                    isDirectory.boolValue,
+                    FileManager.default.isReadableFile(atPath: folder.path),
+                    folder.path == rootPath || folder.path.hasPrefix(rootPath + "/")
+                else { return .missingFolder }
+                switch profile.shell {
+                case .preferredShell:
+                    return approvedShellPaths.isEmpty ? .unapprovedShell : .available
+                case .approvedShellPath(let path):
+                    return approvedShellPaths.contains(path) ? .available : .unapprovedShell
+                }
+            },
+            revalidateProfile: { profile in
+                TerminalStartFolderResolver.revalidated(profile) {
+                    TerminalWorkspaceFolder.isUsable($0, root: root)
+                }
+            })
     }
 
     func requestCanvasTerminalFocus() { terminalGroupFocusRequest &+= 1 }
@@ -5986,7 +5984,9 @@ final class WorkspaceSession {
                 return try? TerminalGroupOpenPaneRestorationRecord(
                     id: pane.id, explicitUserName: pane.explicitUserName,
                     themeColor: pane.themeColor, kind: kind,
-                    launchProfile: kind == .ordinaryShell ? pane.launchProfile : nil)
+                    launchProfile: kind == .ordinaryShell
+                        ? pane.launchProfile.map { restorableLaunchProfile($0, paneID: pane.id) }
+                        : nil)
             }
             guard panes.count == snapshot.panes.count else { return nil }
             return try? TerminalGroupOpenTabRestorationRecord(
@@ -5996,6 +5996,21 @@ final class WorkspaceSession {
         }
         return try? TerminalGroupWorkspaceRestoration(
             openGroups: records, ensemble: canvasIDs != nil)
+    }
+
+    /// The profile one pane's restoration record keeps. A pane with a shell
+    /// carries the folder that shell is in now, read from the process at this
+    /// capture (window close, board save, workspace save) or from its last
+    /// OSC 7 report; a folder outside the workspace clears the value. A pane
+    /// with no observation keeps its stored value. Named saved layouts never
+    /// see this value (`TerminalGroupRestorationCodec.savedRecord`).
+    private func restorableLaunchProfile(
+        _ profile: TerminalPaneLaunchProfile, paneID: TerminalPaneID
+    ) -> TerminalPaneLaunchProfile {
+        let controller = terminal.terminalController(for: paneID)
+        controller?.refreshCurrentDirectoryFromProcess()
+        return TerminalStartFolderResolver.persistedLastFolder(
+            stored: profile, observedPath: controller?.currentDirectoryPath, root: rootURL)
     }
 
     /// Filters a value copy only. Unsaved groups and every legacy live
