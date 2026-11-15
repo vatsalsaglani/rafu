@@ -36,7 +36,11 @@ historical. Current: the deck insets are per edge (`RafuMetrics.deckInsetTop` 6,
 `deckInsetLeading` 6, `deckInsetTrailing` 8, `deckInsetBottom` 12; each equals
 the shadow reach on that edge, and `workbenchInset` is gone); the Activity Rail
 is 38 pt wide; the shelf, header and tab-label alignment follow the 6 pt top
-inset (navigator header title centre 25, top inset 13). Frame surfaces paint
+inset (navigator header title centre 25, top inset 13). **Second round, same
+day (ADR 0031 section j, "Second round"):** `deckInsetTop` 2, `deckInsetLeading`
+8, new `deckGapCollapsedRail` 5, trailing 8 and bottom 12 unchanged; the top
+shadow may spill into the earlier-drawn titlebar row, and the split handle is
+an overlay. The navigator header title centre / top inset are 21 / 9. Frame surfaces paint
 through `rafuFrameSurface`: the token in Solid, nothing in Frosted (the opt-in
 frosted window base, see [`frosted-window-base.md`](frosted-window-base.md));
 Reduce Transparency and Increase Contrast force Solid.

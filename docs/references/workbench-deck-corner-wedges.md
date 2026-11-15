@@ -40,8 +40,11 @@ is a blur, so a flat `appBackground` wedge would show a solid patch. Four masked
 `.behindWindow` wedge views (2r x 2r tiles, cached even-odd `maskImage`) sit
 under the existing masked wedge ZStack, which is tinted with
 `appBackground.opacity(tint)`. The deck is still never clipped. See
-[`frosted-window-base.md`](frosted-window-base.md). The 6 pt gutters of ADR 0031
-section j are the metrics to check these corners against.
+[`frosted-window-base.md`](frosted-window-base.md). The gutters of ADR 0031
+section j are the metrics to check these corners against (6 pt first round; the
+second round the same day made them top 2, leading 8 open / 5 collapsed,
+trailing 8, bottom 12). Wedge behaviour at the 2 pt top and 5 pt collapsed gaps
+was accepted by the user on Rafu Lightning; it has no separate measurement.
 
 ## Why it matters
 

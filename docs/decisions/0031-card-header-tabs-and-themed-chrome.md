@@ -300,6 +300,65 @@ y 4). At minimum width the deck gains 20 pt. The 12 pt "equal gutter" in §g and
 the 31 pt / 19 pt header figures in §g and §i are superseded by this table.
 Not screenshot-verified; see the GUI checks in the phase work log.
 
+**Second round (2026-11-15, user: "its fine now, looks much better").** The
+user asked for smaller gaps again. The table above records the first round;
+where it disagrees with this block, this block holds. The user checked Rafu
+Lightning and accepted the result.
+
+| Metric (pt) | First round | Final | Reason |
+|---|---|---|---|
+| Deck top inset (`deckInsetTop`) | 6 | 2 | Top shadow may spill into the earlier-drawn titlebar row |
+| Deck leading inset (`deckInsetLeading`) | 6 | 8 | The handle no longer adds 10 to layout |
+| Collapsed rail gap (`deckGapCollapsedRail`, new) | 10 (handle only) | 5 | Rail deck-side strip 3 + 2; rail icon edge to card 13 to 5 |
+| Sidebar open, sidebar edge to card | 16 | 8 | Leading inset only |
+| Titlebar row bottom to card top | 6 | 2 | Follows `deckInsetTop` |
+| Rail deck-side strip (`WorkspaceActivityRail.deckSideInset`, new) | n/a | 3 | Nonisolated constant; rail width 38 and leading 5 unchanged |
+| Rail app tile top | 6 | 2 | Level with the deck top |
+| Navigator header title centre / top inset | 25 / 13 | 21 / 9 | Follows `deckInsetTop` |
+| Resize floor | 754 | 746 | 38 + 220 + 472 + 8 + 8 |
+
+Unchanged: trailing inset 8, bottom inset 12, titlebar row height 28 pt, window
+`minWidth` 774 pt.
+
+**Rule (replaces the first-round rule).** Top: the deck shadow reaches
+radius - y = 4 pt above the card; with a 2 pt inset, 2 pt spills over the
+titlebar row. That row is drawn earlier in the `VStack`, so the shadow paints
+over it and is not cut in Solid or Frosted. It stays below the 20 pt search
+field (4 pt free at the bottom of the 28 pt row), which bounds the top inset.
+Trailing keeps the shadow radius (8). The leading gap is the visible seam
+(5 collapsed, 8 open) with the handle as an overlay. Bottom keeps radius + y
+(12).
+
+**Handle as overlay.** `WorkbenchSplitHandle(session:hitAreaWidth:)` no longer
+takes layout width. It is an `.overlay(alignment: .topLeading)` on the workbench
+`HStack`, placed with `.offset`. Its hit area extends
+`WorkbenchDeckLane.handleDeckOverlap` = 3 pt into the card, past the visible
+gap, and never covers a rail icon or the sidebar scroller: 11 pt open (sidebar
+edge to card + 3), 8 pt collapsed (icon edge to card + 3).
+`WorkbenchDeckLane.handleHitArea(isSidebarCollapsed:railDeckSideInset:)` returns
+`HandleHitArea(x:width:)`, with x measured from the leading pane's trailing
+edge. `WorkbenchDeckLane.padding(isSidebarCollapsed:railDeckSideInset:insets:
+collapsedGap:)` replaces the `handleWidth:` form. Drag, collapse on release,
+live reopen, cursor, help text and the "Sidebar width" accessibility element are
+unchanged; the grab bar is centred on the visible gap.
+
+**One frame fill.** The rail no longer paints its own `.app` frame fill. One
+`.rafuFrameSurface(.app)` on the workbench `HStack` paints under the rail and the
+deck lane. The rail is drawn above the deck (`zIndex` 1, for hit testing), so a
+rail fill would cut the deck's sideways shadow at the 5 pt gap. The handle
+overlay sits after that fill and before the voice companion overlay.
+
+**Known side effects.** The handle hit area covers the card's leading 3 pt, so a
+click there starts a resize, not a content click. In Solid, the deck shadow
+paints faintly under the rail strip when the sidebar is collapsed.
+
+Tests: `WorkbenchDeckPresentationTests` (`seamGapMath`, `handleIsAnOverlay`),
+`RafuWorkbenchStyleContractTests` (top-spill rule),
+`NavigatorPanelHeaderPlacementTests` (21 / 9), `SidebarTreeAndRailPolishTests`
+(`deckSideInset`, no rail frame fill), `WindowFrostBackdropTests`. On `main`
+(commit 848a63f): both modes green, 451 tests in 31 suites and 3709 tests in 301
+suites, each in parallel and `--no-parallel`.
+
 Details of §i and the Terminals row rules:
 [`sidebar-panel-anatomy-and-terminal-rows.md`](../references/sidebar-panel-anatomy-and-terminal-rows.md).
 

@@ -47,7 +47,8 @@ component) and [ADR 0002](../decisions/0002-native-workbench-navigation.md)
   landed 2026-11-15 as [ADR 0038](../decisions/0038-optional-frosted-window-base.md)
   (`rafuFrameSurface` paints nothing in Frosted). The 19 pt header top inset and
   the 31 pt title centre above became 13 pt and 25 pt with the 6 pt deck top
-  inset (ADR 0031 section j).
+  inset (ADR 0031 section j), then 9 pt and 21 pt with the 2 pt deck top inset
+  (second round, same day; `NavigatorPanelHeaderPlacementTests`).
 
 ### Segmented control
 

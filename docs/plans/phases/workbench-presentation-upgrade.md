@@ -167,6 +167,24 @@ GUI checks owed on the final build (none done):
 - A second window follows the setting.
 - WindowServer cost in a Release build (the spike figures are Debug).
 
+2026-11-15 (second round of frame gaps, merge of "split handle as overlay,
+tighter deck gaps", commit 848a63f): the user asked for smaller gaps again.
+ADR 0031 section j ("Second round") records the final values: deck top 6 -> 2,
+leading 6 -> 8 (open), collapsed rail icon edge to card 13 -> 5 (new
+`deckGapCollapsedRail`, rail deck-side strip `deckSideInset` 3 + 2), sidebar to
+card 16 -> 8, navigator header title centre / top inset 25 / 13 -> 21 / 9, rail
+app tile top 6 -> 2, resize floor 754 -> 746 (window `minWidth` 774 unchanged).
+`WorkbenchSplitHandle` is now an overlay with a hit area 3 pt into the card (11
+pt open, 8 pt collapsed); the rail no longer paints a frame fill. Known side
+effects: the handle covers the card's leading 3 pt; in Solid the deck shadow
+paints faintly under the rail strip when collapsed. Evidence: both test modes
+green on `main`, 451 tests in 31 suites and 3709 tests in 301 suites, each
+parallel and `--no-parallel`; the user checked Rafu Lightning: "its fine now,
+looks much better". The owed GUI checks above that name 6 pt gutters or the 10 pt
+collapsed gap (Frosted corners, collapsed gap) describe first-round values.
+Notes: [`workbench-split-handle.md`](../../references/workbench-split-handle.md),
+[`ui-design-language.md`](../../references/ui-design-language.md).
+
 Open: the per-region backdrop alternative is not measured; terminal alpha
 (step 3) is not started.
 

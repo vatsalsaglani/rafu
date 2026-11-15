@@ -109,6 +109,50 @@ bottom reach radius + y = 12, inset 12; the leading 6 counts the 10 pt handle).
 
 Not screenshot-verified.
 
+### 2026-11-15 round 2: the handle is an overlay, not a layout column
+
+Supersedes the layout-width parts of the rounds above and of the previous
+section. Recorded in ADR 0031 section j ("Second round"). Verified on Xcode with
+the macOS 27.2 SDK (26B118), Swift 6 language mode, Darwin 27.2.0, Mac17,13,
+commit 848a63f on `main`; the user checked Rafu Lightning and accepted it.
+
+- The workbench `HStack` is now `{ rail ; sidebar ; deck }`. The handle is an
+  `.overlay(alignment: .topLeading)` on that `HStack`, placed with `.offset`,
+  and adds no layout width. It sits after the one `.rafuFrameSurface(.app)`
+  fill and before the voice companion overlay.
+- `WorkbenchSplitHandle(session:hitAreaWidth:)` takes an instance
+  `hitAreaWidth`. Drag, collapse on release, live reopen from collapsed, the
+  resize cursor, the help text and the "Sidebar width" adjustable element are
+  unchanged. The grab bar is centred on the visible gap.
+- The invisible hit area extends `WorkbenchDeckLane.handleDeckOverlap` = 3 pt
+  into the card past the visible gap, and never covers a rail icon or the
+  sidebar scroller: **11 pt open** (sidebar edge to card 8 + 3), **8 pt
+  collapsed** (icon edge to card 5 + 3).
+  `WorkbenchDeckLane.handleHitArea(isSidebarCollapsed:railDeckSideInset:)`
+  returns `HandleHitArea(x:width:)`; x is from the leading pane's trailing edge.
+- `WorkbenchDeckLane.padding(isSidebarCollapsed:railDeckSideInset:insets:
+  collapsedGap:)` replaces the `handleWidth:` form.
+- Gaps: collapsed, rail icon edge to card 13 -> 5 (`deckGapCollapsedRail` 5 =
+  rail deck-side strip `WorkspaceActivityRail.deckSideInset` 3 + 2); open,
+  sidebar to card 16 -> 8 (`deckInsetLeading` 8); titlebar row bottom to card
+  top 6 -> 2 (`deckInsetTop` 2). Trailing 8, bottom 12 unchanged.
+- The rail no longer paints a frame fill. It is drawn above the deck
+  (`zIndex` 1, for hit testing), so its own fill would cut the deck's sideways
+  shadow at the 5 pt gap.
+- **Resize floor 754 -> 746**: rail 38 + sidebar 220 + deck 472 + leading 8 +
+  trailing 8. The handle no longer appears in the sum. Window `minWidth` stays
+  774.
+- **Side effects.** The hit area covers the card's leading 3 pt, so a click there
+  starts a resize, not a content click. In Solid the deck shadow paints faintly
+  under the rail strip when the sidebar is collapsed.
+- Rule 8's "+ 10 (handle)" term and the "handle 10 + inset" gap arithmetic in the
+  previous section are historical.
+
+Tests: `WorkbenchDeckPresentationTests` (`seamGapMath`, `handleIsAnOverlay`),
+`SidebarTreeAndRailPolishTests` (`deckSideInset`, no rail frame fill). Both test
+modes green on `main`: 451 tests in 31 suites and 3709 tests in 301 suites, each
+parallel and `--no-parallel`.
+
 ### 2026-11-01: no navigator may declare a width minimum above 220 pt
 
 Verified on Swift 6.2 language mode, macOS Darwin 27.0.0.
