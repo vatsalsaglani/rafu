@@ -214,12 +214,48 @@ struct WorkspaceSearchNavigatorView: View {
     var body: some View {
         VStack(spacing: 0) {
             RafuUtilityPanelHeader(title: "Search") {
-                EmptyView()
+                WorkspaceSearchHeaderActions(session: session, search: session.workspaceSearch)
             }
             WorkspaceSearchContent(session: session, search: session.workspaceSearch)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+}
+
+/// The Search header's two trailing actions: Recent Searches (a menu) and the
+/// Replace toggle. The Replace toggle uses the replace glyph with an active
+/// state, not a disclosure chevron, so it reads as a toggle with a name.
+private struct WorkspaceSearchHeaderActions: View {
+    @Bindable var session: WorkspaceSession
+    @Bindable var search: WorkspaceSearchModel
+
+    var body: some View {
+        Menu {
+            ForEach(search.recentQueries, id: \.self) { recentQuery in
+                Button(recentQuery) {
+                    search.query = recentQuery
+                    guard session.rootURL != nil else { return }
+                    search.search(in: session.workspaceSearchRoots)
+                }
+            }
+        } label: {
+            Label("Recent Searches", systemImage: "clock")
+        }
+        .menuStyle(.button)
+        .buttonStyle(RafuIconButtonStyle(size: 24))
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .disabled(search.recentQueries.isEmpty)
+        .help("Recent Searches")
+        .accessibilityLabel("Recent Searches")
+        Button(
+            search.isReplacePresented ? "Hide Replace" : "Show Replace",
+            systemImage: "arrow.left.arrow.right"
+        ) { search.isReplacePresented.toggle() }
+        .buttonStyle(RafuIconButtonStyle(isActive: search.isReplacePresented, size: 24))
+        .help(search.isReplacePresented ? "Hide Replace" : "Show Replace")
+        .accessibilityAddTraits(search.isReplacePresented ? .isSelected : [])
     }
 }
 
@@ -241,9 +277,10 @@ private struct WorkspaceSearchContent: View {
     @State private var isApplyConfirmationPresented = false
 
     var body: some View {
+        // No divider under the controls: space separates them from the
+        // results, as in Files (sidebar redesign).
         VStack(spacing: 0) {
             searchControls
-            Divider().overlay(theme.palette.borderSubtle)
             searchResults
         }
         .defaultFocus($isQueryFocused, true)
@@ -275,39 +312,20 @@ private struct WorkspaceSearchContent: View {
 
     private var searchControls: some View {
         VStack(spacing: 7) {
+            // Full-width field with a leading glyph; Return searches. The
+            // recent-searches menu and the Replace toggle are header actions.
             HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(theme.palette.textMuted)
+                    .accessibilityHidden(true)
                 TextField("Search workspace", text: $search.query)
                     .textFieldStyle(.plain)
-                    .rafuField(isFocused: isQueryFocused)
                     .focused($isQueryFocused)
                     .onSubmit(performSearch)
-                Menu {
-                    ForEach(search.recentQueries, id: \.self) { recentQuery in
-                        Button(recentQuery) {
-                            search.query = recentQuery
-                            performSearch()
-                        }
-                    }
-                } label: {
-                    Label("Recent Searches", systemImage: "clock")
-                }
-                .menuStyle(.button)
-                .buttonStyle(RafuIconButtonStyle(size: 24))
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .disabled(search.recentQueries.isEmpty)
-                .help("Recent Searches")
-                Button("Search", systemImage: "magnifyingglass", action: performSearch)
-                    .buttonStyle(RafuIconButtonStyle(size: 24))
-                    .disabled(search.query.isEmpty)
-                    .help("Search")
-                Button(
-                    search.isReplacePresented ? "Hide Replace" : "Show Replace",
-                    systemImage: search.isReplacePresented ? "chevron.down" : "chevron.right"
-                ) { search.isReplacePresented.toggle() }
-                .buttonStyle(RafuIconButtonStyle(isActive: search.isReplacePresented, size: 24))
-                .help(search.isReplacePresented ? "Hide Replace" : "Show Replace")
+                    .help("Press Return to search")
             }
+            .rafuField(isFocused: isQueryFocused)
             DisclosureGroup("File filters", isExpanded: fileFiltersExpandedBinding) {
                 HStack(spacing: 6) {
                     TextField("files to include", text: $search.includePattern)
@@ -367,7 +385,8 @@ private struct WorkspaceSearchContent: View {
                 }
             }
         }
-        .padding(RafuMetrics.utilityBodyInset)
+        .padding(.horizontal, RafuMetrics.sidebarTextInset)
+        .padding(.bottom, RafuMetrics.space2)
     }
 
     @ViewBuilder
