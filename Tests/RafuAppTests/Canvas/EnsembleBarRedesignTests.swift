@@ -170,10 +170,14 @@ struct EnsembleBarRedesignTests {
         #expect(Nav.move(0, .down, tileCount: 0, chipCount: 0) == 0)
     }
 
-    @Test("Terminal groups are cards with pane chips, not an accordion; the card stays draggable")
+    @Test("Terminal groups are list rows with pane rows under a chevron; the row stays draggable")
     func terminalGroupCards() throws {
         let panel = try Self.source("Sources/RafuApp/Views/WorkspaceTerminalsPanelView.swift")
-        #expect(!panel.contains("chevron.right"))
+        // Native list (direction A): a group with more than one pane is a
+        // disclosure row again, so the chevron is back. The expansion is per
+        // window (collapsed groups in `@SceneStorage`), never a view-local set.
+        #expect(panel.contains("chevron.right"))
+        #expect(panel.contains("@SceneStorage(TerminalsPanelListModel.expansionStorageKey)"))
         #expect(!panel.contains("expandedGroupIDs"))
         #expect(!panel.contains("TerminalGroupPaneRowView"))
         // Sidebar redesign ("tuned rows"): a 16 pt status glyph in place of
@@ -192,9 +196,11 @@ struct EnsembleBarRedesignTests {
         #expect(
             cardSource.contains(
                 "CanvasBoardDragPayload(terminalGroupID: row.id).makeItemProvider()"))
-        // Hover-revealed ⋯, backed by the same items in a context menu.
+        // Hover-revealed ⋯, backed by the same items in a context menu. In the
+        // list the rows are not focusable one by one; the list selection (the
+        // keyboard cursor) reveals the ⋯ instead of row focus.
         #expect(cardSource.contains(".contextMenu { actions }"))
-        #expect(cardSource.contains("private var showsActions: Bool { isHovering || isFocused }"))
+        #expect(cardSource.contains("private var showsActions: Bool { isHovering || isSelected }"))
         #expect(cardSource.contains("isVisible: showsActions"))
         // One tap handler: double-click renames without delaying a click.
         #expect(cardSource.contains("TabClickIntent.current() == .selectAndRename"))
