@@ -6,7 +6,8 @@
   [`usage-widgets.md`](../plans/phases/usage-widgets.md) and
   [ADR 0039](../decisions/0039-widgetkit-extension-packaging.md).
 - Last verified: Swift 6.4.2, Xcode with macOS 27.2 SDK (26B118), Darwin 27.2.0,
-  Mac17,13, 2026-11-15 (W2, commit bb1c43a, merge e23da21). No GUI check yet.
+  Mac17,13, 2026-11-15 (W2, commit bb1c43a, merge e23da21; estimated rule from W3,
+  merge e962e3e). No GUI check yet.
 
 ## Rule or observed behavior
 
@@ -54,6 +55,24 @@ never write it.
 - Output: 7 values (past days, today so far, `nil` for future days).
 - Only windows with `windowMinutes == 10080` get a split.
 
+### Estimated flag (W3)
+
+`UsageDailyBreakdown.estimated` is true only when all three hold for two
+neighbouring points: they are more than 2 h apart (`estimateGap`), a day boundary
+lies between them, and the level goes up. An overnight gap with no use stays exact.
+The broader rule in the brief (any gap across a day boundary) would have marked
+almost every widget, so it was not used. A log that starts late is covered: the
+first span runs from the window start at level 0, so it is a gap that goes up.
+
+Snapshot: `Window.dailyEstimated: Bool?`. No version bump (the snapshot stays v3).
+A missing key reads as `nil`, and `isDailyEstimated` maps `nil` to `false`. An older
+extension ignores the key. The widgets show "est." and add "daily values estimated"
+to the VoiceOver sentence ([`usage-widgets-catalog.md`](usage-widgets-catalog.md)).
+
+Test-data trap: moving `now` forward more than 6 h hits `abandonedAge`, and the
+widget shows "Rafu not running". Reset-passed and day-boundary tests must use
+windows near their boundary. Tests: `UsageDailyEstimateTests` (7).
+
 ### Snapshot v3
 
 `currentVersion` is 3 and `supportedVersions` is 1 to 3. `Window` gains optional
@@ -93,8 +112,8 @@ Kind `dev.vatsalsaglani.rafu.widgets.hundred`, small and medium. Pure
 
 - The publisher fingerprint excludes the split. A split change shows on the next
   percent change or the 15-minute keep-alive reload.
-- Gaps and a log that starts mid-window are interpolated and not marked as
-  estimated in W2. W3 is adding an estimated flag.
+- Gaps and a log that starts mid-window are interpolated. W2 did not mark them;
+  W3 marks them with the estimated flag (rule above).
 - The log grows only while Rafu runs. The Codex rollout backfill is not done.
 - The log is not deleted when a provider is turned off. Records expire after 35
   days.
@@ -120,6 +139,7 @@ result to a `let` first. See [`concurrency.md`](concurrency.md).
 ```bash
 swift test --filter UsageSampleLogTests
 swift test --filter WidgetHundredTests
+swift test --filter UsageDailyEstimateTests
 ```
 
 ## Related code, ADRs, and phases
@@ -127,6 +147,7 @@ swift test --filter WidgetHundredTests
 - `UsageSampleRecord`, `UsageSampleLog`, `UsageSampleLogStore`,
   `UsageDailyBreakdown`, `WidgetHundredPresentation`, `WidgetTimelinePlan`
   (`rg -n "UsageSampleLog|UsageDailyBreakdown|WidgetHundredPresentation" Sources`)
-- [ADR 0039](../decisions/0039-widgetkit-extension-packaging.md) (amendment W2)
+- [ADR 0039](../decisions/0039-widgetkit-extension-packaging.md) (amendments W2, W3)
+- [`usage-widgets-catalog.md`](usage-widgets-catalog.md)
 - [`usage-rings-and-pace.md`](usage-rings-and-pace.md)
 - Phase: [`usage-widgets.md`](../plans/phases/usage-widgets.md)

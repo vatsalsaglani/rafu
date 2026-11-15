@@ -134,6 +134,26 @@ publisher fingerprint excludes the split; interpolated days are not marked as
 estimated in W2 (W3 adds a flag); the log is not deleted when a provider is turned
 off.
 
+## Amendment 2026-11-15: W3 estimated flag, W4 families
+
+Merges e962e3e (W3) and 34a2dea (W4). Widget rules:
+[`usage-widgets-catalog.md`](../references/usage-widgets-catalog.md). Estimated
+rule: [`usage-sample-log.md`](../references/usage-sample-log.md).
+
+**Snapshot v3, no version change (W3).** `Window` gains optional
+`dailyEstimated: Bool?`. A missing key reads as `nil`, and `isDailyEstimated` maps
+`nil` to `false`. `currentVersion` stays 3, so no reader changes. An older
+extension ignores the key. The data path, signing and packaging did not change.
+
+**Families (W3, W4).** Seven widget (kind `dev.vatsalsaglani.rafu.widgets.seven`):
+`systemMedium` and `systemLarge`. Board widget (kind
+`dev.vatsalsaglani.rafu.widgets.board`): `systemExtraLarge`, and
+`systemExtraLargePortrait` only on macOS 27. The macOS 27.2 SDK declares that
+family `@available(macOS 27.0, iOS 27.0)`. The deployment target is macOS 15, so
+both `supportedFamilies` and every `family ==` comparison need
+`if #available(macOS 27.0, *)`. Four kinds are registered now; the publisher
+reloads all of them (`WidgetSnapshotPublisher.widgetKinds`).
+
 ## Phased plan
 
 W0 to W4 and the daily usage log are tracked in

@@ -10,13 +10,57 @@ path decision: [ADR 0039](../../decisions/0039-widgetkit-extension-packaging.md)
 | W0 packaging (SwiftPM `RafuWidgets` appex assembled by `build_and_run.sh`, signing order, snapshot read) | Done, except the widget gallery check (see below) |
 | W1 Rings widget (small, medium), shared usage code, theme inks, usage link | Delivered (2026-11-15, merge of commit c30a519); signed-build manual checks owed (see below) |
 | W2 Hundred widget, daily usage log, snapshot v3 | Delivered (2026-11-15, commit bb1c43a, merge e23da21); no GUI check yet (see below) |
-| W3 | Pending (adds an estimated flag for interpolated days) |
-| W4 | Pending |
+| W3 Seven widget ("Agent usage by day"), estimated-day flag | Delivered (2026-11-15, commit 1aadade, merge e962e3e); main passed both modes; no GUI or gallery check yet |
+| W4 Board widget ("Agent usage board"), shared widget drawing | Delivered (2026-11-15, commit e24fa64, merge 34a2dea); branch passed parallel; main gate run by coordinator; no GUI or gallery check yet |
 
-The scope of W3 and W4 was not given in the handoff; the lines above record state
-only.
+Widget catalog (kinds, families, states, accessibility, drawing rules):
+[`usage-widgets-catalog.md`](../../references/usage-widgets-catalog.md).
 
 ## Work log
+
+**2026-11-15, W3 and W4 (merges e962e3e and 34a2dea).** Decision amendment:
+[ADR 0039](../../decisions/0039-widgetkit-extension-packaging.md). Toolchain:
+Swift 6.4.2, Xcode with macOS 27.2 SDK (26B118), Darwin 27.2.0, Mac17,13. Widget
+behavior: [`usage-widgets-catalog.md`](../../references/usage-widgets-catalog.md).
+Estimated rule: [`usage-sample-log.md`](../../references/usage-sample-log.md).
+
+- **W3 Seven widget** (kind `dev.vatsalsaglani.rafu.widgets.seven`, `systemMedium`
+  one provider, `systemLarge` two). Pure `WidgetSevenPresentation`.
+- **W3 estimated flag.** `Window.dailyEstimated: Bool?` in snapshot v3, no version
+  bump. `UsageDailyBreakdown.estimated`.
+- **W3 test-data trap.** Moving `now` forward more than 6 h hits `abandonedAge`
+  and the widget shows "Rafu not running". Reset-passed and day-boundary tests
+  must use windows near their boundary.
+- **W3 tests.** `WidgetSevenTests` (21), `UsageDailyEstimateTests` (7).
+- **W4 Board widget** (kind `dev.vatsalsaglani.rafu.widgets.board`,
+  `systemExtraLarge`; `systemExtraLargePortrait` only behind
+  `if #available(macOS 27.0, *)`). Each row reuses the Hundred and Seven cards.
+- **W4 shared drawing.** Moved verbatim to
+  `Sources/RafuWidgets/WidgetDotDrawing.swift`; one `UsageNotConnectedView`. Future
+  widgets reuse it.
+- **W4 publisher rule.** `WidgetSnapshotPublisher.widgetKinds` must list every
+  registered kind (4 now). `WidgetBoardTests.publisherReloadsEveryWidgetKind`
+  asserts the exact list. No test can check the bundle's registrations, because
+  the extension is an executable target.
+- **W4 size.** Debug `RafuWidgets` binary is about 2.3 MB. It uses Canvas and SF
+  Symbols only.
+- **W4 tests.** `WidgetBoardTests` (11).
+- **Evidence.** After W3, main passed both modes: 495 tests in 36 suites and 3839
+  tests in 313 suites, in parallel and in `--no-parallel` (serial). W4 branch,
+  parallel: 495 tests and 3850 tests in 314 suites. W4 main gate run by
+  coordinator; no result is recorded here. No device or gallery check for any
+  widget.
+
+**Manual checks owed for all four widgets (no device check yet).** On a signed
+Lightning build (`RAFU_SIGN_IDENTITY`):
+
+- Gallery check: every widget appears and can be added.
+- Each family in light, dark, accented, vibrant, and increased contrast.
+- VoiceOver reads the one sentence for each widget.
+- Text fit: the 9 pt weekday letters (Seven) and the `caption2` legend (Seven,
+  Board).
+- Real `systemExtraLarge` and `systemExtraLargePortrait` sizes on macOS 27 (Board).
+- A tap opens the right surface.
 
 **2026-11-15, W2 (commit bb1c43a, merge e23da21 "W2 Hundred widget, daily usage
 log, snapshot v3").** Decision amendment:
@@ -44,7 +88,7 @@ Behavior, rules and limits: [`usage-sample-log.md`](../../references/usage-sampl
   311 suites. Main gate run by coordinator. No GUI check.
 - **Known limits.** The publisher fingerprint excludes the split (it shows on the
   next percent change or the 15-minute keep-alive reload). Gaps and a log that
-  starts mid-window are interpolated and not marked as estimated in W2 (W3 adds an
+  starts mid-window are interpolated and not marked as estimated in W2 (W3 added an
   estimated flag). The log grows only while Rafu runs (no Codex rollout backfill).
   The log is not deleted when a provider is turned off (35-day expiry).
 
