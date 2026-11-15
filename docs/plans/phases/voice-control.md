@@ -101,6 +101,21 @@
 - Decision: [ADR 0035 amendment](../../decisions/0035-voice-through-gpt-live.md)
   and [ADR 0036](../../decisions/0036-generated-views-on-the-ensemble-board.md).
 
+## Work log
+
+**2026-11-15, load-sensitive tests made deterministic (commit ff189c4).**
+Toolchain: Swift 6.4.2, Xcode with macOS 27.2 SDK (26B118), Darwin 27.2.0,
+Mac17,13. The `VoiceSessionIntegrationTests` agent-update tests read the real
+session clock, and the 1.5 s quiet gate failed under machine load. Fix: an
+internal `VoiceSession.Dependencies.now` seam (default `ContinuousClock.now`, live
+behavior unchanged) and `VoiceManualClock` in tests for all 8 agent-update tests.
+The `until` test helper now has a 120 s wall-clock deadline (it had a 200,000-yield
+budget). Also fixed in the same commit: `AgentActivityStoreTests` (directory
+notification failure deadline 120 s). Rules, evidence, stress recipe and the
+tests with the same pattern that do not fail yet:
+[`time-sensitive-tests.md`](../../references/time-sensitive-tests.md). Main, both
+modes green: 470 tests in 33 suites and 3801 tests in 308 suites each.
+
 ## Exit checklist (VPLAN Phase 1)
 
 - [ ] Hold-to-talk, latched, check-in, pause and idle close work with a real

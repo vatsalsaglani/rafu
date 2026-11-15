@@ -140,11 +140,14 @@ Changes: per-step pools in `WorkspaceFileNameIndex.enumeratedPaths` (non-git
 fallback), `WorkspaceSymbolIndex.enumeratedPaths`, and
 `WorkspaceSearchService.scan`; kept paths native; Codex `thread_name` title native.
 
-**Open bug (found by the new tests, fix in progress, not recorded as fixed).** In
-the non-git enumerator fallback, a symlink to a directory placed before sibling
-directories made the first sibling directory drop out. A test with a `Link` to
-`Modul1` lost all 240 files of `Modul0`. Likely cause: `skipDescendants()` called
-on a symlink entry (not confirmed).
+**Bug found by the new tests, fixed (commit 2244217).** In the non-git
+enumerator fallback, a symlink to a directory placed before sibling directories
+made the first sibling directory drop out. A test with a `Link` to `Modul1` lost
+all 240 files of `Modul0`. Cause: `skipDescendants()` called for a symlink entry.
+The rule and the symptom are in
+[`memory-and-file-indexing.md`](memory-and-file-indexing.md) ("Never call
+`skipDescendants()` for a non-directory"). The Codex history scanner change
+applies the same rule as a guard; see that note.
 
 **User check owed.** Open History and one conversation, refresh the workspace,
 then run:
@@ -172,8 +175,13 @@ another `#require` produces one. Hoist the inner value into a `let` first.
 
 Each implementor ran format, build, and the full parallel suite green on its
 branch (D2 follow-up: parallel suite green on the branch, merge of commit
-56369ec). Main gate run by coordinator (both modes); no serial result is
-recorded here.
+56369ec). Main, after the symlink fix and the test-determinism merges (Swift
+6.4.2, Xcode with macOS 27.2 SDK (26B118), Darwin 27.2.0, Mac17,13): both modes
+passed. Parallel (`./script/test.sh`): 470 tests in 33 suites and 3801 tests in
+308 suites. Serial (`./script/test.sh --no-parallel`, the CI gate): the same
+counts, 470 tests in 33 suites and 3801 tests in 308 suites. The parallel run was
+the first green parallel run on 2026-11-15, after the test fixes in
+[`time-sensitive-tests.md`](time-sensitive-tests.md).
 
 ```bash
 rg -n "withAutoreleasePool|makeContiguousUTF8" Sources

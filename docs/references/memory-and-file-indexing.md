@@ -102,6 +102,30 @@
   which is exactly the shape most filesystem-enumeration unit tests use —
   write relative-path assertions for any new enumerator-based code, not just
   `.name`/`.lastPathComponent` ones, or this class of bug stays invisible.
+- **Never call `NSDirectoryEnumerator.skipDescendants()` for a symlink or any
+  non-directory entry (fixed in commit 2244217; toolchain: Swift 6.4.2, Xcode
+  with macOS 27.2 SDK (26B118), Darwin 27.2.0, Mac17,13, 2026-11-15).** The
+  enumerator does not descend into a symlink, so there is nothing to skip for
+  it. The call then applies to the *next* directory the enumerator would enter,
+  and silently drops that whole subtree. Call it only for the directory just
+  yielded, checked with `URLResourceKey.isDirectoryKey`. `isDirectoryKey` is
+  `false` for a symlink to a directory because the enumerator does not follow
+  links, so a directory guard is safe. The symptom depends on enumeration order:
+  it shows when the symlink is listed before sibling directories (in the
+  regression test, `Link` came before `Modul0`). The loops with the bug were `WorkspaceFileNameIndex.enumeratedPaths`
+  (non-git fallback), `WorkspaceSymbolIndex.enumeratedPaths`, and
+  `WorkspaceSearchService.scan`. Regression tests:
+  `WorkspaceFileNameIndexTests`, `WorkspaceSymbolIndexTests`, and
+  `SearchServiceTests` ("A directory symlink listed before sibling directories
+  does not hide the first sibling": a `Link` to `Modul1` lost all of `Modul0`
+  before the fix). `.skipsPackageDescendants` was not a factor. The Codex history
+  scanner change calls `skipDescendants` only for a directory at level 4 or
+  more (level ≥ 4); its new test (a stray folder below a day folder, the next day still
+  found) passed before and after the change, so no loss was reproduced there.
+  It is a guard, not a bug fix. Enumerator loops checked and not affected:
+  `UsageSupport`, `CanvasIconPackStore`, `CanvasPersistenceStore`,
+  `ServerInstaller`, `WorkspaceFileService`. Autorelease-pool context:
+  [`autorelease-pools-in-swift-concurrency-loops.md`](autorelease-pools-in-swift-concurrency-loops.md).
 
 ## Why it matters
 

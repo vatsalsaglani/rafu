@@ -32,8 +32,13 @@ trees. Changes: per-step pools in `WorkspaceFileNameIndex.enumeratedPaths`
 `WorkspaceSearchService.scan`; kept paths and the Codex `thread_name` title are
 native. About 38 to 40k of the old 94k stay unexplained (likely a second symbol
 array set during a rebuild, D1, or undrained autoreleased objects; not verified).
-**Open:** a pre-existing bug in the non-git enumerator fallback (a symlink to a
-directory before sibling directories drops the first sibling; fix in progress).
+**Found and fixed (commit 2244217, 2026-11-15):** a pre-existing bug in the
+non-git enumerator fallback (a symlink to a directory before sibling directories
+dropped the first sibling, because `skipDescendants()` was called for the
+symlink). Rule: [`memory-and-file-indexing.md`](../../references/memory-and-file-indexing.md).
+The Codex history scanner change is a guard only (no loss was reproduced there).
+Main, both modes green after the fix and the test merges: parallel and serial
+each 470 tests in 33 suites and 3801 tests in 308 suites.
 **Owed (user):** the `heap -s -q --forkCorpse` check after History plus one
 conversation plus a workspace refresh; expected fewer than about 25k `CFString`
 objects and one symbol array set (about 1.7k arrays, 3.4 MB); two sets means D1.

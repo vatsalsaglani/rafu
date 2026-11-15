@@ -106,6 +106,34 @@ Platform and isolation nuances are in that note and in
 [`usage-widgets.md`](../plans/phases/usage-widgets.md). The decision did not change
 the packaging, signing, or data path above. The gallery question stays open.
 
+## Amendment 2026-11-15: W2 snapshot v3, daily usage log
+
+Commit bb1c43a, merge e23da21. Details and rules:
+[`usage-sample-log.md`](../references/usage-sample-log.md).
+
+**Snapshot v3.** `currentVersion` is 3 and `supportedVersions` is 1 to 3. `Window`
+gains optional `windowStart` and `daily: [Double?]` on the first 7-day window of
+each provider (7 values: past days, today so far, `nil` for future days).
+
+**Daily usage log.** The app keeps a bounded usage sample log (35 days, at most
+20,000 records and 2 MiB; short JSON keys; no identity, no tokens) at
+`~/Library/Application Support/<App Name>/Usage/usage-samples.json`. It is
+**outside** the widget folder: the extension never reads it and receives only the
+split inside the snapshot. The data-path decision above (one read-only
+home-relative exception for the `Widgets/` folder) did not change. It is written
+only from a staged Rafu or Rafu Lightning bundle.
+
+**Publisher.** Log records come from fresh providers only. The app appends through
+`UsageSampleLogStore`, attaches the split in a detached task, writes the snapshot,
+and reloads both widget kinds. Write tasks chain (each waits for the previous and
+is not cancelled), so the newest snapshot is written last.
+
+**Hundred widget.** Kind `dev.vatsalsaglani.rafu.widgets.hundred`, small and
+medium. The packaging and signing decisions did not change. Known limits: the
+publisher fingerprint excludes the split; interpolated days are not marked as
+estimated in W2 (W3 adds a flag); the log is not deleted when a provider is turned
+off.
+
 ## Phased plan
 
 W0 to W4 and the daily usage log are tracked in
