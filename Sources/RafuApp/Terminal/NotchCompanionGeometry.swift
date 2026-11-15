@@ -61,6 +61,12 @@ nonisolated enum NotchCompanionGeometry {
         }
     }
 
+    /// The open notch or pill panel's window width for a panel `height`
+    /// tall: `panelWidth` plus a shoulder on each side.
+    static func openPanelWidth(height: CGFloat) -> CGFloat {
+        panelWidth + 2 * CompanionOutlineLimits.open.metrics(height: height).shoulder
+    }
+
     /// The tallest frame `peekPanelFrame` will produce for `metrics`.
     static func maxPeekHeight(for metrics: NotchScreenMetrics) -> CGFloat {
         (metrics.frame.height * maxPeekHeightFraction).rounded()
@@ -213,6 +219,10 @@ nonisolated enum NotchCompanionGeometry {
     /// On an island screen the open card keeps the capsule's top edge
     /// instead (`NotchIslandGeometry.openFrame`), so it grows out of the
     /// capsule rather than from the screen top.
+    ///
+    /// The window is `panelWidth` plus both concave shoulders of the open
+    /// outline (`CompanionOutline`, Cider's `NotchOutline`): the shoulders
+    /// sit outside the content, so the content keeps `panelWidth`.
     static func peekPanelFrame(for metrics: NotchScreenMetrics, contentHeight: CGFloat) -> CGRect {
         if surface(for: metrics, allowsPill: false) == .island,
             let open = NotchIslandGeometry.openFrame(for: metrics, contentHeight: contentHeight)
@@ -228,8 +238,8 @@ nonisolated enum NotchCompanionGeometry {
             centerX = metrics.frame.midX
             topY = metrics.visibleFrame.maxY
         }
-        let width = min(panelWidth, metrics.frame.width)
         let height = min(contentHeight, maxPeekHeight(for: metrics))
+        let width = min(openPanelWidth(height: height), metrics.frame.width)
         let x = min(max(centerX - width / 2, metrics.frame.minX), metrics.frame.maxX - width)
         let y = min(max(topY - height, metrics.frame.minY), metrics.frame.maxY - height)
         return CGRect(x: x, y: y, width: width, height: height)

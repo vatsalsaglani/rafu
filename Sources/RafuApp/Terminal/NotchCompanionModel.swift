@@ -1272,6 +1272,10 @@ final class NotchCompanionModel: NSObject {
                 for: metrics, contentHeight: peekContentHeight())
             panel.setFrame(frame, display: true, animate: shouldAnimate)
             panel.clickThroughRegions = []
+            // The open notch or pill panel has concave shoulders
+            // (`NotchCompanionView.outlineLimits`); beside them the panel
+            // takes no clicks. The island card is a plain rounded card.
+            panel.hitOutline = surface == .island ? nil : .open
             panel.hasShadow = true
             if surface == .island {
                 installIslandYieldMonitor()
@@ -1292,6 +1296,7 @@ final class NotchCompanionModel: NSObject {
         }
         panel.setFrame(frame, display: true, animate: shouldAnimate)
         panel.clickThroughRegions = []
+        panel.hitOutline = nil
         panel.hasShadow = false
         leadingWingWidth =
             NotchCompanionGeometry.leadingWingWidth(for: metrics, stripFrame: frame) ?? 0

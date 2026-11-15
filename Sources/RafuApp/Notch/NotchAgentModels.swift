@@ -186,11 +186,21 @@ nonisolated struct NotchAgentRow: Identifiable, Equatable, Sendable {
     let windowID: UUID?
     /// Active sub-agents from hooks, in start order.
     let subagents: [NotchSubagentEntry]
+    /// Card details for an agent seen through hooks (`CompanionAgentCardView`),
+    /// `nil` when Rafu does not have them: the folder path, the time of the
+    /// newest hook event, the bounded last-message preview the helper kept
+    /// (at most 600 characters, in memory only), and a short session suffix
+    /// to tell two cards with the same title apart.
+    let detail: String?
+    let updatedAt: Date?
+    let lastMessage: String?
+    let sessionSuffix: String?
 
     init(
         id: UUID, title: String, cli: ConductorCLIID, phase: NotchAgentPhase,
         boardID: UUID? = nil, cardID: UUID? = nil, windowID: UUID? = nil,
-        subagents: [NotchSubagentEntry] = []
+        subagents: [NotchSubagentEntry] = [], detail: String? = nil, updatedAt: Date? = nil,
+        lastMessage: String? = nil, sessionSuffix: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -200,6 +210,10 @@ nonisolated struct NotchAgentRow: Identifiable, Equatable, Sendable {
         self.cardID = cardID
         self.windowID = windowID
         self.subagents = subagents
+        self.detail = detail
+        self.updatedAt = updatedAt
+        self.lastMessage = lastMessage
+        self.sessionSuffix = sessionSuffix
     }
 
     /// Agent rows for every terminal that runs a recognised agent CLI, in the

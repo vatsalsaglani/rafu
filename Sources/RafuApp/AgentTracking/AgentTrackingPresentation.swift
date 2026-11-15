@@ -59,6 +59,18 @@ nonisolated enum AgentTrackedPhase {
         }
     }
 
+    /// The folder line of an outside agent's card: the working folder with
+    /// the home folder shortened to `~`; `nil` when the hook sent none.
+    static func cardDetail(cwd: String) -> String? {
+        cwd.isEmpty ? nil : (cwd as NSString).abbreviatingWithTildeInPath
+    }
+
+    /// The last 8 characters of a session id, as Cider shows to tell two
+    /// cards with the same title apart; `nil` for an empty id.
+    static func sessionSuffix(_ sessionID: String) -> String? {
+        sessionID.isEmpty ? nil : String(sessionID.suffix(8))
+    }
+
     /// The notch phase for a session outside Rafu. A reply stays "ready"
     /// for `TrackedAgentSession.replyFreshInterval`, as nothing in Rafu can
     /// clear it.
@@ -123,7 +135,11 @@ extension AgentActivityStore {
                 title: session.projectName,
                 cli: session.provider.cli,
                 phase: phase,
-                subagents: AgentTrackedPhase.subagentEntries(session))
+                subagents: AgentTrackedPhase.subagentEntries(session),
+                detail: AgentTrackedPhase.cardDetail(cwd: session.cwd),
+                updatedAt: session.updatedAt,
+                lastMessage: session.lastMessagePreview,
+                sessionSuffix: AgentTrackedPhase.sessionSuffix(session.sessionID))
         }
     }
 }

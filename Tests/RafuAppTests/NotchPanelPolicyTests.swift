@@ -196,7 +196,10 @@ func openPanelFrameIsFixed() {
     let notchHeight = notchScreen.safeAreaTopInset + NotchCompanionGeometry.openPanelBodyHeight
     let onNotch = NotchCompanionGeometry.peekPanelFrame(
         for: notchScreen, contentHeight: notchHeight)
-    #expect(onNotch.width == NotchCompanionGeometry.panelWidth)
+    // The window adds both shoulders of the open outline to the content
+    // width, so the content stays `panelWidth`.
+    #expect(onNotch.width == NotchCompanionGeometry.panelWidth + 24)
+    #expect(onNotch.width == NotchCompanionGeometry.openPanelWidth(height: notchHeight))
     #expect(onNotch.height == notchHeight)
     #expect(onNotch.maxY == notchScreen.frame.maxY)
     #expect(notchScreen.frame.contains(onNotch))

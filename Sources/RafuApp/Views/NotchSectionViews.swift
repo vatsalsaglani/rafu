@@ -40,14 +40,14 @@ struct CompanionEnsemblesSectionView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             case .list:
                 ScrollView(.vertical) {
-                    VStack(alignment: .leading, spacing: RafuMetrics.space3) {
+                    VStack(alignment: .leading, spacing: CompanionChromeMetrics.sectionSpacing) {
                         ForEach(model.visibleEditorRows) { row in
                             CompanionWindowGroupView(model: model, row: row)
                         }
                         TrackedAgentsNotchView(model: model)
                         CompanionTrackingHintView(model: model, host: host)
                     }
-                    .padding(.horizontal, RafuMetrics.space3)
+                    .padding(.horizontal, CompanionChromeMetrics.contentHorizontalPadding)
                     .padding(.bottom, RafuMetrics.space3)
                     .frame(maxWidth: .infinity, alignment: .top)
                 }
@@ -275,19 +275,19 @@ struct CompanionUpNextSectionView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             ScrollView(.vertical) {
-                VStack(alignment: .leading, spacing: RafuMetrics.space2) {
+                VStack(alignment: .leading, spacing: CompanionChromeMetrics.sectionSpacing) {
                     CompanionAttentionFeedView(model: model)
                     if !waiting.isEmpty {
-                        VStack(alignment: .leading, spacing: 2) {
+                        VStack(alignment: .leading, spacing: RafuMetrics.space1) {
                             ForEach(waiting) { row in
                                 if row.windowID == nil {
-                                    TrackedAgentNotchRow(row: row)
+                                    TrackedAgentNotchRow(row: row, among: waiting)
                                 } else {
                                     CompanionAgentRowView(model: model, row: row)
                                 }
                             }
                         }
-                        .padding(.horizontal, RafuMetrics.space3)
+                        .padding(.horizontal, CompanionChromeMetrics.contentHorizontalPadding)
                     }
                 }
                 .padding(.bottom, RafuMetrics.space3)
@@ -503,7 +503,7 @@ struct CompanionUsageSectionView: View {
                     .accessibilityLabel("Close usage panel")
                 }
             }
-            .padding(.horizontal, RafuMetrics.space3)
+            .padding(.horizontal, CompanionChromeMetrics.contentHorizontalPadding)
             if snapshots.isEmpty {
                 Text("No usage data yet. Turn providers on in Settings ▸ Usage.")
                     .font(.system(size: 11))
@@ -513,14 +513,14 @@ struct CompanionUsageSectionView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView(.vertical) {
-                    VStack(spacing: RafuMetrics.space2) {
+                    VStack(spacing: CompanionChromeMetrics.sectionSpacing) {
                         ForEach(snapshots, id: \.providerID) { snapshot in
                             CompanionUsageCardView(
                                 model: model, providerID: snapshot.providerID,
                                 openUsageSettings: { openUsageSettings() })
                         }
                     }
-                    .padding(.horizontal, RafuMetrics.space3)
+                    .padding(.horizontal, CompanionChromeMetrics.contentHorizontalPadding)
                     .padding(.bottom, RafuMetrics.space3)
                     .frame(maxWidth: .infinity, alignment: .top)
                 }

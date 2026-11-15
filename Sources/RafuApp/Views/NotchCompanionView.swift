@@ -51,10 +51,14 @@ struct NotchCompanionView: View {
                     .transition(panelTransition)
             }
         }
+        // The open notch panel's window is wider by both shoulders
+        // (`NotchCompanionGeometry.peekPanelFrame`); the content stays
+        // between them.
+        .padding(.horizontal, contentInset)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(surfaceColor)
         .overlay(alignment: .bottom) {
-            if contrast == .increased, model.surface != .island {
+            if contrast == .increased, model.surface != .island, !glowVisible {
                 Rectangle()
                     .fill(theme.palette.borderStrong)
                     .frame(height: RafuMetrics.hairline)
@@ -63,12 +67,16 @@ struct NotchCompanionView: View {
         // The island capsule floats free of the screen edge, so Increase
         // Contrast outlines all of it instead of drawing a bottom rule.
         .overlay {
-            if contrast == .increased, model.surface == .island {
-                shellShape.strokeBorder(
+            if contrast == .increased, model.surface == .island, !glowVisible {
+                islandShape.strokeBorder(
                     theme.palette.borderStrong, lineWidth: RafuMetrics.hairline)
             }
         }
-        .clipShape(shellShape)
+        .modifier(
+            CompanionShellModifier(
+                model: model, islandShape: islandShape, outlineLimits: outlineLimits,
+                glowVisible: glowVisible)
+        )
         // Continuous, not `.onHover`: on macOS 27 a collapsed strip sits
         // below the menu bar and its leading wing must not start hover
         // (`CompanionPanelLayering`), so the model needs the pointer's x.
@@ -90,7 +98,7 @@ struct NotchCompanionView: View {
         )
         .rafuTheme(theme)
         // The strip stays ordered front behind a locked screen; this stops
-        // the mascot and the playback bars there.
+        // the mascot, the playback bars, and the gradient border there.
         .rafuMotionScope()
     }
 
@@ -99,27 +107,34 @@ struct NotchCompanionView: View {
     /// floating pill on a plain display keeps the same look.
     private var surfaceColor: Color { Color.black }
 
-    /// Bottom-rounded, flush with the screen's top edge — the strip reads
-    /// as hanging from the physical housing, matching `NotchHUDView`'s
-    /// `hudShape` technique. On an island every corner is round: a capsule
-    /// at rest (radius half the height), a rounded card when open — the
-    /// same language as the system Dynamic Island it sits behind.
-    private var shellShape: UnevenRoundedRectangle {
-        if model.surface == .island {
-            let radius = model.isPanelOpen ? model.islandOpenCornerRadius : model.stripHeight / 2
-            return UnevenRoundedRectangle(
-                topLeadingRadius: radius,
-                bottomLeadingRadius: radius,
-                bottomTrailingRadius: radius,
-                topTrailingRadius: radius,
-                style: .continuous
-            )
-        }
+    /// The gradient border shows while the panel is open (Cider: expanded),
+    /// and on the strip while it is widened for attention (Cider: peek).
+    private var glowVisible: Bool {
+        model.isPanelOpen
+            || (model.surface != .island && model.isStripExpanded && model.attentionCount > 0)
+    }
+
+    /// The notch and the plain-display pill hang from the screen top: Cider's
+    /// outline, with concave shoulders only while the panel is open, so the
+    /// panel opens out of the strip. The island keeps all-round corners.
+    private var outlineLimits: CompanionOutlineLimits {
+        model.isPanelOpen ? .open : .closed
+    }
+
+    private var contentInset: CGFloat {
+        model.surface == .island ? 0 : outlineLimits.shoulder
+    }
+
+    /// On an island every corner is round: a capsule at rest (radius half
+    /// the height), a rounded card when open — the same language as the
+    /// system Dynamic Island it sits behind.
+    private var islandShape: UnevenRoundedRectangle {
+        let radius = model.isPanelOpen ? model.islandOpenCornerRadius : model.stripHeight / 2
         return UnevenRoundedRectangle(
-            topLeadingRadius: 0,
-            bottomLeadingRadius: RafuMetrics.radiusPanel,
-            bottomTrailingRadius: RafuMetrics.radiusPanel,
-            topTrailingRadius: 0,
+            topLeadingRadius: radius,
+            bottomLeadingRadius: radius,
+            bottomTrailingRadius: radius,
+            topTrailingRadius: radius,
             style: .continuous
         )
     }
@@ -128,6 +143,37 @@ struct NotchCompanionView: View {
     /// transition rule).
     private var panelTransition: AnyTransition {
         reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top))
+    }
+}
+
+/// Clips the companion to its shell and draws the gradient border: the
+/// island's rounded rectangle, or the hanging `CompanionOutline` (the border
+/// leaves out the top edge, which meets the housing or the menu bar).
+private struct CompanionShellModifier: ViewModifier {
+    let model: NotchCompanionModel
+    let islandShape: UnevenRoundedRectangle
+    let outlineLimits: CompanionOutlineLimits
+    let glowVisible: Bool
+
+    func body(content: Content) -> some View {
+        let working = model.agentSummary.working > 0
+        let attention = model.attentionCount + model.agentSummary.attention
+        if model.surface == .island {
+            content
+                .companionGlowBorder(
+                    stroke: islandShape, clip: islandShape, visible: glowVisible,
+                    anyWorking: working, attention: attention
+                )
+                .clipShape(islandShape)
+        } else {
+            content
+                .companionGlowBorder(
+                    stroke: CompanionOutline(limits: outlineLimits, openTop: true),
+                    clip: CompanionOutline(limits: outlineLimits),
+                    visible: glowVisible, anyWorking: working, attention: attention
+                )
+                .clipShape(CompanionOutline(limits: outlineLimits))
+        }
     }
 }
 
@@ -382,10 +428,11 @@ struct CompanionPanelView: View {
     }
 }
 
-/// Cider's pill picker, as a row of tab buttons. Each tab is a real button
-/// with a title for VoiceOver; counts are text, not colour alone. Left and
-/// Right arrows move between tabs; on the menu bar card Command-1 to
-/// Command-3 select a tab.
+/// Cider's pill picker (`CompanionChromeMetrics`), as a row of tab
+/// buttons in one capsule track, then the pin or close button. Each tab is
+/// a real button with a title for VoiceOver; counts are text, not colour
+/// alone. Left and Right arrows move between tabs; on the menu bar card
+/// Command-1 to Command-3 select a tab.
 struct CompanionTabBar: View {
     let model: NotchCompanionModel
     let host: CompanionHost
@@ -396,15 +443,25 @@ struct CompanionTabBar: View {
 
     var body: some View {
         let sections = model.sections(for: host)
-        HStack(spacing: RafuMetrics.space1) {
-            ForEach(Array(sections.enumerated()), id: \.element) { index, section in
-                tab(section, index: index)
+        let equalWidths = CompanionChromeMetrics.usesEqualTabWidths(tabCount: sections.count)
+        HStack(spacing: CompanionChromeMetrics.tabAccessorySpacing) {
+            HStack(spacing: CompanionChromeMetrics.tabOptionSpacing) {
+                ForEach(Array(sections.enumerated()), id: \.element) { index, section in
+                    tab(section, index: index, equalWidth: equalWidths)
+                }
             }
-            Spacer(minLength: RafuMetrics.space2)
+            .frame(maxWidth: equalWidths ? .infinity : nil)
+            .modifier(CompanionTabTrack())
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Sections")
+            if !equalWidths {
+                Spacer(minLength: 0)
+            }
             trailingControl
         }
-        .padding(.horizontal, RafuMetrics.space3)
-        .padding(.vertical, RafuMetrics.space2)
+        .padding(.horizontal, CompanionChromeMetrics.tabBarHorizontalPadding)
+        .padding(.top, CompanionChromeMetrics.tabBarTopPadding)
+        .padding(.bottom, CompanionChromeMetrics.tabBarBottomPadding)
         .onKeyPress(.leftArrow) { step(-1, in: sections) }
         .onKeyPress(.rightArrow) { step(1, in: sections) }
     }
@@ -422,11 +479,7 @@ struct CompanionTabBar: View {
             Button {
                 close?()
             } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(ink.secondary)
-                    .frame(width: 24, height: 24)
-                    .contentShape(Rectangle())
+                accessoryLabel(symbol: "xmark", color: ink.secondary)
             }
             .buttonStyle(.plain)
             .help("Close")
@@ -435,11 +488,9 @@ struct CompanionTabBar: View {
             Button {
                 model.clicked()
             } label: {
-                Image(systemName: model.hoverState == .pinned ? "pin.fill" : "pin")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(model.hoverState == .pinned ? ink.accent : ink.secondary)
-                    .frame(width: 24, height: 24)
-                    .contentShape(Rectangle())
+                accessoryLabel(
+                    symbol: model.hoverState == .pinned ? "pin.fill" : "pin",
+                    color: model.hoverState == .pinned ? ink.accent : ink.secondary)
             }
             .buttonStyle(.plain)
             .help(model.hoverState == .pinned ? "Unpin the notch" : "Pin the notch open")
@@ -447,35 +498,41 @@ struct CompanionTabBar: View {
         }
     }
 
-    private func tab(_ section: NotchSection, index: Int) -> some View {
+    private func accessoryLabel(symbol: String, color: Color) -> some View {
+        let size = CompanionChromeMetrics.tabAccessorySize
+        return Image(systemName: symbol)
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(color)
+            .frame(width: size, height: size)
+            .contentShape(Circle())
+    }
+
+    private func tab(_ section: NotchSection, index: Int, equalWidth: Bool) -> some View {
         let selected = model.selection(for: host) == section
         let badge = badgeText(for: section)
         return Button {
             model.select(section, host: host)
         } label: {
-            HStack(spacing: 4) {
+            HStack(spacing: RafuMetrics.space1) {
                 Image(systemName: section.symbol)
-                    .font(.system(size: 10, weight: .medium))
+                    .font(.system(size: 11, weight: .medium))
                 Text(section.title)
-                    .font(.system(size: 11, weight: selected ? .semibold : .regular))
+                    .font(.system(size: 12, weight: selected ? .semibold : .medium))
                     .lineLimit(1)
                 if let badge {
                     Text(badge.text)
-                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
                         .monospacedDigit()
                         .foregroundStyle(badge.isAttention ? ink.accent : ink.muted)
                 }
             }
             .foregroundStyle(selected ? ink.primary : ink.secondary)
-            .padding(.horizontal, RafuMetrics.space2)
-            .frame(height: 24)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(selected ? theme.palette.selection : Color.clear)
-            )
-            .contentShape(Capsule(style: .continuous))
+            .padding(.horizontal, CompanionChromeMetrics.tabOptionHorizontalPadding)
+            .frame(maxWidth: equalWidth ? .infinity : nil)
+            .frame(height: CompanionChromeMetrics.tabOptionHeight(for: host))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(CompanionTabOptionStyle(selected: selected))
+        .help(section.title)
         .modifier(CompanionTabShortcut(index: index, enabled: host == .menuBar))
         .accessibilityLabel(section.title + (badge.map { ", " + $0.spoken } ?? ""))
         .accessibilityAddTraits(
@@ -685,13 +742,12 @@ struct CompanionAttentionFeedView: View {
 
     var body: some View {
         if !model.feedItems.isEmpty {
-            VStack(spacing: RafuMetrics.space2) {
+            VStack(spacing: CompanionChromeMetrics.sectionSpacing) {
                 ForEach(model.feedItems) { item in
                     CompanionFeedCardView(model: model, item: item)
                 }
             }
-            .padding(.horizontal, RafuMetrics.space3)
-            .padding(.bottom, RafuMetrics.space3)
+            .padding(.horizontal, CompanionChromeMetrics.contentHorizontalPadding)
             .frame(maxWidth: .infinity, alignment: .top)
         }
     }

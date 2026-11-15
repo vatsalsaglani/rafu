@@ -215,9 +215,24 @@ private struct UsageMenuBarPopoverView: View {
     let close: @MainActor () -> Void
 
     var body: some View {
+        let border = RoundedRectangle(
+            cornerRadius: CompanionChromeMetrics.popoverBorderRadius, style: .continuous)
         CompanionSectionHost(model: model, host: .menuBar, close: close)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .background(Color.black)
+            // The notch's gradient border, inset inside the popover's own
+            // rim: open while shown, a sweep on a new attention event, a
+            // slow sweep while an agent works (`CompanionGlowPolicy`).
+            .overlay {
+                Color.clear
+                    .companionGlowBorder(
+                        stroke: border, clip: border, visible: true,
+                        anyWorking: model.agentSummary.working > 0,
+                        attention: model.attentionCount + model.agentSummary.attention
+                    )
+                    .padding(CompanionChromeMetrics.popoverBorderInset)
+                    .allowsHitTesting(false)
+            }
             .environment(\.colorScheme, .dark)
             .rafuTheme(theme)
             .onExitCommand { close() }

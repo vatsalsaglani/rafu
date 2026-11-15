@@ -250,7 +250,7 @@ final class NotchHUDController: NSObject, NotchHUDPresenting {
 
     private func contentSize(for state: NotchHUDState) -> CGSize {
         CGSize(
-            width: Self.layoutWidth,
+            width: panelWidth,
             height: state == .compact ? Self.compactHeight : Self.expandedHeight)
     }
 
@@ -258,6 +258,19 @@ final class NotchHUDController: NSObject, NotchHUDPresenting {
     /// screen — the view pads its content down by this so nothing is laid
     /// out beside the physical housing (0 on the non-notch fallback).
     private(set) var bandInset: CGFloat = 0
+
+    /// The window width: `layoutWidth`, plus both concave shoulders of the
+    /// `CompanionOutline` under a notch (the content keeps `layoutWidth`).
+    var panelWidth: CGFloat {
+        Self.panelWidth(bandInset: bandInset)
+    }
+
+    static func panelWidth(bandInset: CGFloat) -> CGFloat {
+        guard bandInset > 0 else { return layoutWidth }
+        // Every HUD height is far above three shoulders, so the shoulder is
+        // the open outline's full limit.
+        return layoutWidth + 2 * CompanionOutlineLimits.open.shoulder
+    }
 
     private func presentPanel() {
         guard let metrics = NotchScreenAdapter.currentMetrics() else { return }
@@ -269,6 +282,7 @@ final class NotchHUDController: NSObject, NotchHUDPresenting {
             // Already visible: a newer event replaced the shown one — keep
             // the top edge pinned (the geometry does that).
             panel.setFrame(target, display: true, animate: !reduceMotion)
+            panel.hitOutline = hitOutline
             panel.alphaValue = 1
             panel.orderFrontRegardless()
             return
@@ -289,6 +303,7 @@ final class NotchHUDController: NSObject, NotchHUDPresenting {
         hostingView.frame = NSRect(origin: .zero, size: target.size)
         hostingView.autoresizingMask = [.width, .height]
         panel.contentView = hostingView
+        panel.hitOutline = hitOutline
         self.panel = panel
         // Appear WITHOUT activating: slide down from behind the notch and
         // fade in — or fade only under Reduce Motion.
@@ -325,6 +340,13 @@ final class NotchHUDController: NSObject, NotchHUDPresenting {
             for: metrics, contentSize: contentSize(for: state), state: state)
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         panel.setFrame(target, display: true, animate: animated && !reduceMotion)
+        panel.hitOutline = hitOutline
+    }
+
+    /// Under a notch the HUD has concave shoulders (`NotchHUDView`), and
+    /// beside them it takes no clicks; elsewhere the whole rectangle does.
+    private var hitOutline: CompanionOutlineLimits? {
+        bandInset > 0 ? .open : nil
     }
 
     // MARK: - Auto-dismiss timer (12s, hover-paused)

@@ -239,7 +239,9 @@ func islandRegressionLockNotchedAndPlain() {
         NotchCompanionGeometry.expandedFrame(for: notchedScreen, allowsPill: true)
             == CGRect(x: 673, y: 1074, width: 365, height: 33))
     let peek = NotchCompanionGeometry.peekPanelFrame(for: notchedScreen, contentHeight: 373)
-    #expect(peek == CGRect(x: 635.5, y: 734, width: 440, height: 373))
+    // The open panel is 440 plus a 12 pt concave shoulder on each side
+    // (`CompanionOutline`, Cider's notch outline); still centred on the notch.
+    #expect(peek == CGRect(x: 623.5, y: 734, width: 464, height: 373))
     #expect(peek.maxY == 1107)
 
     #expect(
