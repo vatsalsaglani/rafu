@@ -28,7 +28,7 @@ struct TrackedAgentsNotchView: View {
 }
 
 /// One outside agent: vendor icon, folder name, and state as a glyph plus a
-/// word, so state never rests on colour alone.
+/// word, so state never rests on colour alone; then its sub-agents chip.
 struct TrackedAgentNotchRow: View {
     let row: NotchAgentRow
     @Environment(\.rafuTheme) private var theme
@@ -36,6 +36,13 @@ struct TrackedAgentNotchRow: View {
     private var ink: NotchInk { NotchInk(theme: theme) }
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            summary
+            CompanionSubagentsView(subagents: row.subagents)
+        }
+    }
+
+    private var summary: some View {
         HStack(spacing: RafuMetrics.space2) {
             AgentIconView(cli: row.cli, size: 14)
                 .accessibilityHidden(true)

@@ -189,7 +189,8 @@ struct CompanionLooseAgentsView: View {
     }
 }
 
-/// One agent: its vendor icon, name, and state as a glyph plus a word.
+/// One agent: its vendor icon, name, and state as a glyph plus a word, then
+/// its sub-agents chip when it has any.
 struct CompanionAgentRowView: View {
     let model: NotchCompanionModel
     let row: NotchAgentRow
@@ -198,6 +199,13 @@ struct CompanionAgentRowView: View {
     private var ink: NotchInk { NotchInk(theme: theme) }
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            rowButton
+            CompanionSubagentsView(subagents: row.subagents)
+        }
+    }
+
+    private var rowButton: some View {
         Button {
             model.focusAgent(row)
         } label: {

@@ -470,7 +470,9 @@ final class NotchCompanionModel: NSObject {
         for controller: WorkspaceTerminalController, windowID: UUID? = nil,
         boardID: UUID? = nil, cardID: UUID? = nil
     ) -> NotchTerminalInput {
-        NotchTerminalInput(
+        let store = AgentActivityStore.shared
+        let session = store.trackedSession(for: controller)
+        return NotchTerminalInput(
             id: controller.id,
             title: controller.presentedTitle,
             cli: agentIdentity(of: controller),
@@ -480,7 +482,9 @@ final class NotchCompanionModel: NSObject {
             boardID: boardID,
             cardID: cardID,
             windowID: windowID,
-            trackedPhase: AgentActivityStore.shared.notchPhase(for: controller))
+            trackedPhase: AgentTrackedPhase.terminalPhase(
+                session: session, status: controller.status, now: store.now),
+            subagents: AgentTrackedPhase.subagentEntries(session))
     }
 
     /// Every agent terminal in every registered window. Reads only the

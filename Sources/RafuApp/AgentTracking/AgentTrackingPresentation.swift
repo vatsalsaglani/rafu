@@ -51,6 +51,14 @@ nonisolated enum AgentTrackedPhase {
         }
     }
 
+    /// A session's active sub-agents as notch entries, in start order.
+    static func subagentEntries(_ session: TrackedAgentSession?) -> [NotchSubagentEntry] {
+        (session?.subagents ?? []).map {
+            NotchSubagentEntry(
+                id: $0.id, type: $0.type, model: $0.model, taskDescription: $0.taskDescription)
+        }
+    }
+
     /// The notch phase for a session outside Rafu. A reply stays "ready"
     /// for `TrackedAgentSession.replyFreshInterval`, as nothing in Rafu can
     /// clear it.
@@ -114,7 +122,8 @@ extension AgentActivityStore {
                 id: phase == .replyReady ? (session.replyEventID ?? session.rowID) : session.rowID,
                 title: session.projectName,
                 cli: session.provider.cli,
-                phase: phase)
+                phase: phase,
+                subagents: AgentTrackedPhase.subagentEntries(session))
         }
     }
 }
