@@ -495,7 +495,7 @@ nonisolated enum TerminalsPanelModel {
                     isUnavailable: pane.status == .unavailable,
                     sessionID: pane.sessionID,
                     sessionColor: controller?.sessionColor,
-                    folder: pane.launchProfile?.startingFolder.rawValue
+                    folder: pane.launchProfile?.preferredStartFolder.rawValue
                         ?? controller?.currentDirectoryPath ?? "No saved folder",
                     providerOrShell: providerOrShell,
                     canStart: pane.status == .stopped
@@ -644,7 +644,7 @@ nonisolated enum TerminalsPanelModel {
         if let live = controller?.currentDirectoryPath ?? controller?.startingDirectory {
             return live
         }
-        guard let raw = pane.launchProfile?.startingFolder.rawValue, !raw.isEmpty else {
+        guard let raw = pane.launchProfile?.preferredStartFolder.rawValue, !raw.isEmpty else {
             return workspaceRoot
         }
         if raw.hasPrefix("/") { return raw }
@@ -680,7 +680,7 @@ nonisolated enum TerminalsPanelModel {
     ) -> String? {
         let path =
             controller?.currentDirectoryPath ?? controller?.startingDirectory
-            ?? pane.launchProfile?.startingFolder.rawValue
+            ?? pane.launchProfile?.preferredStartFolder.rawValue
         return TerminalNaming.folderName(path: path, workspaceRoot: workspaceRoot)
     }
 

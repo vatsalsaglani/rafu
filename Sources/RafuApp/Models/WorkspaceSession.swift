@@ -1499,6 +1499,7 @@ final class WorkspaceSession {
         case .close(let paneID): closeTerminalPane(paneID)
         case .restart(let paneID): restartTerminalPane(paneID)
         case .start(let paneID): startTerminalPane(paneID)
+        case .startAll(let groupID): startAllRestartableTerminalPanes(in: groupID)
         }
     }
 
@@ -1587,9 +1588,7 @@ final class WorkspaceSession {
     /// startup remains non-transactional after this manager transaction.
     func startAllRestartableTerminalPanes(in groupID: TerminalGroupID) {
         guard let snapshot = terminal.terminalGroup(groupID), let rootURL else { return }
-        let restartable = snapshot.panes.filter {
-            $0.startAvailability == .available && ($0.status == .stopped || $0.status == .exited)
-        }
+        let restartable = snapshot.restartablePanes
         guard !restartable.isEmpty else { return }
         var instantiations: [TerminalPaneID: TerminalGroupControllerInstantiation] = [:]
         for pane in restartable {
@@ -2214,14 +2213,24 @@ final class WorkspaceSession {
         }
     }
 
-    func openSavedTerminalGroup(_ savedLayoutID: SavedTerminalGroupID) {
+    /// Opens a saved layout as a new group with every pane stopped. With
+    /// `startingAllPanes` ("Open and Start All Panes") it then starts every
+    /// restartable pane through the Start All preflight; a refused preflight
+    /// leaves the group open with its panes stopped. A plain open starts
+    /// nothing.
+    func openSavedTerminalGroup(
+        _ savedLayoutID: SavedTerminalGroupID, startingAllPanes: Bool = false
+    ) {
         guard let rootURL,
             let record = savedTerminalGroups.first(where: { $0.id == savedLayoutID })
         else { return }
         do {
             let decoded = try terminalGroupCodec(for: rootURL).openNamedLayout(record)
             let group = try terminal.insertInertSnapshot(decoded.snapshot)
+            noteWorkspaceFolderFallbacks(decoded)
+            // Reveal first, so a refused Start All still shows the group.
             revealTerminalGroup(group.id)
+            if startingAllPanes { startAllRestartableTerminalPanes(in: group.id) }
         } catch { presentTerminalGroupError(error.localizedDescription) }
     }
 
@@ -2421,14 +2430,18 @@ final class WorkspaceSession {
         }
         let key = TerminalGroupWorkspaceKey(standardizedRoot: rootURL)
         let generation = terminalGroupWorkspaceGeneration
+        // Read each shell's folder now, at the user's Save. A failure takes
+        // the same error path as an encoding failure below.
+        let captured = Result { try snapshotCapturingWorkingFolders(snapshot) }
         terminalGroupMutationEpoch &+= 1
         let epoch = terminalGroupMutationEpoch
         terminalGroupMutationTask = Task { [weak self] in
             defer { self?.terminalGroupSaveTaskFinishedForTesting?() }
             do {
+                let capturedSnapshot = try captured.get()
                 let record = try TerminalGroupRestorationCodec().savedRecord(
-                    from: snapshot,
-                    savedLayoutID: snapshot.savedLayoutID)
+                    from: capturedSnapshot,
+                    savedLayoutID: capturedSnapshot.savedLayoutID)
                 let request = try TerminalGroupSavedLayoutSaveRequest(
                     workspaceKey: key, operation: operation, group: record)
                 guard let self else { return }
@@ -2475,6 +2488,39 @@ final class WorkspaceSession {
                 }
             }
         }
+    }
+
+    /// `snapshot` with each ordinary shell's current folder read as its last
+    /// working folder (`restorableLaunchProfile`), so a named layout saves
+    /// the folder each shell is in (`namedLayoutTemplate`). A folder that is
+    /// no longer usable is dropped, and the pane keeps its stored folder.
+    /// The live group is not changed. Agent and Ensemble panes pass through.
+    private func snapshotCapturingWorkingFolders(_ snapshot: TerminalGroupSnapshot) throws
+        -> TerminalGroupSnapshot
+    {
+        let panes = try snapshot.panes.map { pane -> TerminalPaneSnapshot in
+            guard pane.runtimeKind == .ordinaryShell, let profile = pane.launchProfile else {
+                return pane
+            }
+            var observed = restorableLaunchProfile(profile, paneID: pane.id)
+            if let last = observed.lastWorkingFolder,
+                rootURL.map({ !TerminalWorkspaceFolder.isUsable(last, root: $0) }) ?? true
+            {
+                observed = observed.withoutLastWorkingFolder
+            }
+            guard observed != profile else { return pane }
+            return try TerminalPaneSnapshot(
+                id: pane.id, sessionID: pane.sessionID,
+                explicitUserName: pane.explicitUserName, reportedTitle: pane.reportedTitle,
+                runtimeKind: pane.runtimeKind, themeColor: pane.themeColor,
+                status: pane.status, launchProfile: observed,
+                startAvailability: pane.startAvailability)
+        }
+        guard panes != snapshot.panes else { return snapshot }
+        return try TerminalGroupSnapshot(
+            id: snapshot.id, name: snapshot.name, root: snapshot.root,
+            focusedPaneID: snapshot.focusedPaneID, savedLayoutID: snapshot.savedLayoutID,
+            panes: panes, retainedPaneCount: retainedTerminalPaneCount)
     }
 
     var rootURL: URL? {
@@ -6122,8 +6168,9 @@ final class WorkspaceSession {
     /// carries the folder that shell is in now, read from the process at this
     /// capture (window close, board save, workspace save) or from its last
     /// OSC 7 report; a folder outside the workspace clears the value. A pane
-    /// with no observation keeps its stored value. Named saved layouts never
-    /// see this value (`TerminalGroupRestorationCodec.savedRecord`).
+    /// with no observation keeps its stored value. A named saved layout reads
+    /// the same value at Save and folds it into the starting folder
+    /// (`snapshotCapturingWorkingFolders`, `namedLayoutTemplate`).
     private func restorableLaunchProfile(
         _ profile: TerminalPaneLaunchProfile, paneID: TerminalPaneID
     ) -> TerminalPaneLaunchProfile {

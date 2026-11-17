@@ -178,6 +178,9 @@ struct TerminalGroupSavedLayoutsSection: View {
                     isBusy: session.isTerminalGroupStoreMutationInFlight,
                     select: { selection = rowID },
                     open: { session.openSavedTerminalGroup(record.id) },
+                    openAndStartAll: {
+                        session.openSavedTerminalGroup(record.id, startingAllPanes: true)
+                    },
                     beginRename: { beginRename(record) },
                     commitRename: { commitRename(record.id) },
                     cancelRename: cancelRename,
@@ -244,6 +247,9 @@ private struct SavedTerminalGroupRowView: View {
     let isBusy: Bool
     let select: () -> Void
     let open: () -> Void
+    /// Opens the layout and starts every restartable pane. Only this
+    /// explicit item starts shells; Open, a double-click, and Return do not.
+    let openAndStartAll: () -> Void
     let beginRename: () -> Void
     let commitRename: () -> Void
     let cancelRename: () -> Void
@@ -287,6 +293,8 @@ private struct SavedTerminalGroupRowView: View {
             Menu {
                 Button("Open", action: open)
                     .disabled(isBusy)
+                Button("Open and Start All Panes", action: openAndStartAll)
+                    .disabled(isBusy)
                 Button("Rename…", action: beginRename)
                     .disabled(isBusy)
                 Divider()
@@ -325,6 +333,7 @@ private struct SavedTerminalGroupRowView: View {
         .accessibilityLabel("Saved Terminal Group, \(record.name.rawValue)")
         .accessibilityValue(TerminalNaming.paneCountLabel(record.panes.count))
         .accessibilityAction(named: "Open") { if !isBusy { open() } }
+        .accessibilityAction(named: "Open and Start All") { if !isBusy { openAndStartAll() } }
         .accessibilityAction(named: "Rename") { if !isBusy { beginRename() } }
         .accessibilityAction(named: "Delete") { if !isBusy { requestDelete() } }
     }

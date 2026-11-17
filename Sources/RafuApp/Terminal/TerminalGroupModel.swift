@@ -343,15 +343,23 @@ nonisolated struct TerminalPaneLaunchProfile: Codable, Equatable, Hashable, Send
     /// the pane was created in.
     let startingFolder: TerminalWorkspaceRelativePath
     /// The folder the shell was last in, inside the workspace. Only workspace
-    /// restoration and Ensemble boards carry it; named saved layouts never do
-    /// (`withoutLastWorkingFolder`). An old record without the key decodes as
-    /// `nil`, and a `nil` value is not encoded. It is never a command.
+    /// restoration and Ensemble boards carry it; a named saved layout folds
+    /// it into its starting folder (`namedLayoutTemplate`). An old record
+    /// without the key decodes as `nil`, and a `nil` value is not encoded.
+    /// It is never a command.
     var lastWorkingFolder: TerminalWorkspaceRelativePath? = nil
 
-    /// The same profile with no observed folder: the form for a named saved
-    /// layout and for a new split pane.
+    /// The same profile with no observed folder: the form for a new split
+    /// pane.
     var withoutLastWorkingFolder: TerminalPaneLaunchProfile {
         TerminalPaneLaunchProfile(shell: shell, startingFolder: startingFolder)
+    }
+
+    /// The profile a named saved layout keeps: the folder a start would try
+    /// first becomes the starting folder, and no last working folder is
+    /// kept. The saved-layout file has no key for it.
+    var namedLayoutTemplate: TerminalPaneLaunchProfile {
+        TerminalPaneLaunchProfile(shell: shell, startingFolder: preferredStartFolder)
     }
 
     /// Stores `folder` as the last working folder. A folder equal to the
@@ -508,6 +516,14 @@ nonisolated struct TerminalGroupSnapshot: Equatable, Sendable {
         self.focusedPaneID = focusedPaneID
         self.savedLayoutID = savedLayoutID
         self.panes = panes
+    }
+
+    /// The panes Start All targets: available panes that are stopped or
+    /// exited. Unavailable Agent and Ensemble placeholders are never here.
+    var restartablePanes: [TerminalPaneSnapshot] {
+        panes.filter {
+            $0.startAvailability == .available && ($0.status == .stopped || $0.status == .exited)
+        }
     }
 
     static func normalizedFraction(_ value: Double) -> Double {
