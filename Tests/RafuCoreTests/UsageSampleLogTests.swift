@@ -280,6 +280,86 @@ struct UsageDailyBreakdownTests {
         #expect(make([], current: .nan, at: at(1)) == nil)
     }
 
+    private func makeToday(
+        _ records: [UsageSampleRecord], current: Double, at observed: Date, todayStart: Date?
+    ) -> UsageDailyBreakdown? {
+        UsageDailyBreakdown.make(
+            records: records, providerID: "claude", window: "7d", currentPercent: current,
+            observedAt: observed, resetsAt: reset, windowMinutes: 10_080, todayStart: todayStart)
+    }
+
+    @Test("Without a today start there is no today value")
+    func noTodayStart() throws {
+        let result = try #require(make([], current: 10, at: at(1.5)))
+        #expect(result.todayStart == nil)
+        #expect(result.todayUsed == nil)
+    }
+
+    @Test("Today counts from the caller's midnight, not from the 24-hour slice")
+    func todaySinceMidnight() throws {
+        // The window starts at 13:00 UTC, like the Claude limit in
+        // Asia/Kolkata (UTC+5:30). All 6% were used after the local
+        // midnight (18:30 UTC) but before the next slice boundary
+        // (13:00 UTC), so the slice for the current day holds 0.
+        let formatter = ISO8601DateFormatter()
+        let windowStart = try #require(formatter.date(from: "2026-11-16T13:00:00Z"))
+        let windowReset = windowStart.addingTimeInterval(7 * day)
+        let midnight = try #require(formatter.date(from: "2026-11-16T18:30:00Z"))
+        let records = [
+            sample(0, at: midnight, resetsAt: windowReset),
+            sample(
+                1, at: try #require(formatter.date(from: "2026-11-17T03:00:00Z")),
+                resetsAt: windowReset),
+            sample(
+                6, at: try #require(formatter.date(from: "2026-11-17T12:54:00Z")),
+                resetsAt: windowReset),
+        ]
+        let observed = try #require(formatter.date(from: "2026-11-17T13:10:00Z"))
+        let result = try #require(
+            UsageDailyBreakdown.make(
+                records: records, providerID: "claude", window: "7d", currentPercent: 6,
+                observedAt: observed, resetsAt: windowReset, windowMinutes: 10_080,
+                todayStart: midnight))
+        #expect(rounded(result.daily) == [6, 0, nil, nil, nil, nil, nil])
+        #expect(result.todayStart == midnight)
+        let today = try #require(result.todayUsed)
+        #expect(abs(today - 6) < 0.001)
+    }
+
+    @Test("A today start before the window start counts the whole window so far")
+    func todayStartBeforeWindow() throws {
+        let records = [sample(10, at: at(0.5), resetsAt: reset)]
+        let result = try #require(
+            makeToday(records, current: 30, at: at(2.5), todayStart: at(-0.3)))
+        let today = try #require(result.todayUsed)
+        #expect(abs(today - 30) < 0.001)
+        #expect(result.todayStart == at(-0.3))
+        let atStart = try #require(makeToday(records, current: 30, at: at(2.5), todayStart: start))
+        #expect(abs((atStart.todayUsed ?? 0) - 30) < 0.001)
+    }
+
+    @Test("The level at midnight is interpolated between the samples around it")
+    func todayInterpolatesAcrossMidnight() throws {
+        // 10% at day 1.0 and 30% at day 2.0; midnight at day 1.25 is 15%.
+        let records = [
+            sample(10, at: at(1), resetsAt: reset), sample(30, at: at(2), resetsAt: reset),
+        ]
+        let result = try #require(
+            makeToday(records, current: 40, at: at(2.5), todayStart: at(1.25)))
+        let today = try #require(result.todayUsed)
+        #expect(abs(today - 25) < 0.001)
+    }
+
+    @Test("A midnight after the last observation, or a lower level, never gives a negative")
+    func todayNeverNegative() throws {
+        let records = [sample(20, at: at(1), resetsAt: reset)]
+        let ahead = try #require(makeToday(records, current: 20, at: at(1.5), todayStart: at(3)))
+        #expect(ahead.todayUsed == 0)
+        let corrected = try #require(
+            makeToday(records, current: 15, at: at(1.5), todayStart: at(1.2)))
+        #expect((corrected.todayUsed ?? -1) >= 0)
+    }
+
     @Test("The last day of the window holds today")
     func lastDay() throws {
         let result = try #require(make([], current: 70, at: at(6.5)))

@@ -329,19 +329,34 @@ public struct UsageDailyBreakdown: Equatable, Sendable {
     public let daily: [Double?]
     /// `true` when a gap in the log was spread over more than one day.
     public let estimated: Bool
+    /// The caller's start of the calendar day (local midnight) that
+    /// `todayUsed` counts from, as given to `make`. `nil` when the caller
+    /// gave none.
+    public let todayStart: Date?
+    /// Used percent since `todayStart`, from the same levels as `daily`. A
+    /// `todayStart` at or before the window start counts the whole window
+    /// so far. `nil` when the caller gave no `todayStart`.
+    public let todayUsed: Double?
 
-    public init(windowStart: Date, daily: [Double?], estimated: Bool = false) {
+    public init(
+        windowStart: Date, daily: [Double?], estimated: Bool = false, todayStart: Date? = nil,
+        todayUsed: Double? = nil
+    ) {
         self.windowStart = windowStart
         self.daily = daily
         self.estimated = estimated
+        self.todayStart = todayStart
+        self.todayUsed = todayUsed
     }
 
     /// `nil` for a window that is not weekly, has no reset, or does not
     /// contain `observedAt`. `records` may hold any provider windows; only
-    /// those of `providerID`/`window` are read.
+    /// those of `providerID`/`window` are read. `todayStart` is the start
+    /// of the user's calendar day; the caller owns the calendar, so this
+    /// type stays pure.
     public static func make(
         records: [UsageSampleRecord], providerID: String, window: String, currentPercent: Double,
-        observedAt: Date, resetsAt: Date?, windowMinutes: Int?
+        observedAt: Date, resetsAt: Date?, windowMinutes: Int?, todayStart: Date? = nil
     ) -> UsageDailyBreakdown? {
         guard windowMinutes == weeklyWindowMinutes, let resetsAt, currentPercent.isFinite else {
             return nil
@@ -397,7 +412,13 @@ public struct UsageDailyBreakdown: Equatable, Sendable {
             let boundary = windowStart.addingTimeInterval(Double(lowerDay + 1) * dayLength)
             return boundary < upper.time
         }
-        return UsageDailyBreakdown(windowStart: windowStart, daily: daily, estimated: estimated)
+        let finalLevel = points[points.count - 1].value
+        let todayUsed = todayStart.map { start in
+            max(0, finalLevel - level(at: max(start, windowStart)))
+        }
+        return UsageDailyBreakdown(
+            windowStart: windowStart, daily: daily, estimated: estimated, todayStart: todayStart,
+            todayUsed: todayUsed)
     }
 }
 

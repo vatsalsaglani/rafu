@@ -138,7 +138,8 @@ public struct WidgetSevenCard: Equatable, Sendable, Identifiable {
     public let headline: String
     /// `"used"` or `"left"`.
     public let headlineCaption: String
-    /// `"6% today"`, with a day split only.
+    /// `"6% today"` by the user's calendar day (`"<1% today"` under half a
+    /// percent), with a day split only. See `WidgetTodayText`.
     public let todayText: String?
     /// `"Day 6 of 7"`.
     public let dayText: String?
@@ -287,7 +288,9 @@ public struct WidgetSevenCard: Equatable, Sendable, Identifiable {
                 let days = columns.filter { $0.kind != .future }.map { column in
                     let value = column.percent ?? 0
                     return column.kind == .today
-                        ? "today \(value) percent so far" : "\(column.weekday) \(value) percent"
+                        ? WidgetTodayText.spokenSoFar(
+                            window: window, now: now, calendar: calendar, sliceCount: value)
+                        : "\(column.weekday) \(value) percent"
                 }
                 spoken.append(contentsOf: days)
                 if isEstimated { spoken.append("daily values estimated") }
@@ -309,7 +312,10 @@ public struct WidgetSevenCard: Equatable, Sendable, Identifiable {
             hasDailySplit: dayCounts != nil, isEstimated: isEstimated,
             paceLinePercent: paceLinePercent, paceLineRow: rowFor(paceLinePercent),
             headline: headline, headlineCaption: caption,
-            todayText: todayCount.map { "\($0)% today" }, dayText: dayText,
+            todayText: todayCount.flatMap {
+                WidgetTodayText.text(
+                    window: window, now: now, calendar: calendar, sliceCount: $0)
+            }, dayText: dayText,
             paceLineText: paceLineText, status: status, tokenSummary: provider.tokenSummary,
             resetsAt: resetsAt, accessibilityLabel: spoken.joined(separator: ", "))
     }
