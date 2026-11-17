@@ -163,9 +163,11 @@ final class WidgetSnapshotPublisher {
 
     /// Writes the day split into each provider's primary weekly window
     /// (the first window with a 7-day length). Other windows are unchanged.
-    nonisolated static func attachDaily(_ snapshot: WidgetUsageSnapshot, log: UsageSampleLog)
-        -> WidgetUsageSnapshot
-    {
+    /// The same window gets the used percent since local midnight (of
+    /// `calendar`, at the provider's observation) for the "N% today" text.
+    nonisolated static func attachDaily(
+        _ snapshot: WidgetUsageSnapshot, log: UsageSampleLog, calendar: Calendar = .current
+    ) -> WidgetUsageSnapshot {
         var snapshot = snapshot
         for index in snapshot.providers.indices {
             let provider = snapshot.providers[index]
@@ -180,11 +182,14 @@ final class WidgetSnapshotPublisher {
                     records: log.records(providerID: provider.id, window: window.label),
                     providerID: provider.id, window: window.label,
                     currentPercent: window.usedPercent, observedAt: provider.observedAt,
-                    resetsAt: window.resetsAt, windowMinutes: window.windowMinutes)
+                    resetsAt: window.resetsAt, windowMinutes: window.windowMinutes,
+                    todayStart: calendar.startOfDay(for: provider.observedAt))
             else { continue }
             snapshot.providers[index].windows[windowIndex].windowStart = breakdown.windowStart
             snapshot.providers[index].windows[windowIndex].daily = breakdown.daily
             snapshot.providers[index].windows[windowIndex].dailyEstimated = breakdown.estimated
+            snapshot.providers[index].windows[windowIndex].todayStart = breakdown.todayStart
+            snapshot.providers[index].windows[windowIndex].todayUsed = breakdown.todayUsed
         }
         return snapshot
     }

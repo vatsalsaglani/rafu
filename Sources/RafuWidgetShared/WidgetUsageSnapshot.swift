@@ -18,6 +18,9 @@ import Foundation
 /// log. Both fields are optional, so v1 and v2 files still decode.
 /// `Window.dailyEstimated` (added with the Seven widget, still version 3)
 /// is optional too: a v3 file without it decodes as not estimated.
+/// `Window.todayStart` and `Window.todayUsed` (the "N% today" text by the
+/// user's calendar day) are optional the same way, still version 3: a file
+/// without them makes the widget show the slice count it showed before.
 public struct WidgetUsageSnapshot: Codable, Equatable, Sendable {
     public static let currentVersion = 3
     /// Versions `WidgetSnapshotStore.read` accepts.
@@ -117,10 +120,17 @@ public struct WidgetUsageSnapshot: Codable, Equatable, Sendable {
         /// was closed), so `daily` is an estimate. `nil` (an older v3 file)
         /// reads as `false`; see `isDailyEstimated`.
         public var dailyEstimated: Bool?
+        /// v3 addition: the local-midnight start of the app's calendar day
+        /// at its observation, and the used percent since then. They drive
+        /// the "N% today" text, not the dots or the columns. Only with
+        /// `daily`.
+        public var todayStart: Date?
+        public var todayUsed: Double?
 
         public init(
             label: String, usedPercent: Double, resetsAt: Date?, windowMinutes: Int?,
-            windowStart: Date? = nil, daily: [Double?]? = nil, dailyEstimated: Bool? = nil
+            windowStart: Date? = nil, daily: [Double?]? = nil, dailyEstimated: Bool? = nil,
+            todayStart: Date? = nil, todayUsed: Double? = nil
         ) {
             self.label = label
             self.usedPercent = usedPercent
@@ -129,6 +139,8 @@ public struct WidgetUsageSnapshot: Codable, Equatable, Sendable {
             self.windowStart = windowStart
             self.daily = daily
             self.dailyEstimated = dailyEstimated
+            self.todayStart = todayStart
+            self.todayUsed = todayUsed
         }
 
         /// `dailyEstimated`, `false` when absent.

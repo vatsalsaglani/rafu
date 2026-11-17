@@ -123,7 +123,8 @@ public struct WidgetHundredCard: Equatable, Sendable, Identifiable {
     public let headline: String
     /// `"used"` or `"left"`.
     public let headlineCaption: String
-    /// `"6% today"`, with a day split only.
+    /// `"6% today"` by the user's calendar day (`"<1% today"` under half a
+    /// percent), with a day split only. See `WidgetTodayText`.
     public let todayText: String?
     /// `"Day 6 of 7"`.
     public let dayText: String?
@@ -272,7 +273,11 @@ public struct WidgetHundredCard: Equatable, Sendable, Identifiable {
             spoken.append(
                 limitName + " \(shownPercent) percent " + (mode == .remaining ? "left" : "used"))
             if let dayNumber, let days { spoken.append("day \(dayNumber) of \(days)") }
-            if let todayCount { spoken.append("\(todayCount) percent today") }
+            if let todayCount {
+                spoken.append(
+                    WidgetTodayText.spoken(
+                        window: window, now: now, calendar: calendar, sliceCount: todayCount))
+            }
         }
         spoken.append(status.spokenText(now: now))
         if !resetPassed, window.resetsAt != nil {
@@ -286,7 +291,10 @@ public struct WidgetHundredCard: Equatable, Sendable, Identifiable {
             counts: Counts(
                 used: usedCount, today: todayCount, projected: projectedCount, spare: spareCount),
             elapsedMarkerIndex: marker, headline: headline, headlineCaption: caption,
-            todayText: todayCount.map { "\($0)% today" }, dayText: dayText, status: status,
+            todayText: todayCount.flatMap {
+                WidgetTodayText.text(
+                    window: window, now: now, calendar: calendar, sliceCount: $0)
+            }, dayText: dayText, status: status,
             tokenSummary: provider.tokenSummary, resetsAt: resetsAt,
             accessibilityLabel: spoken.joined(separator: ", "))
     }
