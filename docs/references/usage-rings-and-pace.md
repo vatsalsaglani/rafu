@@ -212,6 +212,22 @@ opacity of each resolved `Color.Resolved`; `inkMonochromeKeepsWarningTints`,
 `inkMonochromeIncreasedContrast`, `inkLegendSwatchMatchesRing`) and
 `UsagePaceTests.usageRingPaletteStoreRoundTrip`.
 
+### Pace is window-aligned; "N% today" is not (2026-11-17)
+
+Pace (`UsagePace.estimate`, the widget pace line, the dots' today band, the
+seven-day columns) counts 24-hour slices from the window start (`resetsAt` minus the
+window length). The widget text "N% today" is the used percent since local midnight
+(`todayStart` and `todayUsed` in the snapshot). Rule: keep the two apart. Do not feed
+the calendar value into pace, and do not feed the slice count into the text.
+
+Why: a slice starts at the reset time of day (18:30 IST for a 13:00Z reset), so the
+slice count showed "0% today" for use that happened on the user's local day. A pace
+rule needs equal 24-hour slices; a person reading "today" expects a calendar day. The
+column highlighted in a widget is a window slice, so its value can differ from the
+text. This is intended. Evidence and cases: "Today text" in
+[`usage-widgets-catalog.md`](usage-widgets-catalog.md). The rings and
+`UsagePace.estimate` themselves did not change.
+
 ### `Date.FormatStyle.timeZone(_:)` does not change the rendering zone
 
 `Date.FormatStyle.timeZone(_:)` configures the time-zone **name symbol**

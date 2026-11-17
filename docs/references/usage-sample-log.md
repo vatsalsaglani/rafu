@@ -52,7 +52,9 @@ never write it.
   lower value caps earlier values. No day is negative. The days sum to the
   current percent.
 - Straight-line interpolation at the day boundaries spreads gaps.
-- Output: 7 values (past days, today so far, `nil` for future days).
+- Output: 7 values (past days, today so far, `nil` for future days). The slices
+  are window-aligned, not calendar days. The "N% today" text does not use the last
+  slice; see "Today text" in [`usage-widgets-catalog.md`](usage-widgets-catalog.md).
 - Only windows with `windowMinutes == 10080` get a split.
 
 ### Estimated flag (W3)

@@ -18,6 +18,14 @@ Widget catalog (kinds, families, states, accessibility, drawing rules):
 
 ## Work log
 
+**2026-11-17, "N% today" fix (code commit 8e6297f, merged on main).** "N% today" now
+means used percent since local midnight, not the current window slice. Snapshot
+`Window` gains optional `todayStart` and `todayUsed` (no version bump); pure
+`WidgetTodayText` in `RafuWidgetShared`. Dots, columns, and the pace line stay
+window-slice based on purpose. Root cause, rule, and evidence:
+[`usage-widgets-catalog.md`](../../references/usage-widgets-catalog.md) ("Today
+text"). Both test modes passed on main after the merge. Not checked on the desktop yet.
+
 **2026-11-15, W3 and W4 (merges e962e3e and 34a2dea).** Decision amendment:
 [ADR 0039](../../decisions/0039-widgetkit-extension-packaging.md). Toolchain:
 Swift 6.4.2, Xcode with macOS 27.2 SDK (26B118), Darwin 27.2.0, Mac17,13. Widget

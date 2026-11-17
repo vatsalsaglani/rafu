@@ -58,7 +58,8 @@ only. A column holds 16 dots (8 rows by 2). The rest is `overflow`, drawn as "+N
   today. Caption "Each day left · ~16%".
 - `paceLineRow` is capped at the top row.
 
-**Text.** Header headline (used or left %), "Day N of 7", "6% today",
+**Text.** Header headline (used or left %), "Day N of 7", "6% today" (calendar day;
+see "Today text" below),
 `Text(resetsAt, style: .relative)`, status long text.
 
 **States.** As in W1 and W2. Without a day split: hollow pace dots only and the
@@ -77,6 +78,54 @@ values estimated". In Remaining mode it adds "about N percent for each day left"
 
 **Drawing.** Increased contrast gives stronger strokes. Tests: `WidgetSevenTests`
 (21), `UsageDailyEstimateTests` (7).
+
+## Today text: "N% today" is a calendar day (2026-11-17)
+
+**Symptom.** Both widgets showed "0% today" (Claude 6% used, Codex 58% used).
+
+**Root cause.** "Today" was the current 24-hour slice counted from the window start
+(`resetsAt` minus 7 days), not the local calendar day. Real data on the user's Mac:
+
+- Claude: reset 2026-11-23T13:00Z, so slices start at 13:00Z (18:30 IST). All samples
+  (1% at about 03:00Z, 6% at 12:54Z) were before 13:00Z. The slices were `[6, 0, nil...]`.
+  The 6% was used on the user's local day, but the slice count was 0.
+- Codex: slice 6 started at 14:26:48Z and held 0.448, which rounds to 0.
+
+**Rule.** "N% today" is the used percent since LOCAL midnight.
+
+- `UsageDailyBreakdown.make(..., todayStart: Date? = nil)` sets
+  `todayUsed = max(0, current - level(at: max(todayStart, windowStart)))`. It uses the
+  same interpolation as the day slices. No `Calendar` in `RafuCore`; the caller passes
+  the boundary. Default `nil` gives no value.
+- Snapshot `Window` has optional `todayStart` and `todayUsed`. The snapshot version is
+  not bumped: the Codable is synthesized, the keys are optional, and `supportedVersions`
+  is a range. A test decodes an old v3 file without the keys.
+- `WidgetSnapshotPublisher.attachDaily(_:log:calendar: = .current)` passes
+  `startOfDay(for: provider.observedAt)`.
+- Pure `WidgetTodayText` (`RafuWidgetShared`) makes the text for the Hundred and Seven
+  presentations (Board follows Hundred). The caller passes `now` and a calendar.
+
+| Case | Text |
+|---|---|
+| `now` is the same local day as `todayStart` | the value |
+| `now` is a later day | 0 |
+| value above 0 that rounds to 0 | "<1% today" (spoken "less than 1 percent today") |
+| reset passed | no text (nil) |
+| fields absent (older app) | the old slice count (`sliceCount` parameter) |
+
+The Seven spoken today-column text follows the calendar value too.
+
+**Intended mismatch.** The dots' today band, the seven-day columns, and the
+Remaining-mode pace line stay window-slice based. So the text can differ from the
+highlighted column: the column is a window slice, the text is a calendar day. Do not
+"fix" this. Next-day "0% today" can show only within the stale window just after midnight.
+
+**Tests.** 5 new in `UsageSampleLogTests`. New `WidgetTodayTextTests` (Asia/Kolkata and
+UTC calendars, decode of an old file, round trip, publisher).
+
+**Evidence.** Code commit 8e6297f, merged on main. Both modes passed on main after the
+merge. Implementor, parallel: 3949 tests in 322 suites and 535 tests in 40 suites. Not
+checked on the desktop yet: owed, check that the real widgets show the calendar value.
 
 ## Board ("Agent usage board", W4)
 
@@ -180,3 +229,4 @@ swift test --filter WidgetRingsTests
 - [`usage-sample-log.md`](usage-sample-log.md), [`usage-deep-link.md`](usage-deep-link.md),
   [`usage-rings-and-pace.md`](usage-rings-and-pace.md)
 - Phase: [`usage-widgets.md`](../plans/phases/usage-widgets.md)
+- Today text: `rg -n "WidgetTodayText|todayStart|todayUsed" Sources`
