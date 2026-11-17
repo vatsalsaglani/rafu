@@ -169,10 +169,77 @@ nonisolated struct CompanionPanelLayering: Equatable, Sendable {
     }
 }
 
+/// Hover for the notch strip while it sits below the menu bar
+/// (`CompanionPanelLayering.Level.belowMenuBar`). There the menu-bar window
+/// is above the strip, so the strip's own tracking area never sees the
+/// pointer. The model compares the pointer location with the panel frame
+/// instead, from a global mouse-moved monitor and, while Rafu is the active
+/// app, a short timer. It reads the location only and never logs it.
+///
+/// After the strip rises, the view's hover takes over. Until the view
+/// reports the pointer, the watch closes a dwell or peek that the pointer
+/// leaves. Pure; every member lives in the primary declaration — see
+/// `CompanionEditorRow`.
+nonisolated enum CompanionPointerWatch {
+    nonisolated enum Region: Equatable, Sendable {
+        case outside
+        /// Left of the housing: the pointer may reach for a menu-bar
+        /// overflow item, so it never starts hover.
+        case leadingWing
+        /// The housing or the trailing wing.
+        case hoverArea
+    }
+
+    nonisolated enum Action: Equatable, Sendable {
+        case none
+        /// Start hover (`NotchCompanionModel.hoverEntered()`).
+        case enter
+        /// End hover (`NotchCompanionModel.hoverExited()`).
+        case exit
+    }
+
+    /// Where `point` is relative to the panel `frame`, both in screen
+    /// coordinates (unflipped). Uses `NSMouseInRect` semantics: x in
+    /// `[minX, maxX)` and y in `(minY, maxY]`, so the pointer pressed
+    /// against the top edge of the screen (y == maxY) counts as inside.
+    /// The leading wing is `x < frame.minX + leadingWingWidth`.
+    static func region(of point: CGPoint, in frame: CGRect, leadingWingWidth: CGFloat) -> Region {
+        guard point.x >= frame.minX, point.x < frame.maxX,
+            point.y > frame.minY, point.y <= frame.maxY
+        else { return .outside }
+        return point.x < frame.minX + leadingWingWidth ? .leadingWing : .hoverArea
+    }
+
+    /// Whether the watch runs: only for the notch strip on macOS 27 or
+    /// later, while the strip is below the menu bar, or while a dwell or
+    /// peek that the view has not seen yet is in progress. Never while
+    /// pinned.
+    static func isActive(
+        layering: CompanionPanelLayering, osMajorVersion: Int,
+        surface: NotchCompanionSurface?, hoverState: CompanionHoverState,
+        isHoverPending: Bool, viewHasPointer: Bool
+    ) -> Bool {
+        guard osMajorVersion >= CompanionPanelLayering.firstLoweringOSMajorVersion,
+            surface == .notch
+        else { return false }
+        if layering.level == .belowMenuBar { return true }
+        return !viewHasPointer && hoverState != .pinned
+            && (isHoverPending || hoverState == .peeking)
+    }
+
+    /// The hover action for `region`. Lowered: the hover area starts hover.
+    /// Raised: the view's hover owns entering, so the watch only ends a
+    /// hover it is tracking once the pointer is outside the panel.
+    static func action(for region: Region, isLowered: Bool, isTracking: Bool) -> Action {
+        if isLowered { return region == .hoverArea ? .enter : .none }
+        return region == .outside && isTracking ? .exit : .none
+    }
+}
+
 /// Which companion surfaces exist: the panel (notch strip, island pill or
-/// plain-display pill) and the usage status item in the menu bar. Only a
-/// Dynamic Island screen reads `UsageGlancePosition`; a notched or plain
-/// screen keeps the panel and never gets a status item.
+/// plain-display pill) and the usage status item in the menu bar. Every
+/// Mac reads `UsageGlancePosition`: `.menuBar` replaces the panel with the
+/// status item on any screen; `.belowIsland` keeps the panel.
 nonisolated struct CompanionPresence: Equatable, Sendable {
     let showsPanel: Bool
     let showsMenuBarItem: Bool
@@ -180,18 +247,24 @@ nonisolated struct CompanionPresence: Equatable, Sendable {
     static let none = CompanionPresence(showsPanel: false, showsMenuBarItem: false)
 
     /// - Parameters:
-    ///   - surface: the companion's surface on its screen; `nil` means no
-    ///     companion there (a plain screen with the pill off, or no screen).
-    ///   - position: the stored usage glance position.
+    ///   - surface: the kind of the companion's screen; `.pill` is a plain
+    ///     screen, `nil` means no screen.
+    ///   - position: the stored companion position.
     ///   - isEnabled: Settings ▸ "Show notch companion".
+    ///   - allowsPill: Settings ▸ "Show a floating pill on displays without
+    ///     a notch". Off, a plain screen has no panel, but the menu bar
+    ///     item still shows when the position asks for it.
     static func resolve(
-        surface: NotchCompanionSurface?, position: UsageGlancePosition, isEnabled: Bool
+        surface: NotchCompanionSurface?, position: UsageGlancePosition, isEnabled: Bool,
+        allowsPill: Bool = true
     ) -> CompanionPresence {
         guard isEnabled, let surface else { return .none }
         switch (surface, position) {
-        case (.island, .menuBar):
+        case (_, .menuBar):
             return CompanionPresence(showsPanel: false, showsMenuBarItem: true)
-        case (.island, .belowIsland), (.notch, _), (.pill, _):
+        case (.pill, .belowIsland) where !allowsPill:
+            return .none
+        case (_, .belowIsland):
             return CompanionPresence(showsPanel: true, showsMenuBarItem: false)
         }
     }

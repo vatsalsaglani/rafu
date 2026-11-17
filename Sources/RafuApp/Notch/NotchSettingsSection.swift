@@ -16,16 +16,36 @@ struct NotchSettingsSection: View {
     @AppStorage(NotchDisplayPreferenceStore.usageGlancePositionKey)
     private var usageGlancePosition: UsageGlancePosition = .belowIsland
 
-    /// This Mac has a system Dynamic Island: the companion shows Usage only,
-    /// below the island or in the menu bar, and hover never opens it.
-    private var isIsland: Bool { NotchCompanionModel.shared.surface == .island }
+    /// The kind of the companion's screen: notch, Dynamic Island, or plain.
+    private var surface: NotchCompanionSurface { NotchCompanionModel.shared.surface }
+
+    /// This Mac has a system Dynamic Island: the pill shows Usage only, and
+    /// hover never opens it.
+    private var isIsland: Bool { surface == .island }
+
+    private var isInMenuBar: Bool { usageGlancePosition == .menuBar }
 
     private var footerText: String {
-        let base =
+        var text =
             "Choose the sections the notch panel offers. Agents stays on if you turn every section off. Now Playing reads system media through the bundled adapter; with that off, it reads Music and Spotify only and asks macOS for permission the first time you connect it."
-        guard isIsland else { return base }
-        return base
-            + " On a Mac with a Dynamic Island, the companion is a small pill below the island or an item in the menu bar. The pill opens usage details only. The menu bar item opens a card with Agents, Up next, and Usage, and shows how many agents need you."
+        text +=
+            " In the menu bar, the companion is an item that opens a card with Agents, Up next, and Usage, and shows how many agents need you."
+        if isIsland {
+            text +=
+                " On a Mac with a Dynamic Island, the pill below the island opens usage details only."
+        }
+        return text
+    }
+
+    private var positionHelp: String {
+        let own: String
+        switch surface {
+        case .notch: own = "a strip at the notch"
+        case .island: own = "a small pill below the Dynamic Island"
+        case .pill: own = "a small pill below the menu bar, if you turn it on"
+        }
+        return "Where the companion shows on this Mac: " + own
+            + ", or an item with the other icons on the right of the menu bar. When the menu bar is full, macOS can hide the item behind the notch or in the » menu; hold Command and drag menu bar icons to move it."
     }
 
     var body: some View {
@@ -43,23 +63,19 @@ struct NotchSettingsSection: View {
                 .help(
                     "Off: resting the pointer on the notch only widens the strip, and a click opens the panel."
                 )
-                .disabled(!companionEnabled || isIsland)
+                .disabled(!companionEnabled || isIsland || isInMenuBar)
             Toggle("Show a floating pill on displays without a notch", isOn: $pillOnPlainDisplays)
                 .help(
                     "Adds a small pill at the top centre, under the menu bar, on the built-in display of a Mac that has no notch."
                 )
-                .disabled(!companionEnabled)
-            if isIsland {
-                Picker("Usage glance", selection: $usageGlancePosition) {
-                    ForEach(UsageGlancePosition.allCases) { position in
-                        Text(position.title).tag(position)
-                    }
+                .disabled(!companionEnabled || isInMenuBar)
+            Picker("Companion position", selection: $usageGlancePosition) {
+                ForEach(UsageGlancePosition.allCases) { position in
+                    Text(position.title(on: surface)).tag(position)
                 }
-                .help(
-                    "Where this Mac shows your agent usage: a small pill below the Dynamic Island, or an item with the other icons on the right of the menu bar."
-                )
-                .disabled(!companionEnabled)
             }
+            .help(positionHelp)
+            .disabled(!companionEnabled)
             ForEach(NotchSection.allCases) { section in
                 NotchSectionToggle(section: section)
                     .disabled(!companionEnabled)

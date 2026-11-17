@@ -107,17 +107,21 @@ nonisolated enum CompanionHost: Equatable, Sendable {
 
     /// The host that shows outside agents (seen only through hooks) that
     /// need the person, in its Up next section: the surface in use, never
-    /// two at once. The menu bar card when the usage glance is in the menu
-    /// bar; the notch panel on a notched Mac or the plain-display pill;
-    /// nothing on an island Mac with the pill below the island, whose card
-    /// shows Usage only.
+    /// two at once. The menu bar card when the companion is in the menu bar
+    /// (on any Mac); otherwise the notch panel on a notched Mac or the
+    /// plain-display pill; nothing on an island Mac with the pill below the
+    /// island, whose card shows Usage only, or on a plain screen with the
+    /// pill off. `surface` is the screen's kind (`.pill` for a plain
+    /// screen); `nil` means no screen.
     static func outsideNotices(
-        surface: NotchCompanionSurface?, position: UsageGlancePosition
+        surface: NotchCompanionSurface?, position: UsageGlancePosition, allowsPill: Bool = true
     ) -> CompanionHost? {
+        guard let surface else { return nil }
+        if position == .menuBar { return .menuBar }
         switch surface {
-        case .island: position == .menuBar ? .menuBar : nil
-        case .notch, .pill: .notchPanel
-        case nil: nil
+        case .island: return nil
+        case .pill: return allowsPill ? .notchPanel : nil
+        case .notch: return .notchPanel
         }
     }
 }
@@ -148,23 +152,30 @@ nonisolated enum CompanionMenuSelection {
     }
 }
 
-/// Where a Dynamic Island Mac shows the usage glance (Settings ▸ General ▸
-/// Notch, "Usage glance"). Read only on a Dynamic Island screen; a notched
-/// or plain Mac ignores it (`CompanionPresence`).
+/// Where the companion shows on this Mac (Settings ▸ General ▸ Notch,
+/// "Companion position"). Every Mac reads it (`CompanionPresence`).
 ///
-/// - `belowIsland`: the black pill under the menu bar, centred under the
-///   system island (the default).
-/// - `menuBar`: one status item among the menu bar's right-side items.
+/// - `belowIsland`: the companion's own surface — the strip at the notch,
+///   the pill below a system Dynamic Island, or the pill below the menu bar
+///   on a plain display (the default). The raw value is historical: it
+///   dates from when only Dynamic Island Macs had this setting, and stays
+///   so the stored value survives.
+/// - `menuBar`: one status item among the menu bar's right-side items,
+///   which opens the menu bar card.
 nonisolated enum UsageGlancePosition: String, CaseIterable, Identifiable, Sendable {
     case belowIsland
     case menuBar
 
     var id: String { rawValue }
 
-    var title: String {
-        switch self {
-        case .belowIsland: "Below the Dynamic Island"
-        case .menuBar: "In the menu bar"
+    /// The Settings title on a screen of kind `surface` (`nil` means no
+    /// screen).
+    func title(on surface: NotchCompanionSurface?) -> String {
+        switch (self, surface) {
+        case (.belowIsland, .island): "Below the Dynamic Island"
+        case (.belowIsland, .notch): "At the notch"
+        case (.belowIsland, .pill), (.belowIsland, nil): "Below the menu bar"
+        case (.menuBar, _): "In the menu bar"
         }
     }
 
