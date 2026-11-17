@@ -284,19 +284,39 @@ Verification (Xcode toolchain, macOS 27.2, Mac17,13): on `main`, parallel passed
 3935 tests in 319 suites (32 s); `--no-parallel` passed 3935 tests in 319 suites
 (102 s); the build had no Swift warnings. Rafu Lightning was not launched.
 
-Owed device checks (not verified; the user has no notched Mac now, and the macOS
-version of the reporting Mac is not known):
+Superseded 2026-11-17 (2): the pointer watch and the lowering of this section are
+removed (next section). The position picker on every Mac stays. Of the checks
+that were owed here, only this one still applies:
 
-- The strip is visible on a notched Mac.
-- Hover from the housing and from the trailing wing opens it, with Rafu active
-  and with Rafu inactive; the leading wing starts no hover.
-- The "»" overflow stays clickable.
-- The peek closes when the pointer leaves.
-- No permission prompt appears for the global mouse monitor.
-- After the raise, the panel stays above the status item layer (MenuBarAgent
-  could re-order level 25 above it).
-- macOS 26 behaviour is unchanged.
 - "In the menu bar" on a notched bar (33 or 37 pt) and on a plain 24 pt bar.
+
+### Left-only resting notch strip (2026-11-17 (2), commit 50626a0)
+
+Status: done and merged to `main`. Device photos (notched Mac, macOS 27,
+v0.1.20-beta) showed the "«" chevron right of the notch, under the old trailing
+wing, and that Reduce Transparency hides a level-23 window completely. User
+decision: "Keep wings but only the left and align 1 and 2". The resting notch
+strip is now the left wing (84 pt, about 68 pt visible) plus the housing, right
+edge at `notch.maxX`, mascot and one status item in one row, at `.statusBar` on
+every macOS version. The lowering, `CompanionPanelLayering` and
+`CompanionPointerWatch` are removed. Attention no longer widens the notch strip
+(the pill only); the glow still shows. Decision: the amendment 2026-11-17 (2) of
+[ADR 0037](../../decisions/0037-dynamic-island-macs.md). Facts:
+[`dynamic-island-macs.md`](../../references/dynamic-island-macs.md) items 9 and
+15, [`notch-companion.md`](../../references/notch-companion.md) rule 12.
+
+Verification: parallel and `--no-parallel` passed on `main` after the merge (3928
+tests in 319 suites). Rafu Lightning was not launched.
+
+Owed device checks (not verified):
+
+1. Open "«": do the overflow items draw LEFT of the notch, under the left wing?
+   (FocusIsland PR 14 suggests yes.) Fallbacks: a yield on a click right of the
+   notch, or a narrower wing.
+2. Long app menus under the 68 pt wing.
+3. Hover after status items change, and after "«" is opened and closed.
+4. Mascot plus a 2-digit count not clipped, with Reduce Transparency on and off.
+5. A macOS 26 notched Mac.
 
 ## Vision
 

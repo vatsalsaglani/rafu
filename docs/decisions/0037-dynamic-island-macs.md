@@ -78,6 +78,9 @@ never interactive. The decision below replaces that design.
      panel rises to `.statusBar` (25) when the hover dwell starts and is lowered
      again when the dwell is cancelled. The island pill, the plain-display pill,
      the attention HUD and macOS 26 or earlier do not change.
+     **Superseded 2026-11-17 (2):** the lowering is removed. The strip stays at
+     `.statusBar` on every macOS version; the `constrainFrameRect` override stays.
+     See the amendment 2026-11-17 (2).
 7. **No swipe code.** Rafu adds no handler for the swipe gesture on the island.
 8. **Live Activities deferred.** A real system-island presence needs ActivityKit
    and a WidgetKit extension. That is a later phase.
@@ -318,7 +321,8 @@ to 8 do not change.
    tracking-area hover and no clicks. Only the level change of FocusIsland PR 14
    was ported, not its pointer-geometry hover. The Consequences sentence assumed
    that the housing and the trailing wing still start hover. They do not.
-2. **Pointer watch.** While the strip is lowered (macOS 27 or later, notch
+2. **Pointer watch. Superseded 2026-11-17 (2): removed with the lowering.**
+   While the strip is lowered (macOS 27 or later, notch
    surface only), the model compares `NSEvent.mouseLocation` with the panel
    frame (pure `CompanionPointerWatch`). A pointer in the housing or the trailing
    wing calls the existing `hoverEntered()`, which raises the panel and starts the
@@ -328,7 +332,7 @@ to 8 do not change.
    events then. The watch stops when the view reports the pointer, when pinned,
    and at teardown. It reads the location only; nothing is logged. A global mouse
    monitor needs no permission (device check owed).
-3. **Hover starts only on a new entry.** While lowered, a pointer outside the
+3. **Hover starts only on a new entry (superseded with item 2).** While lowered, a pointer outside the
    hover area resets `isPointerInside` and `viewHasPointer`, because the lowered
    view gets no exit event. Without this, Escape with the pointer still on the
    strip reopened the panel after 0.15 s.
@@ -350,6 +354,44 @@ Facts: [`notch-companion.md`](../references/notch-companion.md) rule 12 and
 device-verified: see "Owed device checks" in
 [`terminal-notch-hud.md`](../plans/phases/terminal-notch-hud.md).
 
+## Amendment 2026-11-17 (2): left-only resting strip on notched Macs
+
+Device evidence (user photos, notched Mac, macOS 27, v0.1.20-beta): the "«"
+overflow chevron sits immediately RIGHT of the notch, under the old trailing
+wing. With Reduce Transparency on, the opaque menu bar hides a level-23 window
+completely. With transparency on, the translucent bar shows it and "«" draws over
+it. The pointer watch did open the strip. User decision: "Keep wings but only the
+left and align 1 and 2" (left wing only; mascot and status in one row).
+
+This amendment supersedes decision 6 (the macOS 27 lowering) and the pointer
+watch and "new entry" parts (items 2 and 3) of the amendment 2026-11-17 above. The
+position picker on every Mac (item 4) and the Settings text (item 5) stay.
+
+1. **Resting notch strip = left wing + housing.** The right edge is
+   `notch.maxX`; nothing sits right of the notch, so "«" stays free.
+   `restingLeadingWingWidth` = 84 pt, of which `housingHiddenInset` = 16 pt is
+   behind the housing, so about 68 pt shows. Mascot and one status item (attention,
+   else agents, else editors) sit in one row (`CompanionRestingStatus`). The look
+   is the same with and without Reduce Transparency.
+2. **One layering on every macOS version.** The strip stays at `.statusBar`. Removed:
+   `CompanionPanelLayering`, `CompanionPointerWatch`, the leading-wing hover
+   rule. Hover is `.onHover` again. The `constrainFrameRect` override stays.
+3. **Attention does not widen the notch strip.** Only the pill widens. The glow
+   still shows. The hover-expanded strip (90 + 90 pt) and the open panel are
+   unchanged.
+4. **Test seams** (no fixed sleeps): `isHoverDwellPendingForTesting`,
+   `isHoverGracePendingForTesting`, `fireHoverDwellForTesting()`.
+
+Rejected: keep the lowering (invisible with Reduce Transparency); level 24 (not
+proven to be above the status items); symmetric wings (cover "«"); widening the
+strip for attention.
+
+Risk: the open "«" overflow may draw left of the notch, under the left wing (not
+verified). Facts: [`dynamic-island-macs.md`](../references/dynamic-island-macs.md)
+items 9 and 15 and [`notch-companion.md`](../references/notch-companion.md) rule
+12. Owed device checks:
+[`terminal-notch-hud.md`](../plans/phases/terminal-notch-hud.md).
+
 ## Related paths
 
 - `Sources/RafuApp/Notch/CompanionMenuPanel.swift` (`CompanionMenuPanel`,
@@ -359,8 +401,8 @@ device-verified: see "Owed device checks" in
 - `Sources/RafuApp/Terminal/NotchIslandGeometry.swift`
 - `Sources/RafuApp/Terminal/NotchCompanionGeometry.swift`
 - `Sources/RafuApp/Terminal/NotchCompanionPolicy.swift`
-  (`CompanionPanelLayering`, `CompanionPresence`, `UsageMenuBarItemText`,
-  `NotchIslandUsageGlance`)
+  (`CompanionPresence`, `UsageMenuBarItemText`, `NotchIslandUsageGlance`;
+  `CompanionPanelLayering` and `CompanionPointerWatch` were removed 2026-11-17)
 - `Sources/RafuApp/Terminal/NotchCompanionModel.swift`
 - `Sources/RafuApp/Terminal/NotchHUDWindow.swift` (`constrainFrameRect`)
 - `Sources/RafuApp/Notch/UsageMenuBarItem.swift`

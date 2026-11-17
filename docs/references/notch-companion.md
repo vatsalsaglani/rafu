@@ -185,28 +185,41 @@ the non-notch fallback layout. General rule: a surface that exists to
 occupy fixed physical hardware must be anchored to the display owning that
 hardware, never to whichever display currently has focus.
 
-**12. On macOS 27 a collapsed strip must not sit at `.statusBar` (2026-11-15).**
-MenuBarAgent draws status items, including the "»" overflow items, in a window
-at layer 25 (`.statusBar`), above the layer-24 menu bar. A resting companion at
-`.statusBar` covers the overflow items that expand beside the notch.
-`CompanionPanelLayering.resolve` therefore orders the panel at `mainMenu - 1`
-(23) on macOS 27 or later while the companion is collapsed on a NOTCH surface,
-and the leading wing does not start hover (the view uses `.onContinuousHover` to
-find the pointer x). The panel rises to `.statusBar` with `orderFrontRegardless()`
-when the hover dwell starts and is lowered again when the dwell is cancelled. The
-island pill, the plain-display pill, the attention HUD and macOS 26 or earlier
-are unchanged. Detecting the open overflow was rejected (no window-list change;
-status items need Accessibility). `NotchHUDPanel.constrainFrameRect(_:to:)`
-returns the frame unchanged: AppKit otherwise moves a window below level 24 out
-of the menu-bar band. This notched-Mac path is NOT device-verified (the user has
-no notched Mac now). Measured layers and the owed device checks:
-[`dynamic-island-macs.md`](dynamic-island-macs.md); decision: ADR 0037.
-**Correction 2026-11-17:** a window at level 23 gets no tracking-area hover at
-all, so `.onContinuousHover` never raised the lowered strip. The model now runs a
-pointer watch (global mouse monitor, plus a 0.1 s timer only while Rafu is
-active) that compares `NSEvent.mouseLocation` with the panel frame and calls
-`hoverEntered()`; hover starts only on a new entry. Details and tests:
-[`dynamic-island-macs.md`](dynamic-island-macs.md) item 15.
+**12. The resting notch strip is the left wing plus the housing, at `.statusBar`
+(rewritten 2026-11-17 (2)).** MenuBarAgent draws status items, including the "«"
+overflow, in a window at layer 25 (`.statusBar`), above the layer-24 menu bar. On
+a notched Mac on macOS 27 the "«" chevron sits immediately right of the notch.
+History: the 2026-11-15 rule lowered the strip to `mainMenu - 1` (23) on macOS 27;
+a level-23 window gets no tracking-area hover, so a pointer watch was added
+(2026-11-17); device photos then showed that Reduce Transparency makes the opaque
+menu bar hide a level-23 window completely. Both are removed
+(`CompanionPanelLayering`, `CompanionPointerWatch`). Rule now:
+
+- The resting notch frame is x = `notch.minX - restingLeadingWingWidth`, width =
+  `notch.width + restingLeadingWingWidth`, top-pinned, notch height. The right edge
+  is `notch.maxX`: nothing sits right of the notch. `restingLeadingWingWidth` = 84,
+  `housingHiddenInset` = 16, so about 68 pt shows. On the reference metrics
+  (notch 763 to 948) the frame is (679, 1074, 269, 33).
+- Mascot and one status item (attention, else agents, else editors:
+  `CompanionRestingStatus`) share one row in the leading wing. One layout on every
+  macOS version; no OS gate.
+- The strip stays at `.statusBar` on every macOS version. Hover is `.onHover`
+  again. `NotchHUDPanel.constrainFrameRect(_:to:)` stays: it returns the frame
+  unchanged, because AppKit moves a window below level 24 out of the menu-bar band.
+- Attention does not widen the notch strip (`isStripExpanded` is true for
+  attention only on the pill); the glow still shows. The hover-expanded strip
+  (90 + 90 pt) and the open panel are unchanged.
+- Test seams (no fixed sleeps): `isHoverDwellPendingForTesting`,
+  `isHoverGracePendingForTesting`, `fireHoverDwellForTesting()`.
+- Rejected: keep the lowering (invisible with Reduce Transparency); level 24 (not
+  proven); symmetric wings (cover "«"); widening for attention.
+
+Not device-verified: whether the open "«" overflow draws left of the notch under
+the left wing (FocusIsland PR 14 suggests yes), the 68 pt wing against long app
+menus, hover after status items change, clipping of mascot plus a 2-digit count
+with Reduce Transparency on and off, and macOS 26. Measured layers and facts:
+[`dynamic-island-macs.md`](dynamic-island-macs.md) items 9 and 15; decision: ADR
+0037 (amendment 2026-11-17 (2)).
 
 ## Cider-style rebuild (2026-10-18; updates stale text above)
 

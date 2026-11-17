@@ -2,7 +2,7 @@
 
 - Applies to: `Sources/RafuApp/Terminal/NotchHUDGeometry.swift`,
   `NotchIslandGeometry.swift`, `NotchCompanionGeometry.swift`,
-  `NotchCompanionPolicy.swift` (`CompanionPanelLayering`, `CompanionPresence`,
+  `NotchCompanionPolicy.swift` (`CompanionPresence`,
   `UsageMenuBarItemText`, `NotchIslandUsageGlance`), `NotchCompanionModel.swift`,
   `NotchHUDWindow.swift` (`constrainFrameRect`), `Notch/UsageMenuBarItem.swift`,
   and `Views/NotchCompanionView.swift`; any work on a Mac whose camera is a
@@ -12,7 +12,9 @@
   (the Xcode version string was not recorded), 2026-11-15. Geometry, window
   layers, event routing and the "In the menu bar" mode were checked on the
   device by the user. Items under "Not verified" were not. Item 15 (2026-11-17):
-  built and tested on macOS 27.2, Mac17,13; no device check of the notch hover.
+  built and tested on macOS 27.2, Mac17,13. The observed facts in item 15 come
+  from user photos of a notched Mac on macOS 27 (v0.1.20-beta, 2026-11-17); the
+  left-only strip was not checked on a device.
 
 ## Rule or observed behavior
 
@@ -91,9 +93,8 @@ item 15.
   click or a tap toggles a Usage-only card that grows down from the pill. The
   resting width is the housing plus 2 x 25 pt, about the width of the menu bar's
   gap. Vertical values and widths scale with the top inset (`scale(for:)`,
-  clamped 0.75 to 1.5). The pill is never lowered: `CompanionPanelLayering`
-  lowers only `.notch`, because the pill covers no menu item and a lowered
-  window would lose its hover. The system reserve zone (`systemZone`, (686,
+  clamped 0.75 to 1.5). The pill is never lowered (a lowered window would
+  lose its hover; the notch lowering is removed since 2026-11-17 (2), item 9). The system reserve zone (`systemZone`, (686,
   953.5, 140, 39.5)) remains: a click there closes an open card through a global
   mouse monitor that exists only while the card is open.
 - **In the menu bar.** `UsageMenuBarItem` creates an `NSStatusItem`
@@ -170,7 +171,12 @@ the "Phase B custom panel" amendment of ADR 0037. Evidence: both test modes on
 `main` passed (495 tests in 36 suites and 3870 tests in 314 suites; parallel and
 `--no-parallel`; Swift 6.4.2, macOS 27.2 SDK 26B118). Not checked on the device.
 
-**9. The macOS 27 "»" overflow (NOTCHED Macs).** The status-item window is at
+**9. SUPERSEDED 2026-11-17 (2): the macOS 27 "»" lowering is removed.** The
+strip stays at `.statusBar` on every macOS version; see item 15 for the facts and
+the new resting strip. The text below is history; `CompanionPanelLayering` and
+`.onContinuousHover` no longer exist.
+
+**9 (history). The macOS 27 "»" overflow (NOTCHED Macs).** The status-item window is at
 layer 25. A companion panel at `.statusBar` covers the overflow items that
 expand beside the notch. Rule: on macOS 27 or later (`osMajorVersion`,
 injectable), while the companion is collapsed on a NOTCH surface
@@ -228,36 +234,48 @@ and OS (vorssaint-utils #3998) reports that the system island is at absolute
 level 799 and that the compositor draws a camera-housing outline over every
 window. Rafu uses none of this and relies only on the measured layers above.
 
-**15. A window below the menu bar gets no hover; the lowered strip needs a
-pointer watch (2026-11-17).** Item 9 lowers the collapsed notch strip to level
-23 on macOS 27 (commit 2a2b244, v0.1.17-beta). A window under the level-24 menu
-bar (full width) gets no tracking-area hover and no clicks, so
-`.onContinuousHover` never fires and `hoverMoved` never raises the panel. The
-user could not open the companion on a notched Mac. Only the level change of
-FocusIsland PR 14 was ported at that time, not its pointer-geometry hover. A
-wider strip does not help. Rules now in code:
+**15. A window below the menu bar gets no hover; the lowering is removed
+(2026-11-17, updated 2026-11-17 (2)).** Item 9 lowered the collapsed notch strip
+to level 23 on macOS 27 (commit 2a2b244, v0.1.17-beta). Facts that stay true:
 
-- While lowered (macOS 27 or later, notch surface), the pure
-  `CompanionPointerWatch` compares `NSEvent.mouseLocation` with `panel.frame`. A
-  pointer in the housing or the trailing wing calls `hoverEntered()` (raise to
-  `.statusBar`, start the dwell). A pointer in the leading wing does nothing.
-- One global `NSEvent` monitor (`.mouseMoved`, `.leftMouseDragged`) runs it. A
-  global monitor gets no events while Rafu is active, so a 0.1 s timer
-  (tolerance 0.05 s) runs only then.
+- A window under the level-24 menu bar (full width) gets no tracking-area hover
+  and no clicks. A wider strip does not help.
 - `NSMouseInRect` counts `y == maxY` as inside (pointer pinned at the screen top).
-- Hover starts only on a new entry. While lowered, a pointer outside the hover
-  area resets `isPointerInside` and `viewHasPointer`, because the lowered view
-  gets no exit event. Without it, Escape with the pointer still on the strip
-  reopened the panel after 0.15 s. Test: `pointerWatchIsEdgeTriggeredAfterEscape`.
-- `hoverMoved` sets `viewHasPointer` and calls `updatePointerWatch` only on the
-  first report. After the raise, the view's own hover takes over and the watch
-  stops (also when pinned and at teardown). Until the view reports, the watch
-  calls `hoverExited()` when the pointer leaves the panel.
-- Only the location is read; nothing is logged. A global mouse monitor needs no
-  permission (not verified).
 - The ADR 0037 Consequences sentence, which said that the housing and the
   trailing wing still start hover, was wrong and is corrected in the 2026-11-17
   amendment.
+
+Observed on a notched Mac, macOS 27, v0.1.20-beta (user photos, 2026-11-17):
+
+- The "«" overflow chevron sits immediately RIGHT of the notch, under the old
+  trailing wing.
+- With Reduce Transparency on, the opaque menu bar hides a level-23 window
+  completely.
+- With transparency on, the translucent bar shows the level-23 window and "«"
+  draws over it.
+- The pointer watch did open the strip.
+
+Pointer watch (`CompanionPointerWatch`, global `NSEvent` monitor, 0.1 s timer
+while Rafu is active, edge-triggered entry): REMOVED in the 2026-11-17 (2) change
+(commit 50626a0) with the lowering. Do not rebuild it for a level-23 window; a
+window that must stay under the menu bar is invisible with Reduce Transparency.
+
+Rule now in code (user decision "Keep wings but only the left and align 1 and
+2"):
+
+- The resting notch strip is the left wing plus the housing. Frame x =
+  `notch.minX - restingLeadingWingWidth`, width = `notch.width +
+  restingLeadingWingWidth`; right edge = `notch.maxX`. `restingLeadingWingWidth`
+  = 84, `housingHiddenInset` = 16, about 68 pt visible. Reference metrics (notch
+  763 to 948): (679, 1074, 269, 33).
+- Mascot and one status item share one row (`CompanionRestingStatus`). The strip
+  is at `.statusBar` on every macOS version. Hover is `.onHover`.
+- Attention widens only the pill, not the notch strip; the glow still shows.
+  Hover-expanded (90 + 90) and the open panel are unchanged.
+- Rejected: keep the lowering; level 24 (not proven); symmetric wings (cover
+  "«"); widening for attention.
+- Test seams: `isHoverDwellPendingForTesting`, `isHoverGracePendingForTesting`,
+  `fireHoverDwellForTesting()`.
 - "In the menu bar" is now available on every Mac (see item 7). Placement is
   unchanged: `CompanionMenuPanelGeometry` already handles 37 pt and 24 pt bars,
   and `UsageMenuBarItemText.ringSize` gives 14 for a 24 pt bar. On a full menu bar
@@ -266,6 +284,9 @@ wider strip does not help. Rules now in code:
   3935 tests in 319 suites in 32 s; `./script/test.sh --no-parallel` passed 3935
   tests in 319 suites in 102 s; the build had no Swift warnings. Toolchain: macOS
   27.2, Mac17,13. Rafu Lightning was not launched.
+- Verified on `main` after the merge of 50626a0 (left-only strip): parallel and
+  `--no-parallel` passed (3928 tests in 319 suites). Rafu Lightning was not
+  launched; no device check.
 
 ## Why it matters
 
@@ -327,14 +348,15 @@ panel are listed there and in `notch-companion.md` rule 18.
   redraw frequency (guarded by the `Drawn` compare; a profile is owed).
 - Old popover items, no longer applicable: border inset, popover key status,
   Escape closing the popover.
-- The overflow "»" fix and the leading-wing rule on a notched Mac on macOS 27.
-- Item 15, on a notched Mac (the user has none now; the macOS version of the
-  reporting Mac is not known): the companion is visible; hover from the housing
-  and the trailing wing opens it, with Rafu active and inactive; the leading wing
-  starts no hover; the "»" overflow stays clickable; the peek closes on leave;
-  no permission prompt; the panel stays above the status item layer after the raise
-  (MenuBarAgent could re-order level 25); macOS 26 is unchanged; "In the menu bar"
-  on a notched bar (33 or 37 pt) and on a plain 24 pt bar.
+- Item 15, left-only strip, on a notched Mac (owed):
+  1. Open "«": do the overflow items draw LEFT of the notch under the left wing?
+     (FocusIsland PR 14 suggests yes.) Fallbacks: a yield on a click right of the
+     notch, or a narrower wing.
+  2. Long app menus under the 68 pt wing.
+  3. Hover after status items change and after "«" is opened and closed.
+  4. Mascot plus a 2-digit count not clipped, with Reduce Transparency on and off.
+  5. macOS 26 notched Mac.
+- "In the menu bar" on a notched bar (33 or 37 pt) and on a plain 24 pt bar.
 - Full-screen Spaces, for both the pill and the status item.
 - "Below the Dynamic Island" visual match (colour seam with the system island)
   and touch tap delivery into the non-activating pill panel were not recorded as
@@ -346,7 +368,7 @@ panel are listed there and in `notch-companion.md` rule 18.
 
 ```bash
 rg -n "islandCamera|cutout\(for" Sources/RafuApp/Terminal
-rg -n "CompanionPanelLayering|CompanionPresence|constrainFrameRect" Sources/RafuApp
+rg -n "CompanionPresence|constrainFrameRect|restingLeadingWingWidth" Sources/RafuApp
 swift test --filter NotchIslandGeometryTests
 ./script/build_and_run.sh --verify
 ```
