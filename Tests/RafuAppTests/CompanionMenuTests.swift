@@ -83,12 +83,28 @@ func menuBarSelectionRoundTrip() {
 
 @Test("CompanionHost.outsideNotices: menu bar card or notch panel, never both")
 func outsideNoticesRouting() {
-    #expect(CompanionHost.outsideNotices(surface: .island, position: .menuBar) == .menuBar)
-    #expect(CompanionHost.outsideNotices(surface: .island, position: .belowIsland) == nil)
-    for position in UsageGlancePosition.allCases {
-        #expect(CompanionHost.outsideNotices(surface: .notch, position: position) == .notchPanel)
-        #expect(CompanionHost.outsideNotices(surface: .pill, position: position) == .notchPanel)
-        #expect(CompanionHost.outsideNotices(surface: nil, position: position) == nil)
+    for allowsPill in [false, true] {
+        // The menu bar position routes to the menu bar card on every Mac.
+        for surface in [NotchCompanionSurface.notch, .island, .pill] {
+            #expect(
+                CompanionHost.outsideNotices(
+                    surface: surface, position: .menuBar, allowsPill: allowsPill) == .menuBar)
+        }
+        #expect(
+            CompanionHost.outsideNotices(
+                surface: .island, position: .belowIsland, allowsPill: allowsPill) == nil)
+        #expect(
+            CompanionHost.outsideNotices(
+                surface: .notch, position: .belowIsland, allowsPill: allowsPill) == .notchPanel)
+        #expect(
+            CompanionHost.outsideNotices(
+                surface: .pill, position: .belowIsland, allowsPill: allowsPill)
+                == (allowsPill ? .notchPanel : nil))
+        for position in UsageGlancePosition.allCases {
+            #expect(
+                CompanionHost.outsideNotices(
+                    surface: nil, position: position, allowsPill: allowsPill) == nil)
+        }
     }
 }
 

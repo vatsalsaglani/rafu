@@ -136,9 +136,9 @@ final class NotchCompanionModel: NSObject {
     private(set) var opensOnHover = true
     /// Show a floating pill on a display with no notch.
     private(set) var allowsPill = false
-    /// Where a Dynamic Island screen shows the usage glance: the pill below
-    /// the island, or a status item in the menu bar. Ignored on every other
-    /// surface (`CompanionPresence`).
+    /// Where the companion shows: its own surface (the notch strip, the
+    /// pill below the island, or the plain-display pill), or a status item
+    /// in the menu bar on any Mac (`CompanionPresence`).
     private(set) var usageGlancePosition: UsageGlancePosition = .belowIsland
     /// Now Playing, read through public API only (`NotchNowPlaying`).
     let nowPlaying = NotchNowPlaying()
@@ -232,10 +232,25 @@ final class NotchCompanionModel: NSObject {
     /// start) the dwell — so continuous hover reports start it only once.
     @ObservationIgnored
     private var isPointerInside = false
+    /// The view's own hover has reported the pointer (`hoverMoved`) since
+    /// the last `hoverExited`. While it has, the view owns hover and the
+    /// pointer watch (`CompanionPointerWatch`) stands down unless the strip
+    /// is below the menu bar.
+    @ObservationIgnored
+    private var viewHasPointer = false
+    /// The pointer watch's global mouse-moved monitor. Global monitors see
+    /// only events that go to other apps, so `pointerWatchTimer` covers the
+    /// time Rafu is active.
+    @ObservationIgnored
+    private var pointerWatchMonitor: Any?
+    /// The pointer watch's timer. Exists only while the watch is active and
+    /// Rafu is the active app.
+    @ObservationIgnored
+    private var pointerWatchTimer: Timer?
     @ObservationIgnored
     var preferenceStore = NotchCompanionPreferenceStore()
     /// The usage status item, present only while `CompanionPresence` asks
-    /// for it (`.menuBar` on a Dynamic Island screen). Created only by
+    /// for it (`.menuBar`, on any Mac). Created only by
     /// `activateIfEnabled()`, so a headless test never makes one.
     @ObservationIgnored
     private var usageMenuBarItem: UsageMenuBarItem?
@@ -309,6 +324,14 @@ final class NotchCompanionModel: NSObject {
             name: NSApplication.didChangeScreenParametersNotification,
             object: nil
         )
+        // The pointer watch's timer runs only while Rafu is active.
+        for name in [
+            NSApplication.didBecomeActiveNotification, NSApplication.didResignActiveNotification,
+        ] {
+            NotificationCenter.default.addObserver(
+                self, selector: #selector(self.applicationActivityDidChange), name: name,
+                object: nil)
+        }
     }
 
     deinit {
@@ -446,14 +469,22 @@ final class NotchCompanionModel: NSObject {
     /// with the pill off has no companion.
     var presence: CompanionPresence {
         CompanionPresence.resolve(
-            surface: surface == .pill && !allowsPill ? nil : surface,
-            position: usageGlancePosition, isEnabled: preferenceStore.isEnabled())
+            surface: surface, position: usageGlancePosition,
+            isEnabled: preferenceStore.isEnabled(), allowsPill: allowsPill)
     }
 
-    /// The usage glance is a status item, so the island pill and its card
-    /// do not exist.
+    /// The companion is a status item in the menu bar, so the notch strip,
+    /// the pills, and their panels do not exist.
     private var showsUsageInMenuBar: Bool {
-        surface == .island && usageGlancePosition == .menuBar
+        usageGlancePosition == .menuBar
+    }
+
+    /// Whether the pointer watch runs now — see `CompanionPointerWatch`.
+    var isPointerWatchActive: Bool {
+        CompanionPointerWatch.isActive(
+            layering: panelLayering, osMajorVersion: osMajorVersion, surface: surface,
+            hoverState: hoverState, isHoverPending: dwellTimer != nil,
+            viewHasPointer: viewHasPointer)
     }
 
     // MARK: - Agents (collapsed status, mascot, Ensembles, Up next)
@@ -525,8 +556,7 @@ final class NotchCompanionModel: NSObject {
     /// (`CompanionHost.outsideNotices`): the surface in use, never two.
     var outsideNoticesHost: CompanionHost? {
         CompanionHost.outsideNotices(
-            surface: surface == .pill && !allowsPill ? nil : surface,
-            position: usageGlancePosition)
+            surface: surface, position: usageGlancePosition, allowsPill: allowsPill)
     }
 
     /// Up next for `host`: Rafu agents that need the person, plus outside
@@ -956,8 +986,8 @@ final class NotchCompanionModel: NSObject {
         let wanted =
             screen.map {
                 CompanionPresence.resolve(
-                    surface: NotchCompanionGeometry.surface(for: $0, allowsPill: allowsPill),
-                    position: usageGlancePosition, isEnabled: preferenceStore.isEnabled())
+                    surface: Self.surfaceKind(for: $0), position: usageGlancePosition,
+                    isEnabled: preferenceStore.isEnabled(), allowsPill: allowsPill)
             } ?? .none
         syncUsageMenuBarItem(installed: wanted.showsMenuBarItem)
         observeAgentTurnEnds()
@@ -1248,6 +1278,8 @@ final class NotchCompanionModel: NSObject {
         nowPlaying.stop()
         cancelTimers()
         removeIslandYieldMonitor()
+        removePointerWatch()
+        viewHasPointer = false
         if !keepingUsageRefresh {
             usageRefreshTask?.cancel()
             usageRefreshTask = nil
@@ -1338,6 +1370,8 @@ final class NotchCompanionModel: NSObject {
     /// `NotchHUDPanel`'s default and the attention drop-down stay
     /// `.statusBar`.
     private func applyPanelLayering() {
+        // Before the early returns: the watch depends on more than the level.
+        updatePointerWatch()
         guard let panel else { return }
         let level = Self.windowLevel(for: panelLayering.level)
         guard panel.level != level else { return }
@@ -1351,6 +1385,98 @@ final class NotchCompanionModel: NSObject {
         case .statusBar: .statusBar
         case .belowMenuBar: NSWindow.Level(rawValue: NSWindow.Level.mainMenu.rawValue - 1)
         }
+    }
+
+    // MARK: - Pointer watch (notch strip below the menu bar, macOS 27+)
+
+    /// Installs or removes the pointer watch to match
+    /// `isPointerWatchActive`. Without a panel (a headless test) it never
+    /// touches `NSApp` or `NSEvent`.
+    private func updatePointerWatch() {
+        guard panel != nil, isPointerWatchActive else {
+            removePointerWatch()
+            return
+        }
+        if pointerWatchMonitor == nil {
+            // Mouse-moved global monitoring needs no Accessibility
+            // permission. The handler reads only the pointer location.
+            pointerWatchMonitor = NSEvent.addGlobalMonitorForEvents(
+                matching: [.mouseMoved, .leftMouseDragged]
+            ) { [weak self] _ in
+                // Global monitor handlers run on the main thread.
+                MainActor.assumeIsolated { self?.pointerWatchTick() }
+            }
+        }
+        if NSApp?.isActive == true {
+            guard pointerWatchTimer == nil else { return }
+            let timer = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in
+                // Timers fire on the main run loop.
+                MainActor.assumeIsolated { self?.pointerWatchTick() }
+            }
+            timer.tolerance = 0.05
+            RunLoop.main.add(timer, forMode: .common)
+            pointerWatchTimer = timer
+        } else {
+            pointerWatchTimer?.invalidate()
+            pointerWatchTimer = nil
+        }
+    }
+
+    private func removePointerWatch() {
+        if let monitor = pointerWatchMonitor {
+            NSEvent.removeMonitor(monitor)
+            pointerWatchMonitor = nil
+        }
+        pointerWatchTimer?.invalidate()
+        pointerWatchTimer = nil
+    }
+
+    private func pointerWatchTick() {
+        guard let panel else {
+            removePointerWatch()
+            return
+        }
+        pointerMoved(
+            to: NSEvent.mouseLocation, panelFrame: panel.frame,
+            leadingWingWidth: leadingWingWidth)
+    }
+
+    @objc
+    private func applicationActivityDidChange(_ notification: Notification) {
+        updatePointerWatch()
+    }
+
+    /// One pointer-watch sample: `point` and `panelFrame` in screen
+    /// coordinates. Lowered, the hover area starts hover as the view's hover
+    /// would. Raised, the watch ends a dwell or peek the pointer leaves
+    /// before the view has reported it. `internal` for tests.
+    func pointerMoved(to point: CGPoint, panelFrame: CGRect, leadingWingWidth: CGFloat) {
+        let region = CompanionPointerWatch.region(
+            of: point, in: panelFrame, leadingWingWidth: leadingWingWidth)
+        let isLowered = panelLayering.level == .belowMenuBar
+        if isLowered, region != .hoverArea {
+            // Below the menu bar the view cannot report an exit, so the
+            // watch does: the pointer must leave before it can enter again.
+            isPointerInside = false
+            viewHasPointer = false
+        }
+        let action = CompanionPointerWatch.action(
+            for: region, isLowered: isLowered,
+            isTracking: isPointerInside || dwellTimer != nil || hoverState == .peeking)
+        switch action {
+        case .none:
+            break
+        case .enter:
+            // Edge-triggered: an Escape with the pointer still on the strip
+            // must not open it again until the pointer leaves and returns.
+            if !isPointerInside {
+                isPointerInside = true
+                hoverEntered()
+            }
+        case .exit:
+            hoverExited()
+        }
+        updatePointerWatch()
     }
 
     // MARK: - Island yield (Dynamic Island screens only)
@@ -1423,6 +1549,10 @@ final class NotchCompanionModel: NSObject {
     /// there is ignored — it is reaching for a menu-bar overflow item — and
     /// the dwell starts only once it reaches the housing or trailing wing.
     func hoverMoved(inLeadingWing: Bool) {
+        if !viewHasPointer {
+            viewHasPointer = true
+            updatePointerWatch()
+        }
         if inLeadingWing, !panelLayering.leadingWingStartsHover { return }
         guard !isPointerInside else { return }
         isPointerInside = true
@@ -1431,6 +1561,7 @@ final class NotchCompanionModel: NSObject {
 
     func hoverExited() {
         isPointerInside = false
+        viewHasPointer = false
         dwellTimer?.invalidate()
         dwellTimer = nil
         // A cancelled dwell drops a resting strip back below the menu bar.
@@ -1455,6 +1586,7 @@ final class NotchCompanionModel: NSObject {
         // shows the usage percentage.
         if isPanelOpen || surface == .island { refreshUsage() }
         refreshEditorRows(animated: true)
+        updatePointerWatch()
     }
 
     private func graceTimerFired() {

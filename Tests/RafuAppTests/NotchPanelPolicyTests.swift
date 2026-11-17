@@ -369,26 +369,112 @@ func usageGlancePositionStoreRoundTrip() {
     #expect(store.usageGlancePosition() == .belowIsland)
 }
 
-@Test("CompanionPresence: only an island Mac with the menu bar position gets a status item")
+@Test("CompanionPresence: the menu bar position gives a status item on every Mac")
 func companionPresenceTable() {
     let panelOnly = CompanionPresence(showsPanel: true, showsMenuBarItem: false)
     let itemOnly = CompanionPresence(showsPanel: false, showsMenuBarItem: true)
     let surfaces: [NotchCompanionSurface?] = [.notch, .island, .pill, nil]
     for surface in surfaces {
         for position in UsageGlancePosition.allCases {
-            let disabled = CompanionPresence.resolve(
-                surface: surface, position: position, isEnabled: false)
-            #expect(disabled == .none)
+            for allowsPill in [false, true] {
+                let disabled = CompanionPresence.resolve(
+                    surface: surface, position: position, isEnabled: false,
+                    allowsPill: allowsPill)
+                #expect(disabled == .none)
 
-            let enabled = CompanionPresence.resolve(
-                surface: surface, position: position, isEnabled: true)
-            switch (surface, position) {
-            case (nil, _): #expect(enabled == .none)
-            case (.island, .menuBar): #expect(enabled == itemOnly)
-            default: #expect(enabled == panelOnly)
+                let enabled = CompanionPresence.resolve(
+                    surface: surface, position: position, isEnabled: true,
+                    allowsPill: allowsPill)
+                switch (surface, position) {
+                case (nil, _): #expect(enabled == .none)
+                case (_, .menuBar): #expect(enabled == itemOnly)
+                case (.pill, .belowIsland):
+                    #expect(enabled == (allowsPill ? panelOnly : .none))
+                default: #expect(enabled == panelOnly)
+                }
             }
         }
     }
+    // A plain screen with the pill off still gets the menu bar item.
+    #expect(
+        CompanionPresence.resolve(
+            surface: .pill, position: .menuBar, isEnabled: true, allowsPill: false) == itemOnly)
+}
+
+@Test("UsageGlancePosition.title(on:): names the companion's own surface on each Mac")
+func companionPositionTitles() {
+    #expect(UsageGlancePosition.belowIsland.title(on: .island) == "Below the Dynamic Island")
+    #expect(UsageGlancePosition.belowIsland.title(on: .notch) == "At the notch")
+    #expect(UsageGlancePosition.belowIsland.title(on: .pill) == "Below the menu bar")
+    #expect(UsageGlancePosition.belowIsland.title(on: nil) == "Below the menu bar")
+    for surface in [NotchCompanionSurface.notch, .island, .pill, nil] {
+        #expect(UsageGlancePosition.menuBar.title(on: surface) == "In the menu bar")
+    }
+}
+
+// MARK: - Pointer watch (notch strip below the menu bar, macOS 27)
+
+@Test("CompanionPointerWatch.region: leading wing, housing, trailing wing, and edges")
+func pointerWatchRegion() throws {
+    let strip = try #require(NotchCompanionGeometry.restingStripFrame(for: notchScreen))
+    let wing = try #require(
+        NotchCompanionGeometry.leadingWingWidth(for: notchScreen, stripFrame: strip))
+    #expect(wing == 44)
+    func region(_ x: CGFloat, _ y: CGFloat) -> CompanionPointerWatch.Region {
+        CompanionPointerWatch.region(of: CGPoint(x: x, y: y), in: strip, leadingWingWidth: wing)
+    }
+    let midY = strip.midY
+    #expect(region(strip.minX + 10, midY) == .leadingWing)
+    #expect(region(strip.midX, midY) == .hoverArea)
+    #expect(region(strip.maxX - 10, midY) == .hoverArea)
+    #expect(region(strip.minX + wing, midY) == .hoverArea)
+    // NSMouseInRect: the top edge (pointer pressed to the screen top) is
+    // inside; the bottom edge and the right edge are outside.
+    #expect(region(strip.midX, strip.maxY) == .hoverArea)
+    #expect(region(strip.midX, strip.minY) == .outside)
+    #expect(region(strip.maxX, midY) == .outside)
+    #expect(region(strip.minX - 1, midY) == .outside)
+    #expect(region(strip.midX, strip.minY - 20) == .outside)
+}
+
+@Test("CompanionPointerWatch.isActive: only the notch strip on macOS 27+, lowered or unseen hover")
+func pointerWatchIsActiveTable() {
+    for os in [26, 27] {
+        for surface in [NotchCompanionSurface.notch, .island, .pill, nil] {
+            for state in [CompanionHoverState.resting, .peeking, .pinned] {
+                for pending in [false, true] {
+                    for viewHasPointer in [false, true] {
+                        let layering = CompanionPanelLayering.resolve(
+                            osMajorVersion: os, surface: surface, hoverState: state,
+                            isPanelOpen: state != .resting, isHoverPending: pending)
+                        let result = CompanionPointerWatch.isActive(
+                            layering: layering, osMajorVersion: os, surface: surface,
+                            hoverState: state, isHoverPending: pending,
+                            viewHasPointer: viewHasPointer)
+                        let lowered = layering.level == .belowMenuBar
+                        let unseen =
+                            !viewHasPointer && state != .pinned && (pending || state == .peeking)
+                        let expected = os >= 27 && surface == .notch && (lowered || unseen)
+                        #expect(result == expected)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Test("CompanionPointerWatch.action: lowered enters from the hover area; raised only exits")
+func pointerWatchActionTable() {
+    typealias Watch = CompanionPointerWatch
+    for tracking in [false, true] {
+        #expect(Watch.action(for: .hoverArea, isLowered: true, isTracking: tracking) == .enter)
+        #expect(Watch.action(for: .leadingWing, isLowered: true, isTracking: tracking) == .none)
+        #expect(Watch.action(for: .outside, isLowered: true, isTracking: tracking) == .none)
+        #expect(Watch.action(for: .hoverArea, isLowered: false, isTracking: tracking) == .none)
+        #expect(Watch.action(for: .leadingWing, isLowered: false, isTracking: tracking) == .none)
+    }
+    #expect(Watch.action(for: .outside, isLowered: false, isTracking: true) == .exit)
+    #expect(Watch.action(for: .outside, isLowered: false, isTracking: false) == .none)
 }
 
 @Test("UsageMenuBarItemText: percent, critical mark, and the no-data form")
@@ -413,6 +499,8 @@ func usageMenuBarItemTextFormats() {
 @Test("UsageMenuBarItemText.ringSize: 16 pt on a 45 pt bar, never below 12 pt")
 func usageMenuBarRingSize() {
     #expect(UsageMenuBarItemText.ringSize(forBarThickness: 45) == 16)
+    // A notched Mac's 37 pt bar and a plain Mac's 24 pt bar.
+    #expect(UsageMenuBarItemText.ringSize(forBarThickness: 37) == 16)
     #expect(UsageMenuBarItemText.ringSize(forBarThickness: 24) == 14)
     #expect(UsageMenuBarItemText.ringSize(forBarThickness: 10) == 12)
 }
