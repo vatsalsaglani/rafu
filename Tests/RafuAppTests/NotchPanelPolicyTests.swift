@@ -298,52 +298,21 @@ func islandArbitrationWithoutFeed() {
     }
 }
 
-// MARK: - Panel layering (menu-bar overflow on macOS 27)
+// MARK: - Resting notch strip (menu-bar overflow on macOS 27)
 
-@Test(
-    "CompanionPanelLayering: lowered only when collapsed on a notch on macOS 27+; never on the island pill"
-)
-func panelLayeringTable() {
-    let lowered = CompanionPanelLayering(level: .belowMenuBar, leadingWingStartsHover: false)
-    for os in [25, 26, 27, 28] {
-        for surface in [NotchCompanionSurface.notch, .island, .pill, nil] {
-            for state in [CompanionHoverState.resting, .peeking, .pinned] {
-                for open in [false, true] {
-                    for pending in [false, true] {
-                        let result = CompanionPanelLayering.resolve(
-                            osMajorVersion: os, surface: surface, hoverState: state,
-                            isPanelOpen: open, isHoverPending: pending)
-                        let collapsed = state == .resting && !open && !pending
-                        let lowers =
-                            os >= 27 && surface == .notch && collapsed
-                        #expect(result == (lowers ? lowered : .standard))
-                    }
-                }
-            }
-        }
-    }
-    #expect(CompanionPanelLayering.standard.level == .statusBar)
-    #expect(CompanionPanelLayering.standard.leadingWingStartsHover)
-}
-
-@Test("leadingWingWidth: the wing left of the notch or island reserve; nil on a plain screen")
-func panelLayeringLeadingWingWidth() throws {
+@Test("resting notch strip: one leading wing, right edge on notch.maxX")
+func restingNotchStripHasOneLeadingWing() throws {
+    let notch = try #require(NotchHUDGeometry.notchRect(for: notchScreen))
     let resting = try #require(NotchCompanionGeometry.restingStripFrame(for: notchScreen))
-    #expect(NotchCompanionGeometry.leadingWingWidth(for: notchScreen, stripFrame: resting) == 44)
+    #expect(resting.maxX == notch.maxX)
+    #expect(resting.minX == notch.minX - NotchCompanionGeometry.restingLeadingWingWidth)
+    #expect(resting.width == notch.width + NotchCompanionGeometry.restingLeadingWingWidth)
+    #expect(resting.height == notch.height)
+    #expect(resting.maxY == notchScreen.frame.maxY)
+    // Hover still widens to both wings.
     let expanded = try #require(NotchCompanionGeometry.expandedStripFrame(for: notchScreen))
-    #expect(NotchCompanionGeometry.leadingWingWidth(for: notchScreen, stripFrame: expanded) == 90)
-    let pill = try #require(NotchCompanionGeometry.pillFrame(for: plainScreen))
-    #expect(NotchCompanionGeometry.leadingWingWidth(for: plainScreen, stripFrame: pill) == nil)
-
-    let island = NotchScreenMetrics(
-        frame: CGRect(x: 0, y: 0, width: 1512, height: 993),
-        visibleFrame: CGRect(x: 0, y: 75, width: 1512, height: 873),
-        safeAreaTopInset: 40,
-        auxiliaryTopLeft: CGRect(x: 0, y: 953, width: 726.5, height: 40),
-        auxiliaryTopRight: CGRect(x: 785.5, y: 953, width: 726.5, height: 40),
-        isBuiltin: true)
-    let capsule = try #require(NotchIslandGeometry.restingFrame(for: island))
-    #expect(NotchCompanionGeometry.leadingWingWidth(for: island, stripFrame: capsule) == 25)
+    #expect(expanded.maxX == notch.maxX + NotchCompanionGeometry.wingWidth)
+    #expect(expanded.minX == notch.minX - NotchCompanionGeometry.wingWidth)
 }
 
 // MARK: - Usage glance position (Dynamic Island Macs)
@@ -410,71 +379,6 @@ func companionPositionTitles() {
     for surface in [NotchCompanionSurface.notch, .island, .pill, nil] {
         #expect(UsageGlancePosition.menuBar.title(on: surface) == "In the menu bar")
     }
-}
-
-// MARK: - Pointer watch (notch strip below the menu bar, macOS 27)
-
-@Test("CompanionPointerWatch.region: leading wing, housing, trailing wing, and edges")
-func pointerWatchRegion() throws {
-    let strip = try #require(NotchCompanionGeometry.restingStripFrame(for: notchScreen))
-    let wing = try #require(
-        NotchCompanionGeometry.leadingWingWidth(for: notchScreen, stripFrame: strip))
-    #expect(wing == 44)
-    func region(_ x: CGFloat, _ y: CGFloat) -> CompanionPointerWatch.Region {
-        CompanionPointerWatch.region(of: CGPoint(x: x, y: y), in: strip, leadingWingWidth: wing)
-    }
-    let midY = strip.midY
-    #expect(region(strip.minX + 10, midY) == .leadingWing)
-    #expect(region(strip.midX, midY) == .hoverArea)
-    #expect(region(strip.maxX - 10, midY) == .hoverArea)
-    #expect(region(strip.minX + wing, midY) == .hoverArea)
-    // NSMouseInRect: the top edge (pointer pressed to the screen top) is
-    // inside; the bottom edge and the right edge are outside.
-    #expect(region(strip.midX, strip.maxY) == .hoverArea)
-    #expect(region(strip.midX, strip.minY) == .outside)
-    #expect(region(strip.maxX, midY) == .outside)
-    #expect(region(strip.minX - 1, midY) == .outside)
-    #expect(region(strip.midX, strip.minY - 20) == .outside)
-}
-
-@Test("CompanionPointerWatch.isActive: only the notch strip on macOS 27+, lowered or unseen hover")
-func pointerWatchIsActiveTable() {
-    for os in [26, 27] {
-        for surface in [NotchCompanionSurface.notch, .island, .pill, nil] {
-            for state in [CompanionHoverState.resting, .peeking, .pinned] {
-                for pending in [false, true] {
-                    for viewHasPointer in [false, true] {
-                        let layering = CompanionPanelLayering.resolve(
-                            osMajorVersion: os, surface: surface, hoverState: state,
-                            isPanelOpen: state != .resting, isHoverPending: pending)
-                        let result = CompanionPointerWatch.isActive(
-                            layering: layering, osMajorVersion: os, surface: surface,
-                            hoverState: state, isHoverPending: pending,
-                            viewHasPointer: viewHasPointer)
-                        let lowered = layering.level == .belowMenuBar
-                        let unseen =
-                            !viewHasPointer && state != .pinned && (pending || state == .peeking)
-                        let expected = os >= 27 && surface == .notch && (lowered || unseen)
-                        #expect(result == expected)
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Test("CompanionPointerWatch.action: lowered enters from the hover area; raised only exits")
-func pointerWatchActionTable() {
-    typealias Watch = CompanionPointerWatch
-    for tracking in [false, true] {
-        #expect(Watch.action(for: .hoverArea, isLowered: true, isTracking: tracking) == .enter)
-        #expect(Watch.action(for: .leadingWing, isLowered: true, isTracking: tracking) == .none)
-        #expect(Watch.action(for: .outside, isLowered: true, isTracking: tracking) == .none)
-        #expect(Watch.action(for: .hoverArea, isLowered: false, isTracking: tracking) == .none)
-        #expect(Watch.action(for: .leadingWing, isLowered: false, isTracking: tracking) == .none)
-    }
-    #expect(Watch.action(for: .outside, isLowered: false, isTracking: true) == .exit)
-    #expect(Watch.action(for: .outside, isLowered: false, isTracking: false) == .none)
 }
 
 @Test("UsageMenuBarItemText: percent, critical mark, and the no-data form")
