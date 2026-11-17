@@ -11,7 +11,8 @@
 - Last verified: macOS 27.2 (26B8119) on Mac17,13, SDK 27.2, Xcode toolchain
   (the Xcode version string was not recorded), 2026-11-15. Geometry, window
   layers, event routing and the "In the menu bar" mode were checked on the
-  device by the user. Items under "Not verified" were not.
+  device by the user. Items under "Not verified" were not. Item 15 (2026-11-17):
+  built and tested on macOS 27.2, Mac17,13; no device check of the notch hover.
 
 ## Rule or observed behavior
 
@@ -74,6 +75,12 @@ values, stored under `notchUsageGlancePosition` as `"belowIsland"` (default,
 also for an unknown stored value) and `"menuBar"`. Only an island screen reads
 it; a notched or plain screen keeps its panel and never gets a status item.
 Settings ▸ Notch shows the "Usage glance" picker on island Macs only.
+**Changed 2026-11-17:** every Mac now reads the position. The picker is
+"Companion position" on every Mac, and "In the menu bar" gives a status item
+(status item only, no panel) on a notched or plain screen too. The signature is
+`CompanionPresence.resolve(surface:position:isEnabled:allowsPill:)`. The raw
+value `belowIsland` is historical; it means "the companion's own surface". See
+item 15.
 
 - **Below the Dynamic Island.** `NotchIslandGeometry`: a black pill hangs
   `pillGapBelowMenuBar` = 4 pt below the menu bar (`visibleFrame.maxY - 4`),
@@ -179,7 +186,10 @@ list does not change, and status items need Accessibility. The policy type is
 `CompanionPanelLayering`; prior art is
 [FocusIsland PR 14](https://github.com/zeapsu/FocusIsland/pull/14). This fix
 depends on item 5 to keep its frame. It is NOT device-verified: the user has no
-notched Mac now.
+notched Mac now. **Corrected 2026-11-17:** the assumption that the housing and
+the trailing wing still start hover was wrong. A lowered window gets no hover at
+all, so the strip could not be opened. Item 15 gives the pointer watch that fixes
+it.
 
 **10. System island sizes from screenshots (pt, about 1 pt accuracy).**
 
@@ -217,6 +227,45 @@ become content state later. See ADR 0037 for the revisit trigger.
 and OS (vorssaint-utils #3998) reports that the system island is at absolute
 level 799 and that the compositor draws a camera-housing outline over every
 window. Rafu uses none of this and relies only on the measured layers above.
+
+**15. A window below the menu bar gets no hover; the lowered strip needs a
+pointer watch (2026-11-17).** Item 9 lowers the collapsed notch strip to level
+23 on macOS 27 (commit 2a2b244, v0.1.17-beta). A window under the level-24 menu
+bar (full width) gets no tracking-area hover and no clicks, so
+`.onContinuousHover` never fires and `hoverMoved` never raises the panel. The
+user could not open the companion on a notched Mac. Only the level change of
+FocusIsland PR 14 was ported at that time, not its pointer-geometry hover. A
+wider strip does not help. Rules now in code:
+
+- While lowered (macOS 27 or later, notch surface), the pure
+  `CompanionPointerWatch` compares `NSEvent.mouseLocation` with `panel.frame`. A
+  pointer in the housing or the trailing wing calls `hoverEntered()` (raise to
+  `.statusBar`, start the dwell). A pointer in the leading wing does nothing.
+- One global `NSEvent` monitor (`.mouseMoved`, `.leftMouseDragged`) runs it. A
+  global monitor gets no events while Rafu is active, so a 0.1 s timer
+  (tolerance 0.05 s) runs only then.
+- `NSMouseInRect` counts `y == maxY` as inside (pointer pinned at the screen top).
+- Hover starts only on a new entry. While lowered, a pointer outside the hover
+  area resets `isPointerInside` and `viewHasPointer`, because the lowered view
+  gets no exit event. Without it, Escape with the pointer still on the strip
+  reopened the panel after 0.15 s. Test: `pointerWatchIsEdgeTriggeredAfterEscape`.
+- `hoverMoved` sets `viewHasPointer` and calls `updatePointerWatch` only on the
+  first report. After the raise, the view's own hover takes over and the watch
+  stops (also when pinned and at teardown). Until the view reports, the watch
+  calls `hoverExited()` when the pointer leaves the panel.
+- Only the location is read; nothing is logged. A global mouse monitor needs no
+  permission (not verified).
+- The ADR 0037 Consequences sentence, which said that the housing and the
+  trailing wing still start hover, was wrong and is corrected in the 2026-11-17
+  amendment.
+- "In the menu bar" is now available on every Mac (see item 7). Placement is
+  unchanged: `CompanionMenuPanelGeometry` already handles 37 pt and 24 pt bars,
+  and `UsageMenuBarItemText.ringSize` gives 14 for a 24 pt bar. On a full menu bar
+  macOS can hide the item behind the notch or in "»"; Command-drag moves it.
+- Verified on `main` (merge of 486c56e): `./script/test.sh` (parallel) passed
+  3935 tests in 319 suites in 32 s; `./script/test.sh --no-parallel` passed 3935
+  tests in 319 suites in 102 s; the build had no Swift warnings. Toolchain: macOS
+  27.2, Mac17,13. Rafu Lightning was not launched.
 
 ## Why it matters
 
@@ -279,6 +328,13 @@ panel are listed there and in `notch-companion.md` rule 18.
 - Old popover items, no longer applicable: border inset, popover key status,
   Escape closing the popover.
 - The overflow "»" fix and the leading-wing rule on a notched Mac on macOS 27.
+- Item 15, on a notched Mac (the user has none now; the macOS version of the
+  reporting Mac is not known): the companion is visible; hover from the housing
+  and the trailing wing opens it, with Rafu active and inactive; the leading wing
+  starts no hover; the "»" overflow stays clickable; the peek closes on leave;
+  no permission prompt; the panel stays above the status item layer after the raise
+  (MenuBarAgent could re-order level 25); macOS 26 is unchanged; "In the menu bar"
+  on a notched bar (33 or 37 pt) and on a plain 24 pt bar.
 - Full-screen Spaces, for both the pill and the status item.
 - "Below the Dynamic Island" visual match (colour seam with the system island)
   and touch tap delivery into the non-activating pill panel were not recorded as

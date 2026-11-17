@@ -201,6 +201,12 @@ returns the frame unchanged: AppKit otherwise moves a window below level 24 out
 of the menu-bar band. This notched-Mac path is NOT device-verified (the user has
 no notched Mac now). Measured layers and the owed device checks:
 [`dynamic-island-macs.md`](dynamic-island-macs.md); decision: ADR 0037.
+**Correction 2026-11-17:** a window at level 23 gets no tracking-area hover at
+all, so `.onContinuousHover` never raised the lowered strip. The model now runs a
+pointer watch (global mouse monitor, plus a 0.1 s timer only while Rafu is
+active) that compares `NSEvent.mouseLocation` with the panel frame and calls
+`hoverEntered()`; hover starts only on a new entry. Details and tests:
+[`dynamic-island-macs.md`](dynamic-island-macs.md) item 15.
 
 ## Cider-style rebuild (2026-10-18; updates stale text above)
 

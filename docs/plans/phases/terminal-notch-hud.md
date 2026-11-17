@@ -269,6 +269,35 @@ two sections above):
 - An auto-hidden menu bar (the card stays until a click outside).
 - `.moveToActiveSpace` plus `.fullScreenAuxiliary` behaviour.
 
+### Notch hover on macOS 27 and menu bar position on every Mac (2026-11-17, commit 486c56e)
+
+Status: done and merged to `main`. The user reported from a notched Mac that the
+companion hides behind the notch and cannot be hovered open, and asked for "In
+the menu bar" on every Mac. Cause: the macOS 27 lowering (commit 2a2b244,
+v0.1.17-beta) leaves the strip without tracking-area hover. Fix: a pointer watch
+while lowered, and the position picker on every Mac. Decision: the amendment
+2026-11-17 of [ADR 0037](../../decisions/0037-dynamic-island-macs.md). Facts:
+[`dynamic-island-macs.md`](../../references/dynamic-island-macs.md) item 15,
+[`notch-companion.md`](../../references/notch-companion.md) rule 12.
+
+Verification (Xcode toolchain, macOS 27.2, Mac17,13): on `main`, parallel passed
+3935 tests in 319 suites (32 s); `--no-parallel` passed 3935 tests in 319 suites
+(102 s); the build had no Swift warnings. Rafu Lightning was not launched.
+
+Owed device checks (not verified; the user has no notched Mac now, and the macOS
+version of the reporting Mac is not known):
+
+- The strip is visible on a notched Mac.
+- Hover from the housing and from the trailing wing opens it, with Rafu active
+  and with Rafu inactive; the leading wing starts no hover.
+- The "»" overflow stays clickable.
+- The peek closes when the pointer leaves.
+- No permission prompt appears for the global mouse monitor.
+- After the raise, the panel stays above the status item layer (MenuBarAgent
+  could re-order level 25 above it).
+- macOS 26 behaviour is unchanged.
+- "In the menu bar" on a notched bar (33 or 37 pt) and on a plain 24 pt bar.
+
 ## Vision
 
 The notch stops being dead space and becomes Rafu's **always-on companion

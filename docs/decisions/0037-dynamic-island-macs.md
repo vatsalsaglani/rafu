@@ -132,6 +132,9 @@ never interactive. The decision below replaces that design.
 - The collapsed companion on a macOS 27 NOTCHED Mac has no hover over its leading
   wing. The user reaches the companion by the housing or the trailing wing. This
   path is not device-verified (the user has no notched Mac now).
+  **Corrected 2026-11-17:** this sentence was wrong. A window below the level-24
+  menu bar gets no tracking-area hover, so the housing and the trailing wing also
+  started no hover. See the amendment 2026-11-17.
 - The island values (4 pt gap, 33 pt height, 28 pt card radius, system island
   sizes) came from screenshots and are accurate to about 1 pt. Only one island
   model was measured.
@@ -301,6 +304,51 @@ Not device-verified: see "Owed device checks" in
 [`terminal-notch-hud.md`](../plans/phases/terminal-notch-hud.md). Facts:
 [`notch-companion.md`](../references/notch-companion.md) rule 18 and
 [`dynamic-island-macs.md`](../references/dynamic-island-macs.md) item 8c.
+
+## Amendment 2026-11-17: notch hover on macOS 27, menu bar position on every Mac
+
+The user reported from a notched Mac that the companion hides behind the notch,
+with no way to hover it open, and asked for "In the menu bar" on every Mac. This
+amendment corrects the Consequences sentence about the leading wing and changes
+decision 3 (the position setting is no longer island-only). Decisions 1, 2 and 4
+to 8 do not change.
+
+1. **Cause.** Commit 2a2b244 (v0.1.17-beta) lowers the collapsed notch strip to
+   `mainMenu - 1` (23) on macOS 27. A window under the level-24 menu bar gets no
+   tracking-area hover and no clicks. Only the level change of FocusIsland PR 14
+   was ported, not its pointer-geometry hover. The Consequences sentence assumed
+   that the housing and the trailing wing still start hover. They do not.
+2. **Pointer watch.** While the strip is lowered (macOS 27 or later, notch
+   surface only), the model compares `NSEvent.mouseLocation` with the panel
+   frame (pure `CompanionPointerWatch`). A pointer in the housing or the trailing
+   wing calls the existing `hoverEntered()`, which raises the panel and starts the
+   dwell. The leading wing starts nothing. A global `NSEvent` monitor
+   (`.mouseMoved`, `.leftMouseDragged`) runs the watch, plus a 0.1 s timer
+   (tolerance 0.05 s) only while Rafu is active, because a global monitor gets no
+   events then. The watch stops when the view reports the pointer, when pinned,
+   and at teardown. It reads the location only; nothing is logged. A global mouse
+   monitor needs no permission (device check owed).
+3. **Hover starts only on a new entry.** While lowered, a pointer outside the
+   hover area resets `isPointerInside` and `viewHasPointer`, because the lowered
+   view gets no exit event. Without this, Escape with the pointer still on the
+   strip reopened the panel after 0.15 s.
+4. **Position on every Mac.** The picker (label "Companion position") shows on
+   every Mac. The stored key and raw values do not change; the raw value
+   `belowIsland` is historical and now means "the companion's own surface".
+   Titles: "At the notch" (notch), "Below the Dynamic Island" (island), "Below the
+   menu bar" (plain screen or none), "In the menu bar" (every Mac). The default
+   stays `belowIsland`. `CompanionPresence.resolve` and
+   `CompanionHost.outsideNotices` take the surface and an `allowsPill` flag: "In
+   the menu bar" gives a status item only, and the outside notices go to the menu
+   card.
+5. **Settings.** "Open when the pointer rests on the notch" is disabled on an
+   island and with "In the menu bar". The help text says that macOS can hide the
+   status item behind the notch or in "»", and that Command-drag moves it.
+
+Facts: [`notch-companion.md`](../references/notch-companion.md) rule 12 and
+[`dynamic-island-macs.md`](../references/dynamic-island-macs.md) item 15. Not
+device-verified: see "Owed device checks" in
+[`terminal-notch-hud.md`](../plans/phases/terminal-notch-hud.md).
 
 ## Related paths
 
