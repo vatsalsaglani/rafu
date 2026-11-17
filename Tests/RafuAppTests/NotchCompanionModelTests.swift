@@ -168,10 +168,11 @@ func refreshEditorRowsAggregatesAttentionCount() {
 
 @MainActor
 @Test(
-    "isStripExpanded: false while resting with no attention; true once a session bells; false again once cleared"
+    "isStripExpanded on the pill: false while resting with no attention; true once a session bells; false again once cleared"
 )
 func isStripExpandedFollowsAttentionWhileResting() {
     let model = NotchCompanionModel()
+    model.setSurfaceForTesting(.pill)
     #expect(model.hoverState == .resting)
     #expect(model.isStripExpanded == false)
 
@@ -631,7 +632,7 @@ func islandClickedTogglesOpenAndClosed() {
 }
 
 @MainActor
-@Test("island attention: does not widen the capsule and has no feed; the notch still widens")
+@Test("island attention: does not widen the capsule and has no feed; the pill still widens")
 func islandAttentionDoesNotWidenCapsule() {
     let model = NotchCompanionModel()
     let noisy = session(named: "noisy", path: "/tmp/notch-companion-island-attention")
@@ -641,6 +642,7 @@ func islandAttentionDoesNotWidenCapsule() {
     model.register(noisy)
     #expect(model.attentionCount == 1)
 
+    model.setSurfaceForTesting(.pill)
     #expect(model.isStripExpanded)
     #expect(model.isAttentionFeedAvailable)
 
@@ -678,165 +680,79 @@ func islandUsageGlanceFromInjectedReader() async throws {
     #expect(glance.spokenLabel.hasSuffix("Weekly \(glance.percentText)"))
 }
 
-// MARK: - Panel layering (menu-bar overflow on macOS 27)
+// MARK: - Resting notch strip (menu-bar overflow on macOS 27)
 
 @MainActor
-@Test("panelLayering on macOS 27: resting lowers; hover dwell and open panel raise")
-func panelLayeringFollowsHoverOnMacOS27() {
+@Test("notch attention: the resting strip keeps its one leading wing; the pill widens")
+func notchAttentionDoesNotWidenRestingStrip() {
     let model = NotchCompanionModel()
-    model.usageReader = fixtureReader(descriptors: [])  // see escapePressedClearsSearchQuery
-    model.osMajorVersion = 27
+    let noisy = session(named: "noisy", path: "/tmp/notch-companion-notch-attention")
+    noisy.newTerminalTab()
+    noisy.terminal.sessions[0].markRunningForTesting()
+    noisy.terminal.sessions[0].noteBell()
+    model.register(noisy)
+    #expect(model.attentionCount == 1)
+    #expect(model.hoverState == .resting)
+
     model.setSurfaceForTesting(.notch)
-
-    #expect(model.panelLayering.level == .belowMenuBar)
-    #expect(!model.panelLayering.leadingWingStartsHover)
-
-    // The leading wing does not start the dwell while lowered.
-    model.hoverMoved(inLeadingWing: true)
-    #expect(model.panelLayering.level == .belowMenuBar)
-
-    // The housing or trailing wing does, and the panel rises at once.
-    model.hoverMoved(inLeadingWing: false)
-    #expect(model.panelLayering == .standard)
-    model.hoverExited()
-    #expect(model.panelLayering.level == .belowMenuBar)
-
-    model.clicked()
-    #expect(model.panelLayering == .standard)
-    model.escapePressed()
-    #expect(model.panelLayering.level == .belowMenuBar)
-
-    // The island pill hangs below the menu bar, so it is never lowered.
-    model.setSurfaceForTesting(.island)
-    #expect(model.panelLayering == .standard)
+    #expect(!model.isStripExpanded)
     model.setSurfaceForTesting(.pill)
-    #expect(model.panelLayering == .standard)
+    #expect(model.isStripExpanded)
 }
 
 @MainActor
-@Test("panelLayering on macOS 26: always the status-bar level and the full hover area")
-func panelLayeringUnchangedOnMacOS26() {
-    let model = NotchCompanionModel()
-    model.usageReader = fixtureReader(descriptors: [])
-    model.osMajorVersion = 26
-    for surface in [NotchCompanionSurface.notch, .island, .pill] {
-        model.setSurfaceForTesting(surface)
-        #expect(model.panelLayering == .standard)
-        model.clicked()
-        #expect(model.panelLayering == .standard)
-        model.escapePressed()
-    }
-}
-
-// MARK: - Pointer watch (notch strip below the menu bar, macOS 27)
-
-/// A 1710 × 1107 notched screen's collapsed strip: the 185 pt notch at
-/// x 763...948 plus a 44 pt wing each side, 33 pt tall at the screen top.
-private let watchStrip = CGRect(x: 719, y: 1074, width: 273, height: 33)
-private let watchLeadingWing: CGFloat = 44
-private let inLeadingWing = CGPoint(x: 730, y: 1090)
-private let inHousing = CGPoint(x: 855, y: 1090)
-private let belowStrip = CGPoint(x: 855, y: 900)
-
-@MainActor
-@Test("pointer watch on macOS 27: the housing raises the lowered strip; the leading wing does not")
-func pointerWatchRaisesLoweredStripOnMacOS27() {
+@Test("notch hover: hoverMoved starts one dwell, the dwell peeks, hoverExited starts the grace")
+func notchHoverMovedDwellsThenGraces() {
     let model = NotchCompanionModel()
     model.usageReader = fixtureReader(descriptors: [])  // see escapePressedClearsSearchQuery
-    model.osMajorVersion = 27
     model.setSurfaceForTesting(.notch)
-    #expect(model.panelLayering.level == .belowMenuBar)
-    #expect(model.isPointerWatchActive)
+    #expect(!model.isHoverDwellPendingForTesting)
 
-    model.pointerMoved(
-        to: inLeadingWing, panelFrame: watchStrip, leadingWingWidth: watchLeadingWing)
-    #expect(model.panelLayering.level == .belowMenuBar)
-    #expect(model.hoverState == .resting)
+    model.hoverMoved()
+    #expect(model.isHoverDwellPendingForTesting)
+    // Further reports while inside do not restart anything.
+    model.hoverMoved()
+    #expect(model.isHoverDwellPendingForTesting)
 
-    model.pointerMoved(to: inHousing, panelFrame: watchStrip, leadingWingWidth: watchLeadingWing)
-    #expect(model.panelLayering == .standard)
-    // The dwell is pending and the view has not seen the pointer yet.
-    #expect(model.isPointerWatchActive)
-
-    // The view's hover now reports the pointer and takes over.
-    model.hoverMoved(inLeadingWing: false)
-    #expect(!model.isPointerWatchActive)
-    #expect(model.panelLayering == .standard)
+    model.fireHoverDwellForTesting()
+    #expect(!model.isHoverDwellPendingForTesting)
+    #expect(model.hoverState == .peeking)
+    #expect(model.isStripExpanded)
 
     model.hoverExited()
-    #expect(model.panelLayering.level == .belowMenuBar)
-    #expect(model.isPointerWatchActive)
-}
+    #expect(model.isHoverGracePendingForTesting)
+    #expect(model.hoverState == .peeking)
 
-@MainActor
-@Test("pointer watch on macOS 27: a pending dwell the pointer leaves lowers the strip again")
-func pointerWatchEndsUnseenDwellOnMacOS27() {
-    let model = NotchCompanionModel()
-    model.usageReader = fixtureReader(descriptors: [])
-    model.osMajorVersion = 27
-    model.setSurfaceForTesting(.notch)
-
-    model.pointerMoved(to: inHousing, panelFrame: watchStrip, leadingWingWidth: watchLeadingWing)
-    #expect(model.panelLayering == .standard)
-    model.pointerMoved(to: belowStrip, panelFrame: watchStrip, leadingWingWidth: watchLeadingWing)
-    #expect(model.panelLayering.level == .belowMenuBar)
-    #expect(model.hoverState == .resting)
-
-    // The pointer comes back: hover starts again.
-    model.pointerMoved(to: inHousing, panelFrame: watchStrip, leadingWingWidth: watchLeadingWing)
-    #expect(model.panelLayering == .standard)
-    model.hoverExited()
-}
-
-@MainActor
-@Test("pointer watch on macOS 27: after Escape the pointer must leave before hover starts again")
-func pointerWatchIsEdgeTriggeredAfterEscape() {
-    let model = NotchCompanionModel()
-    model.usageReader = fixtureReader(descriptors: [])
-    model.osMajorVersion = 27
-    model.setSurfaceForTesting(.notch)
-
-    model.pointerMoved(to: inHousing, panelFrame: watchStrip, leadingWingWidth: watchLeadingWing)
-    model.clicked()
-    #expect(model.hoverState == .pinned)
-    #expect(!model.isPointerWatchActive)
+    // Back on the strip before the grace ends: the grace stops.
+    model.hoverMoved()
+    #expect(!model.isHoverGracePendingForTesting)
     model.escapePressed()
-    #expect(model.panelLayering.level == .belowMenuBar)
-
-    // Still on the housing: no new hover.
-    model.pointerMoved(to: inHousing, panelFrame: watchStrip, leadingWingWidth: watchLeadingWing)
-    #expect(model.panelLayering.level == .belowMenuBar)
-
-    // Leave, then come back: hover starts.
-    model.pointerMoved(to: belowStrip, panelFrame: watchStrip, leadingWingWidth: watchLeadingWing)
-    model.pointerMoved(to: inHousing, panelFrame: watchStrip, leadingWingWidth: watchLeadingWing)
-    #expect(model.panelLayering == .standard)
-    model.hoverExited()
+    #expect(model.hoverState == .resting)
 }
 
 @MainActor
-@Test("pointer watch: never on macOS 26, the island, or the plain-display pill")
-func pointerWatchInactiveElsewhere() {
+@Test("notch hover: after Escape the pointer must leave before hover starts again")
+func notchHoverMovedIsEdgeTriggeredAfterEscape() {
     let model = NotchCompanionModel()
     model.usageReader = fixtureReader(descriptors: [])
-    model.osMajorVersion = 26
     model.setSurfaceForTesting(.notch)
-    #expect(!model.isPointerWatchActive)
-    model.pointerMoved(to: inHousing, panelFrame: watchStrip, leadingWingWidth: watchLeadingWing)
-    #expect(model.panelLayering == .standard)
-    model.pointerMoved(to: belowStrip, panelFrame: watchStrip, leadingWingWidth: watchLeadingWing)
-    #expect(model.panelLayering == .standard)
-    model.hoverExited()
 
-    model.osMajorVersion = 27
-    for surface in [NotchCompanionSurface.island, .pill] {
-        model.setSurfaceForTesting(surface)
-        #expect(!model.isPointerWatchActive)
-        model.hoverMoved(inLeadingWing: false)
-        #expect(!model.isPointerWatchActive)
-        model.hoverExited()
-        #expect(!model.isPointerWatchActive)
-    }
+    model.hoverMoved()
+    model.fireHoverDwellForTesting()
+    #expect(model.hoverState == .peeking)
+    model.escapePressed()
+    #expect(model.hoverState == .resting)
+
+    // Still on the strip: no new dwell.
+    model.hoverMoved()
+    #expect(!model.isHoverDwellPendingForTesting)
+
+    // Leave, then come back: the dwell starts.
+    model.hoverExited()
+    model.hoverMoved()
+    #expect(model.isHoverDwellPendingForTesting)
+    model.hoverExited()
+    #expect(!model.isHoverDwellPendingForTesting)
 }
 
 // MARK: - Usage glance in the menu bar (Dynamic Island Macs)

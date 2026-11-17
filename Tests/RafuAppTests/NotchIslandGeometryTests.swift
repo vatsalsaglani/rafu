@@ -228,13 +228,13 @@ func islandFrameDispatch() {
 func islandRegressionLockNotchedAndPlain() {
     #expect(
         NotchCompanionGeometry.restingStripFrame(for: notchedScreen)
-            == CGRect(x: 719, y: 1074, width: 273, height: 33))
+            == CGRect(x: 679, y: 1074, width: 269, height: 33))
     #expect(
         NotchCompanionGeometry.expandedStripFrame(for: notchedScreen)
             == CGRect(x: 673, y: 1074, width: 365, height: 33))
     #expect(
         NotchCompanionGeometry.restingFrame(for: notchedScreen, allowsPill: true)
-            == CGRect(x: 719, y: 1074, width: 273, height: 33))
+            == CGRect(x: 679, y: 1074, width: 269, height: 33))
     #expect(
         NotchCompanionGeometry.expandedFrame(for: notchedScreen, allowsPill: true)
             == CGRect(x: 673, y: 1074, width: 365, height: 33))

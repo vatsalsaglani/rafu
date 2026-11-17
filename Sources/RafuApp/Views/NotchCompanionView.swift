@@ -77,14 +77,10 @@ struct NotchCompanionView: View {
                 model: model, islandShape: islandShape, outlineLimits: outlineLimits,
                 glowVisible: glowVisible)
         )
-        // Continuous, not `.onHover`: on macOS 27 a collapsed strip sits
-        // below the menu bar and its leading wing must not start hover
-        // (`CompanionPanelLayering`), so the model needs the pointer's x.
-        .onContinuousHover { phase in
-            switch phase {
-            case .active(let location):
-                model.hoverMoved(inLeadingWing: location.x < model.leadingWingWidth)
-            case .ended:
+        .onHover { inside in
+            if inside {
+                model.hoverMoved()
+            } else {
                 model.hoverExited()
             }
         }
@@ -108,10 +104,11 @@ struct NotchCompanionView: View {
     private var surfaceColor: Color { Color.black }
 
     /// The gradient border shows while the panel is open (Cider: expanded),
-    /// and on the strip while it is widened for attention (Cider: peek).
+    /// and on the notch strip or the pill while a terminal needs attention
+    /// (Cider: peek). The resting notch strip does not widen for attention,
+    /// so the border does not wait for `isStripExpanded`.
     private var glowVisible: Bool {
-        model.isPanelOpen
-            || (model.surface != .island && model.isStripExpanded && model.attentionCount > 0)
+        model.isPanelOpen || (model.surface != .island && model.attentionCount > 0)
     }
 
     /// The notch and the plain-display pill hang from the screen top: Cider's
@@ -178,25 +175,35 @@ private struct CompanionShellModifier: ViewModifier {
 }
 
 /// The wings row (terminal-notch-hud.md, "Resting"): the mascot (or the plain
-/// Rafu mark) on the left, the compact status on the right — a dot and count
-/// when something needs you, the live agent count, and the open-editor count
-/// when nothing else is running. The physical housing hides about 16pt beside
-/// the notch, so the resting strip keeps to one short item per side; the wider
-/// strip (attention, hover) and the pill on a plain display show everything.
-/// The row IS the click target — since `NotchHUDPanel.clickThroughRegions` is
-/// always empty for this panel (see `NotchCompanionModel.presentPanel`), a
-/// single tap on the whole row covers the full strip, notch gap included.
+/// Rafu mark) and the compact status (`CompanionRestingStatus`). The resting
+/// notch strip has ONE wing, left of the notch, with the mark and the status
+/// side by side in it: the physical housing hides about 16pt beside the
+/// notch, and on macOS 27 the menu bar's "«" overflow chevron sits right of
+/// the notch, where a right wing would cover it. The wider strip (hover) and
+/// the pill on a plain display put the mark on the left and the status on
+/// the right. The row IS the click target — since
+/// `NotchHUDPanel.clickThroughRegions` is always empty for this panel (see
+/// `NotchCompanionModel.presentPanel`), a single tap on the whole row covers
+/// the full strip, notch gap included.
 struct CompanionWingsView: View {
     let model: NotchCompanionModel
-    @Environment(\.rafuTheme) private var theme
-
-    private var ink: NotchInk { NotchInk(theme: theme) }
 
     var body: some View {
-        HStack(spacing: 0) {
-            leftWing
-            Spacer(minLength: 0)
-            rightWing
+        Group {
+            if model.hasPhysicalNotch, !model.isStripExpanded {
+                HStack(spacing: 0) {
+                    restingLeadingWing
+                    // The notch housing.
+                    Spacer(minLength: 0)
+                }
+            } else {
+                HStack(spacing: 0) {
+                    leftWing
+                    Spacer(minLength: 0)
+                    CompanionRestingStatus(model: model, wide: true)
+                        .padding(.trailing, RafuMetrics.space2 + 2)
+                }
+            }
         }
         .frame(height: max(model.stripHeight, 1))
         .contentShape(Rectangle())
@@ -209,8 +216,25 @@ struct CompanionWingsView: View {
         .accessibilityAddTraits(.isButton)
     }
 
-    /// The mascot, alone at rest; a playing-music indicator joins it once the
-    /// strip is wide enough that the indicator is not behind the housing.
+    /// The resting notch strip's only wing: the mark and the status in one
+    /// row, kept to the part of the wing the housing does not hide.
+    private var restingLeadingWing: some View {
+        HStack(alignment: .center, spacing: RafuMetrics.space2 - 2) {
+            CompanionLeadingMarkView(model: model)
+            CompanionRestingStatus(model: model, wide: false)
+        }
+        .padding(.leading, RafuMetrics.space2 - 2)
+        .frame(
+            width: NotchCompanionGeometry.restingLeadingWingWidth
+                - NotchCompanionGeometry.housingHiddenInset,
+            alignment: .leading
+        )
+        .lineLimit(1)
+    }
+
+    /// The mascot on the wider strip and the pill; a playing-music indicator
+    /// joins it once the strip is wide enough that the indicator is not
+    /// behind the housing.
     private var leftWing: some View {
         HStack(spacing: RafuMetrics.space1) {
             CompanionLeadingMarkView(model: model)
@@ -226,11 +250,37 @@ struct CompanionWingsView: View {
             && (model.isStripExpanded || !model.hasPhysicalNotch)
     }
 
-    /// Attention first, then agents, then (when nothing is running) editors.
-    private var rightWing: some View {
+    /// "Rafu — 3 agents, 1 needs you, 2 editors open" — prefixed with the app
+    /// name because this element has no window title or menu-bar icon a
+    /// VoiceOver user could otherwise anchor it to.
+    private var summaryLabel: String {
+        let editors = model.editorRows.count
+        var parts = [model.agentSummary.spokenSummary]
+        parts.append("\(editors) editor\(editors == 1 ? "" : "s") open")
+        let attention = model.attentionCount
+        if attention > 0 {
+            parts.append(
+                "\(attention) terminal\(attention == 1 ? "" : "s") needing attention")
+        }
+        return "Rafu — \(parts.joined(separator: ", "))"
+    }
+}
+
+/// The strip's compact status: attention first (a dot and count), then live
+/// agents, then (when nothing is running) open editors. `wide` (the wider
+/// strip and the pill) shows every item with its icon. The resting notch
+/// strip shows only the first of the three, so it fits beside the mark in
+/// the one leading wing.
+struct CompanionRestingStatus: View {
+    let model: NotchCompanionModel
+    let wide: Bool
+    @Environment(\.rafuTheme) private var theme
+
+    private var ink: NotchInk { NotchInk(theme: theme) }
+
+    var body: some View {
         let summary = model.agentSummary
-        let wide = model.isStripExpanded || !model.hasPhysicalNotch
-        return HStack(spacing: RafuMetrics.space2 - 2) {
+        HStack(spacing: RafuMetrics.space2 - 2) {
             if model.attentionCount > 0 {
                 HStack(spacing: 3) {
                     Circle()
@@ -248,7 +298,7 @@ struct CompanionWingsView: View {
                 }
                 .foregroundStyle(ink.primary)
             }
-            if summary.live == 0 || wide {
+            if wide || (summary.live == 0 && model.attentionCount == 0) {
                 HStack(spacing: 3) {
                     if wide {
                         Image(systemName: "macwindow")
@@ -262,26 +312,10 @@ struct CompanionWingsView: View {
         .font(.system(size: 11, weight: .semibold, design: .rounded))
         .monospacedDigit()
         .lineLimit(1)
-        .padding(.trailing, RafuMetrics.space2 + 2)
     }
 
     private static func countText(_ count: Int) -> String {
         count > 99 ? "99+" : String(count)
-    }
-
-    /// "Rafu — 3 agents, 1 needs you, 2 editors open" — prefixed with the app
-    /// name because this element has no window title or menu-bar icon a
-    /// VoiceOver user could otherwise anchor it to.
-    private var summaryLabel: String {
-        let editors = model.editorRows.count
-        var parts = [model.agentSummary.spokenSummary]
-        parts.append("\(editors) editor\(editors == 1 ? "" : "s") open")
-        let attention = model.attentionCount
-        if attention > 0 {
-            parts.append(
-                "\(attention) terminal\(attention == 1 ? "" : "s") needing attention")
-        }
-        return "Rafu — \(parts.joined(separator: ", "))"
     }
 }
 

@@ -311,14 +311,16 @@ func attentionFeedStableForEqualTimestamps() {
 
 // MARK: - NotchCompanionGeometry
 
-@Test("restingStripFrame: exactly the physical notch rect")
+@Test("restingStripFrame: the notch plus one 84pt leading wing, right edge on the notch")
 func restingStripFrameRealMetrics() {
-    // Notch (763, 185 wide) plus the 44pt compact wing each side: wide
-    // enough that the always-on glyph + editor count clear the physical
-    // cutout (which is wider than the software notch; user photos,
-    // 2026-07-22).
+    // Notch (763...948, 185 wide) plus one 84pt wing on the left only: the
+    // mascot and status clear the physical cutout (which is wider than the
+    // software notch; user photos, 2026-07-22), and nothing covers the
+    // menu bar's "«" overflow chevron right of the notch (macOS 27 device
+    // photos, 2026-11-17).
     let frame = NotchCompanionGeometry.restingStripFrame(for: realNotchMetrics)
-    #expect(frame == CGRect(x: 719, y: 1074, width: 273, height: 33))
+    #expect(frame == CGRect(x: 679, y: 1074, width: 269, height: 33))
+    #expect(frame?.maxX == 948)
     #expect(frame?.maxY == realNotchMetrics.frame.maxY)
 }
 
