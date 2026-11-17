@@ -176,9 +176,11 @@ Never save:
 - environment values;
 - credentials, tokens, notification reply IDs, or Ensemble capability;
 - `TerminalProcessSpec`;
-- an automatically observed live working directory in a **named** saved layout
-  (ADR 0023, 2026-11-15 amendment: workspace restoration and Ensemble board
-  records may keep a validated workspace-relative `lastWorkingFolder`; see
+- a `lastWorkingFolder` key or an absolute observed folder in a **named** saved
+  layout (ADR 0023, 2026-11-15 amendment: workspace restoration and Ensemble
+  board records may keep a validated workspace-relative `lastWorkingFolder`. ADR
+  0023, 2026-11-17 amendment: at Save a named layout records each pane's
+  validated workspace-relative current folder as its `startingFolder`; see
   [`terminal-last-working-folder.md`](../../references/terminal-last-working-folder.md));
 - the raw absolute workspace root or an absolute child folder;
 - an OSC-reported terminal title or computed display name;
@@ -187,7 +189,10 @@ Never save:
 - named-layout runtime group, pane, split, or session IDs.
 
 Opening a saved group creates stopped placeholders with fresh runtime IDs. The
-user must select **Start Pane** or **Start All Restartable Panes**. Start All
+user must select **Start Pane**, **Start All Restartable Panes**, the
+**Start All N Panes** button on a stopped pane, or **Open and Start All Panes**
+in a saved row's menu (ADR 0023, 2026-11-17 amendment; plain Open, double-click,
+Return, and window restoration stay inert). Start All
 targets stopped ordinary-shell panes only and leaves unavailable Agent and
 Ensemble placeholders unchanged. It validates all target folders, shells, and
 capacity before it reserves or starts a process. A preflight failure starts
@@ -344,6 +349,34 @@ Evidence (Swift 6.4.2, Xcode with macOS 27.2 SDK 26B118, Darwin 27.2.0, Mac17,13
 on the branch, parallel 495 tests and 3861 tests in 316 suites. Main gate for the
 Terminals merge: run by the coordinator. No device check yet; the user tests at
 the end. Facts and limits:
+[`terminal-last-working-folder.md`](../../references/terminal-last-working-folder.md).
+
+### 2026-11-17: saved layouts keep pane folders; Start All from a pane or a saved row (13bebfb)
+
+Delivered on `main`. User request: starting a saved group needed one start per
+pane, and panes opened in the workspace folder, not the remembered path. ADR 0023
+has a 2026-11-17 amendment that narrows "a named layout never holds an observed
+folder".
+
+- Save, Save As, and Update Saved Layout record each ordinary-shell pane's
+  validated workspace-relative current folder as its `startingFolder`. No
+  `lastWorkingFolder` key; file stays version 1; the strict key inspector is
+  unchanged.
+- `openSavedTerminalGroup` now notes workspace-folder fallbacks for deleted
+  saved folders.
+- "Start All N Panes" button on a stopped pane (2 or more startable panes) and
+  "Open and Start All Panes" in the saved-row menu. Plain Open stays inert.
+- Tests: `TerminalLastWorkingFolderTests` updated; new
+  `TerminalSavedGroupFolderAndStartAllTests` (10 tests).
+
+Evidence: on `main` after the merge, parallel and `--no-parallel` both passed
+(3938 tests in 320 suites, plus 530 tests in 40 suites in the first test
+product). Rafu Lightning was not launched. GUI checks owed: placeholder button
+layout, VoiceOver, Full Keyboard Access, second window, real `cd` then Update then
+reopen then Start All with a matching `pwd`, deleted-folder fallback.
+
+User action owed: layouts saved before this change (for example "DF AI Services")
+hold "." and need one Update after `cd`. Facts and limits:
 [`terminal-last-working-folder.md`](../../references/terminal-last-working-folder.md).
 
 ## Explicit non-goals

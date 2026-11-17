@@ -323,3 +323,30 @@ Details: [`terminal-last-working-folder.md`](../references/terminal-last-working
 
 Detail, the OSC 7 host rule and the capture points:
 [`terminal-last-working-folder.md`](../references/terminal-last-working-folder.md).
+
+## Amendment (2026-11-17): a named layout records each pane's current folder; Start All from a stopped pane or a saved row
+
+The user asked that a saved Terminal Group remember each pane's folder, and that
+the panes need not be started one by one. This narrows the 2026-11-15 rule "a
+named layout never holds an observed folder".
+
+- **Save records the folder.** At Save, Save As, and Update Saved Layout, each
+  ordinary-shell pane's validated workspace-relative current folder is stored as
+  that pane's `startingFolder`. It is never an absolute path, never a command,
+  and never a `lastWorkingFolder` key. The saved-layout file stays version 1 and
+  the strict key inspector is unchanged.
+- **Set Pane Starting Folder is overridden at Save** when the shell has moved
+  since. The live group is not changed by a save.
+- **Not stored.** A folder outside the workspace, or in an additional root of a
+  multi-folder workspace, is not stored. The pane keeps its starting folder.
+- **Start All is an explicit start.** A "Start All N Panes" button on a stopped
+  pane (2 or more startable panes) and an "Open and Start All Panes" item in a
+  saved row menu start every stopped or exited shell pane. Each is an explicitly
+  named user start and runs no command. Plain Open, double-click, Return, and
+  window restoration stay inert. Agent and Ensemble placeholders are never
+  started.
+- **Unchanged.** Spawn is lazy and follows a visible user action. Rafu never
+  sends `cd` to a live shell. Preflight validates every target before any
+  process starts. A remote workspace still refuses to save.
+
+Details: [`terminal-last-working-folder.md`](../references/terminal-last-working-folder.md).

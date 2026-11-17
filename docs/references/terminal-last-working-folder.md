@@ -27,7 +27,8 @@ live-only".
 - A value equal to `startingFolder` is stored as nil. A remote workspace
   (`rootURL` nil) clears it.
 - It is never in a user-named saved layout. `TerminalGroupRestorationCodec.savedRecord`
-  strips it.
+  strips it. (A named layout does record the folder, as the pane's
+  `startingFolder`, at Save; see "Named layouts record the current folder".)
 
 **Start fallback order.** Last folder if usable, then starting folder if usable,
 then the workspace root (ADR 0023 amendment 2, 2026-11-15, supersedes the earlier
@@ -68,6 +69,51 @@ then the workspace root (ADR 0023 amendment 2, 2026-11-15, supersedes the earlie
   (unchanged). An old payload with no terminal field still gives "One saved
   Terminal Group could not be restored."
 
+**Named layouts record the current folder** (ADR 0023 amendment 2026-11-17).
+
+- At Save, Save As, and Update Saved Layout, each ordinary-shell pane's validated
+  workspace-relative current folder (`proc_pidinfo` refresh or OSC 7, through
+  `restorableLaunchProfile`) is stored as the pane's `startingFolder`.
+  `TerminalPaneLaunchProfile.namedLayoutTemplate` is
+  `lastWorkingFolder ?? startingFolder`.
+- No `lastWorkingFolder` key is written to a named record. The file stays
+  version 1 and the strict key inspector is unchanged: an unknown key would fail
+  the whole file, and an older build would lose every layout. This is why there
+  is no schema change.
+- The folder is read on the main actor when Save is clicked, before the
+  background save Task. A failure uses the existing save-error path. A save does
+  not change the live group.
+- A folder outside the workspace, or in an additional root of a multi-folder
+  workspace, is not stored; the pane's starting folder is used. Known edge: a new
+  group saved in `pkg/src`, then updated while the shell is outside the
+  workspace, saves ".". Remote workspaces: save is already refused.
+- Set Pane Starting Folder is overridden at Save when the shell moved.
+- `openSavedTerminalGroup` calls `noteWorkspaceFolderFallbacks`, so a deleted
+  saved folder shows the workspace-folder fallback text (window restoration
+  already did).
+- Existing layouts saved before this change hold "." and need one Update after
+  `cd`.
+
+**Start All.**
+
+- A "Start All N Panes" bordered button sits next to "Start Shell" on each
+  stopped pane placeholder when 2 or more panes can start
+  (`TerminalGroupSnapshot.restartablePanes`: available and stopped or exited;
+  never Agent or Ensemble placeholders). Action `.startAll(TerminalGroupID)` calls
+  `startAllRestartableTerminalPanes(in:)`. Help: "Starts every stopped or exited
+  shell pane in this group. No command runs." VoiceOver label:
+  `startAllAccessibilityLabel(for:)`.
+- The saved-row "..." menu has "Open and Start All Panes" and a VoiceOver action
+  "Open and Start All" (`openSavedTerminalGroup(_:startingAllPanes:)`). Plain
+  Open, double-click, Return, and window restoration stay inert.
+- A preflight failure leaves the group open, the panes stopped, and shows the
+  existing alert.
+- No new key equivalent: menu key equivalents are taken app-wide. The menu
+  `.startAll` availability still counts stopped panes only (deliberately
+  unchanged).
+- The sidebar (`TerminalsPanelModel`) shows `preferredStartFolder` in three
+  places.
+
 **Where the folder comes from.**
 
 - OSC 7 (`hostCurrentDirectoryUpdate`) is one source. Accept an empty host,
@@ -94,7 +140,8 @@ exited controller keeps its last value.
 - A new profile field must be stripped from named layouts. The saved-layout raw
   inspector `profileKeys = ["shell", "startingFolder"]` refuses unknown keys, so
   an unstripped field makes every named-layout save fail with
-  `missingShellProfile`.
+  `missingShellProfile`. To keep a folder in a named layout, write it into the
+  existing `startingFolder` key, not a new key.
 - The user-visible bug came from window close and app relaunch. Closing a board
   inside a window does not stop its shells: `stopAll` only hides the group.
 - On macOS the temp directory is under `/var`, a symlink to `/private/var`. The
@@ -126,6 +173,14 @@ exited controller keeps its last value.
   tests in 316 suites. Main gate for the Terminals merge (4fe79a0): run by the
   coordinator. No device check of the fallback or the unsaved-tab restore yet.
 - Manual: user confirmed in Rafu Lightning that a shell folder is restored.
+- 2026-11-17 (commit 13bebfb, merged on `main`): `TerminalLastWorkingFolderTests`
+  named-layout test updated; new `TerminalSavedGroupFolderAndStartAllTests` (10
+  tests). On `main` after the merge, parallel and `--no-parallel` both passed:
+  3938 tests in 320 suites, plus 530 tests in 40 suites in the first test
+  product. Rafu Lightning was not launched. GUI checks still owed: placeholder
+  button layout, VoiceOver, Full Keyboard Access, a second window, a real
+  `cd` then Update then reopen then Start All with a matching `pwd`, and the
+  deleted-folder fallback text.
 
 ## Verification
 
