@@ -9,6 +9,7 @@ nonisolated enum TerminalGroupViewAction: Equatable, Sendable {
     case close(TerminalPaneID)
     case restart(TerminalPaneID)
     case start(TerminalPaneID)
+    case startAll(TerminalGroupID)
 }
 
 /// The immutable textual presentation for a terminal pane. Keeping it pure
@@ -96,6 +97,20 @@ nonisolated enum TerminalPanePresentation {
         return "Start this pane when you are ready. It starts in \(place)."
     }
 
+    /// The stopped-pane "Start All N Panes" title, or `nil` when fewer than
+    /// two panes can start (Start Shell is enough then). It counts the panes
+    /// Start All targets (`TerminalGroupSnapshot.restartablePanes`).
+    static func startAllTitle(for snapshot: TerminalGroupSnapshot) -> String? {
+        let count = snapshot.restartablePanes.count
+        return count >= 2 ? "Start All \(count) Panes" : nil
+    }
+
+    /// The VoiceOver label for the same button, naming the group.
+    static func startAllAccessibilityLabel(for snapshot: TerminalGroupSnapshot) -> String? {
+        let count = snapshot.restartablePanes.count
+        return count >= 2 ? "Start all \(count) panes in \(snapshot.name.rawValue)" : nil
+    }
+
     static func themeColor(
         for pane: TerminalPaneSnapshot,
         controllerColor: TerminalPaneThemeColor?
@@ -150,6 +165,10 @@ struct TerminalGroupView: View {
                         isFocused: snapshot.focusedPaneID == paneID,
                         requestFocusToken: requestFocusToken,
                         startsInWorkspaceFolder: workspaceFolderFallbackPaneIDs.contains(paneID),
+                        groupID: snapshot.id,
+                        startAllTitle: TerminalPanePresentation.startAllTitle(for: snapshot),
+                        startAllAccessibilityLabel:
+                            TerminalPanePresentation.startAllAccessibilityLabel(for: snapshot),
                         action: action,
                         theme: theme
                     )
@@ -187,6 +206,10 @@ private struct TerminalGroupPaneView: View {
     let isFocused: Bool
     let requestFocusToken: UInt64
     let startsInWorkspaceFolder: Bool
+    let groupID: TerminalGroupID
+    /// "Start All N Panes", or `nil` when fewer than two panes can start.
+    let startAllTitle: String?
+    let startAllAccessibilityLabel: String?
     let action: (TerminalGroupViewAction) -> Void
     let theme: RafuTheme
 
@@ -392,12 +415,24 @@ private struct TerminalGroupPaneView: View {
                         for: pane, startsInWorkspaceFolder: startsInWorkspaceFolder))
             } actions: {
                 if pane.startAvailability == .available {
-                    Button("Start Shell") {
-                        action(.start(pane.id))
+                    HStack(spacing: RafuMetrics.space2) {
+                        Button("Start Shell") {
+                            action(.start(pane.id))
+                        }
+                        .buttonStyle(RafuProminentButtonStyle())
+                        .help("Start terminal pane")
+                        .accessibilityLabel("Start \(displayName)")
+                        if let startAllTitle {
+                            Button(startAllTitle) {
+                                action(.startAll(groupID))
+                            }
+                            .buttonStyle(RafuSecondaryButtonStyle())
+                            .help(
+                                "Starts every stopped or exited shell pane in this group. No command runs."
+                            )
+                            .accessibilityLabel(startAllAccessibilityLabel ?? startAllTitle)
+                        }
                     }
-                    .buttonStyle(RafuProminentButtonStyle())
-                    .help("Start terminal pane")
-                    .accessibilityLabel("Start \(displayName)")
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)

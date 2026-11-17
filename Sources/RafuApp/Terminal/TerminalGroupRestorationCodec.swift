@@ -109,9 +109,10 @@ nonisolated struct TerminalGroupRestorationCodec: Sendable {
                     throw TerminalGroupPersistenceError.missingShellProfile
                 }
                 kind = .ordinaryShell
-                // A named layout is a reusable template: the folder a shell
-                // was last in is not part of it, and the store refuses the key.
-                profile = launchProfile.withoutLastWorkingFolder
+                // A named layout keeps the folder a start would use as its
+                // starting folder. It never writes `lastWorkingFolder`: the
+                // store refuses that key.
+                profile = launchProfile.namedLayoutTemplate
             case .directAgentTerminal, .unavailableAgentTerminal:
                 kind = .unavailableAgentTerminal
                 profile = nil

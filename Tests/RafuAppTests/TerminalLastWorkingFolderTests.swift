@@ -220,7 +220,7 @@ struct TerminalLastWorkingFolderTests {
 
     // MARK: - Named saved layouts
 
-    @Test("A named saved layout never stores the last folder, so a cd does not change it")
+    @Test("A named saved layout folds the last folder into its starting folder")
     func namedLayoutExcludesLastFolder() throws {
         let paneID = TerminalPaneID()
         let base = TerminalPaneLaunchProfile(shell: .preferredShell, startingFolder: .root)
@@ -241,7 +241,8 @@ struct TerminalLastWorkingFolderTests {
         let moved = try codec.savedRecord(
             from: snapshot(base.withLastWorkingFolder(TerminalWorkspaceRelativePath("src"))),
             savedLayoutID: savedID)
-        #expect(moved.panes.map(\.launchProfile) == clean.panes.map(\.launchProfile))
+        #expect(clean.panes.first?.launchProfile?.startingFolder == .root)
+        #expect(moved.panes.first?.launchProfile?.startingFolder.rawValue == "src")
         #expect(moved.panes.first?.launchProfile?.lastWorkingFolder == nil)
         let encoded = String(decoding: try JSONEncoder().encode(moved), as: UTF8.self)
         #expect(!encoded.contains("lastWorkingFolder"))
