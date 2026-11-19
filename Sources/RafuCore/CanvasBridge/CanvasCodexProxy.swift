@@ -45,38 +45,90 @@ final class CanvasCodexProxy: Sendable {
         var acceptedSinceLoss = false
     }
 
+    /// One server request that Rafu may answer on the TUI's own connection. The
+    /// JSON-RPC ID stays here, in its raw JSON text, and never leaves the proxy.
+    private struct PendingRequest: Sendable {
+        let rpcID: String
+        let request: CanvasAgentRequest
+        /// `params.permissions` as JSON. An accepted permissions request sends
+        /// exactly this profile back.
+        let permissions: Data?
+    }
+
+    /// What `inject(key:decision:)` did.
+    enum InjectOutcome: Equatable, Sendable {
+        /// One frame went upstream and the entry is gone.
+        case sent
+        /// No such request on the active connection: answered, cleared, or never known.
+        case unknown
+        /// The decision is not valid for the request, or the write failed.
+        case refused
+        /// The TUI is in the middle of a fragmented message. Try again.
+        case busy
+    }
+
+    /// The two calls the proxy makes for the answer path. Both run on a relay or
+    /// timer thread and must return at once; neither may block on the app.
+    struct Approvals: Sendable {
+        /// A request for the bound thread arrived and was forwarded to the TUI.
+        let request: @Sendable (CanvasAgentRequest) -> Void
+        /// The request is gone without an answer from `inject`: the TUI answered
+        /// it, the server resolved it, the turn ended, or the connection ended.
+        let clear: @Sendable (UUID) -> Void
+    }
+
+    /// The most unanswered server requests the proxy tracks per connection.
+    static let maximumApprovals = 8
+
     /// One accepted TUI socket and its upstream socket. The descriptors close
-    /// only after both workers end, under the same lock that guards shutdown, so
-    /// a shutdown can never reach a reused descriptor number.
+    /// only after both workers (and any injection) end, under the same lock that
+    /// guards shutdown, so a shutdown can never reach a reused descriptor number.
     private final class Connection: Sendable {
         let frontend: Int32
         let upstream: Int32
         private struct Life {
             var retired = false
             var closed = false
+            /// The two relay workers, plus one for each injection in flight.
             var workers = 2
             var pendingIDs: Set<String> = []
             var resumeAttempted = false
+            var requests: [UUID: PendingRequest] = [:]
         }
         private let life = Mutex(Life())
+        /// Serializes every upstream write. The flag is true while the outgoing
+        /// side is inside a fragmented message, where no other frame may go.
+        private let upstreamWrite = Mutex(false)
+        /// Gets the keys still tracked when the connection retires.
+        private let dropped: @Sendable ([UUID]) -> Void
 
-        init(frontend: Int32, upstream: Int32) {
+        init(
+            frontend: Int32, upstream: Int32,
+            dropped: @escaping @Sendable ([UUID]) -> Void = { _ in }
+        ) {
             self.frontend = frontend
             self.upstream = upstream
+            self.dropped = dropped
         }
 
-        /// Stops both directions. Only the first caller gets true.
+        /// Stops both directions. Only the first caller gets true. Requests still
+        /// tracked are dropped: the server never accepts an answer for them on
+        /// another connection.
         @discardableResult
         func retire() -> Bool {
-            life.withLock { life in
-                guard !life.retired else { return false }
+            let keys: [UUID]? = life.withLock { life in
+                guard !life.retired else { return nil }
                 life.retired = true
                 if !life.closed {
                     Darwin.shutdown(frontend, SHUT_RDWR)
                     Darwin.shutdown(upstream, SHUT_RDWR)
                 }
-                return true
+                defer { life.requests.removeAll() }
+                return Array(life.requests.keys)
             }
+            guard let keys else { return false }
+            if !keys.isEmpty { dropped(keys) }
+            return true
         }
 
         func workerEnded() {
@@ -116,6 +168,86 @@ final class CanvasCodexProxy: Sendable {
                 return !life.resumeAttempted
             }
         }
+
+        // MARK: Upstream writes
+
+        /// Writes one frame (or a header) toward the server. `messageContinues`
+        /// is the fragmentation state after a text or continuation frame, and nil
+        /// for a control frame, which leaves it as it was.
+        func writeUpstream(_ data: Data, messageContinues: Bool? = nil) throws {
+            try upstreamWrite.withLock { fragmented in
+                try CanvasCodexProxy.write(data, to: upstream)
+                if let messageContinues { fragmented = messageContinues }
+            }
+        }
+
+        // MARK: Server requests
+
+        /// Tracks a request. False when the table is full or the ID is known.
+        func track(_ pending: PendingRequest) -> Bool {
+            life.withLock { life in
+                guard !life.retired, life.requests.count < CanvasCodexProxy.maximumApprovals,
+                    !life.requests.values.contains(where: { $0.rpcID == pending.rpcID })
+                else { return false }
+                life.requests[pending.request.key] = pending
+                return true
+            }
+        }
+
+        /// Clears the request with this JSON-RPC ID, if tracked.
+        func resolve(rpcID: String) -> UUID? {
+            life.withLock { life in
+                guard let entry = life.requests.first(where: { $0.value.rpcID == rpcID }) else {
+                    return nil
+                }
+                life.requests.removeValue(forKey: entry.key)
+                return entry.key
+            }
+        }
+
+        /// Clears every tracked request.
+        func resolveAll() -> [UUID] {
+            life.withLock { life in
+                defer { life.requests.removeAll() }
+                return Array(life.requests.keys)
+            }
+        }
+
+        /// Answers one tracked request on this connection's server socket. The
+        /// entry goes first, so a second call finds nothing.
+        func inject(key: UUID, decision: CanvasAgentRequestDecision) -> InjectOutcome {
+            upstreamWrite.withLock { fragmented in
+                let known: PendingRequest? = life.withLock { life in
+                    guard !life.retired, !life.closed else { return nil }
+                    return life.requests[key]
+                }
+                guard let pending = known else { return .unknown }
+                guard !fragmented else { return .busy }
+                guard
+                    let frame = CanvasCodexProxy.answerFrame(
+                        rpcID: pending.rpcID, request: pending.request, decision: decision,
+                        permissions: pending.permissions)
+                else { return .refused }
+                // Take the entry and a hold on the descriptors in one step.
+                let claimed = life.withLock { life -> Bool in
+                    guard !life.retired, !life.closed,
+                        life.requests.removeValue(forKey: key) != nil
+                    else { return false }
+                    life.workers += 1
+                    return true
+                }
+                guard claimed else { return .unknown }
+                defer { workerEnded() }
+                do {
+                    try CanvasCodexProxy.write(frame, to: upstream)
+                    return .sent
+                } catch {
+                    // A partly written frame leaves the stream unusable.
+                    retire()
+                    return .refused
+                }
+            }
+        }
     }
 
     private let state = Mutex(State())
@@ -123,19 +255,23 @@ final class CanvasCodexProxy: Sendable {
     private let threadID: String
     private let suspend: @Sendable (SuspensionReason) throws -> Void
     private let resume: (@Sendable () throws -> Void)?
+    private let approvals: Approvals?
     private static let maximumBytes = 256 * 1_024
 
     /// `resume` tells the app that a reconnected TUI is back on the bound thread.
-    /// Without it, a link lost in transport stays suspended.
+    /// Without it, a link lost in transport stays suspended. `approvals` hears
+    /// about server requests that Rafu may answer; without it the proxy tracks none.
     init(
         frontend: String, backend: String, threadID: String,
         resume: (@Sendable () throws -> Void)? = nil,
+        approvals: Approvals? = nil,
         suspend: @escaping @Sendable (SuspensionReason) throws -> Void
     ) throws {
         self.backend = backend
         self.threadID = threadID
         self.suspend = suspend
         self.resume = resume
+        self.approvals = approvals
         let listener = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
         guard listener >= 0 else { throw ProxyError.transport }
         do {
@@ -222,7 +358,11 @@ final class CanvasCodexProxy: Sendable {
             Darwin.close(upstream)
             return
         }
-        let connection = Connection(frontend: frontend, upstream: upstream)
+        let clear = approvals?.clear
+        let connection = Connection(frontend: frontend, upstream: upstream) { keys in
+            guard let clear else { return }
+            for key in keys { clear(key) }
+        }
         let accepted = state.withLock { state in
             guard !state.stopped else { return false }
             // Newest wins. The replaced connection ends without a loss.
@@ -288,7 +428,11 @@ final class CanvasCodexProxy: Sendable {
         }
         // The relay parses every frame as plain JSON text, so it must not let
         // the TUI negotiate a compressed stream (RSV bits, binary frames).
-        try Self.write(outgoing ? Self.withoutCompressionOffer(header) : header, to: destination)
+        if outgoing {
+            try connection.writeUpstream(Self.withoutCompressionOffer(header))
+        } else {
+            try Self.write(header, to: destination)
+        }
         var message = Data()
         var fragmented = false
         var messageDeadline: UInt64?
@@ -349,6 +493,13 @@ final class CanvasCodexProxy: Sendable {
                             connection.answer(identifier)
                         }
                     }
+                    // Announced before the frame is forwarded, so the supervisor
+                    // always hears of a request before it hears the TUI answer it.
+                    if let request = trackApprovals(
+                        object, connection: connection, outgoing: outgoing)
+                    {
+                        approvals?.request(request)
+                    }
                     if Self.requiresSuspension(object, threadID: threadID, outgoing: outgoing) {
                         try revoke(.sessionChanged, cause: .sessionChange)
                     } else if outgoing, Self.targetsThread(object, threadID: threadID) {
@@ -363,9 +514,129 @@ final class CanvasCodexProxy: Sendable {
                     throw ProxyError.malformedFrame
                 }
             }
-            try Self.write(frame, to: destination)
+            if outgoing {
+                // Text and continuation frames set the fragmentation state; a
+                // control frame inside a fragmented message does not change it.
+                let continues: Bool? = opcode <= 1 ? fragmented : nil
+                try connection.writeUpstream(frame, messageContinues: continues)
+            } else {
+                try Self.write(frame, to: destination)
+            }
             if opcode == 8 { return }
         }
+    }
+
+    // MARK: Answering server requests
+
+    private static let approvalMethods: Set<String> = [
+        "item/commandExecution/requestApproval", "item/fileChange/requestApproval",
+        "item/permissions/requestApproval", "item/tool/requestUserInput",
+    ]
+
+    /// Follows server requests for the bound thread. Returns the request to hand
+    /// to the supervisor, which hears it before the TUI does. It never changes
+    /// what is forwarded. An unbound session
+    /// (empty thread ID) tracks nothing.
+    private func trackApprovals(
+        _ object: [String: Any], connection: Connection, outgoing: Bool
+    ) -> CanvasAgentRequest? {
+        guard let approvals, !threadID.isEmpty else { return nil }
+        let method = object["method"] as? String
+        if outgoing {
+            // The TUI answered one itself: a response has an ID and no method.
+            if method == nil, let identifier = Self.requestID(object["id"]),
+                let key = connection.resolve(rpcID: identifier)
+            {
+                approvals.clear(key)
+            }
+            return nil
+        }
+        guard let method, let params = object["params"] as? [String: Any],
+            params["threadId"] as? String == threadID
+        else { return nil }
+        switch method {
+        case "serverRequest/resolved":
+            if let identifier = Self.requestID(params["requestId"]),
+                let key = connection.resolve(rpcID: identifier)
+            {
+                approvals.clear(key)
+            }
+        case "turn/completed":
+            for key in connection.resolveAll() { approvals.clear(key) }
+        case _ where Self.approvalMethods.contains(method):
+            guard let identifier = Self.integerOrStringID(object["id"]),
+                let request = CanvasAgentRequest.parse(method: method, params: params)
+            else { return nil }
+            var profile: Data?
+            if let permissions = params["permissions"] as? [String: Any] {
+                profile = try? JSONSerialization.data(
+                    withJSONObject: permissions, options: [.sortedKeys])
+            }
+            let pending = PendingRequest(rpcID: identifier, request: request, permissions: profile)
+            return connection.track(pending) ? request : nil
+        default:
+            break
+        }
+        return nil
+    }
+
+    /// Answers a tracked request on the active connection, as the TUI would. It
+    /// refuses unless the link is live and the connection is the active one.
+    /// The request and the answer stay in memory and are never logged.
+    func inject(key: UUID, decision: CanvasAgentRequestDecision) -> InjectOutcome {
+        let connection = state.withLock { state -> Connection? in
+            guard !state.stopped, state.link == .live else { return nil }
+            return state.active
+        }
+        guard let connection else { return .unknown }
+        return connection.inject(key: key, decision: decision)
+    }
+
+    /// The masked text frame `{"id": <id>, "result": {...}}`, or nil when the
+    /// decision is not valid for the request. A server expects masked frames
+    /// from its client.
+    static func answerFrame(
+        rpcID: String, request: CanvasAgentRequest, decision: CanvasAgentRequestDecision,
+        permissions: Data?
+    ) -> Data? {
+        let requested = permissions.flatMap { try? JSONSerialization.jsonObject(with: $0) }
+        guard let result = request.result(for: decision, requestedPermissions: requested),
+            let body = try? JSONSerialization.data(
+                withJSONObject: result, options: [.sortedKeys, .withoutEscapingSlashes])
+        else { return nil }
+        var payload = Data(#"{"id":"#.utf8)
+        payload.append(Data(rpcID.utf8))
+        payload.append(Data(#","result":"#.utf8))
+        payload.append(body)
+        payload.append(UInt8(ascii: "}"))
+        guard payload.count <= maximumBytes else { return nil }
+        var frame = Data([0x81])
+        switch payload.count {
+        case ..<126:
+            frame.append(0x80 | UInt8(payload.count))
+        case ..<65_536:
+            frame.append(0x80 | 126)
+            frame.append(contentsOf: [UInt8(payload.count >> 8), UInt8(payload.count & 0xFF)])
+        default:
+            frame.append(0x80 | 127)
+            for shift in stride(from: 56, through: 0, by: -8) {
+                frame.append(UInt8((payload.count >> shift) & 0xFF))
+            }
+        }
+        let mask = (0..<4).map { _ in UInt8.random(in: 0...255) }
+        frame.append(contentsOf: mask)
+        for (index, byte) in payload.enumerated() { frame.append(byte ^ mask[index % 4]) }
+        return frame
+    }
+
+    /// The raw JSON text of an ID that is a string or an integer. Other shapes
+    /// (booleans, fractions) are never answered.
+    private static func integerOrStringID(_ value: Any?) -> String? {
+        if let number = value as? NSNumber {
+            guard CFGetTypeID(number) != CFBooleanGetTypeID(), !CFNumberIsFloatType(number)
+            else { return nil }
+        }
+        return requestID(value)
     }
 
     /// Names why a worker ended, for the supervisor's one line at exit.

@@ -212,9 +212,15 @@ public nonisolated enum CanvasCodexSession {
                     }
                 }
             }
+            // Approvals and questions for the bound thread reach the app only
+            // for a thread Rafu prepared. An explicit resume stays unbound.
+            let approvals = preparedThread.map { thread in
+                CanvasCodexApprovalSupervisor(
+                    token: token, endpoint: endpoint, threadID: thread, exchange: exchange)
+            }
             let proxy = try CanvasCodexProxy(
                 frontend: frontend, backend: endpoint, threadID: preparedThread ?? "",
-                resume: resume
+                resume: resume, approvals: approvals?.hooks
             ) { reason in
                 let request = CanvasBridgeRequest(
                     token: token, operation: "suspend", provider: "codex", endpoint: endpoint,
@@ -223,7 +229,9 @@ public nonisolated enum CanvasCodexSession {
                     throw SessionError.deliveryFailed
                 }
             }
+            approvals?.attach(proxy)
             defer { proxy.stop() }
+            defer { approvals?.stop() }
             phase = .terminal
             let terminal = try spawn(
                 executable: executable,
