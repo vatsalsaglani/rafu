@@ -452,7 +452,7 @@ final class NotchCompanionModel: NSObject {
 
     static func terminalInput(
         for controller: WorkspaceTerminalController, windowID: UUID? = nil,
-        boardID: UUID? = nil, cardID: UUID? = nil
+        boardID: UUID? = nil, cardID: UUID? = nil, cardTitle: String? = nil
     ) -> NotchTerminalInput {
         let store = AgentActivityStore.shared
         let session = store.trackedSession(for: controller)
@@ -465,6 +465,7 @@ final class NotchCompanionModel: NSObject {
             cause: controller.lastAttentionCause,
             boardID: boardID,
             cardID: cardID,
+            cardTitle: cardTitle,
             windowID: windowID,
             trackedPhase: AgentTrackedPhase.terminalPhase(
                 session: session, status: controller.status, now: store.now),
@@ -515,9 +516,29 @@ final class NotchCompanionModel: NSObject {
     /// Up next for `host`: Rafu agents that need the person, plus outside
     /// agents that need them when `host` is the surface in use.
     func upNextRows(for host: CompanionHost) -> [NotchAgentRow] {
-        Self.upNextRows(
-            rafu: allAgentRows,
+        let rafu = allAgentRows
+        // Card names are read only when a row needs the person, so an idle
+        // companion does not observe the boards.
+        let titled = rafu.contains { $0.phase.needsAttention } ? preferringCardTitles(rafu) : rafu
+        return Self.upNextRows(
+            rafu: titled,
             outside: host == outsideNoticesHost ? externalAgentRows : [])
+    }
+
+    /// `rows` with the name of the Ensemble node that hosts each agent, when
+    /// the person named it. Only the title changes: the rows keep no board or
+    /// node, so Up next opens an agent the same way as before.
+    private func preferringCardTitles(_ rows: [NotchAgentRow]) -> [NotchAgentRow] {
+        var cardTitles: [UUID: [UUID: String]] = [:]
+        return rows.map { row in
+            guard row.phase.needsAttention, let windowID = row.windowID else { return row }
+            if cardTitles[windowID] == nil {
+                let session = entries.first(where: { $0.id == windowID })?.session
+                cardTitles[windowID] =
+                    session.map { Self.placements(in: $0).cards.mapValues(\.cardTitle) } ?? [:]
+            }
+            return row.preferringCardTitle(cardTitles[windowID]?[row.id])
+        }
     }
 
     /// Pure core of `upNextRows(for:)`: every row that needs the person,
@@ -538,8 +559,13 @@ final class NotchCompanionModel: NSObject {
         return Self.windowAgents(for: session, windowID: entryID)
     }
 
-    static func windowAgents(for session: WorkspaceSession, windowID: UUID) -> NotchWindowAgents {
-        var placement: [UUID: (board: UUID, card: UUID)] = [:]
+    /// Where each terminal of `session` sits: the open Ensembles, and for a
+    /// terminal on a node, the board, the node, and the node's stored name.
+    private static func placements(in session: WorkspaceSession) -> (
+        boards: [NotchBoardInput],
+        cards: [UUID: (board: UUID, card: UUID, cardTitle: String)]
+    ) {
+        var placement: [UUID: (board: UUID, card: UUID, cardTitle: String)] = [:]
         var boards: [NotchBoardInput] = []
         let open = session.canvas.boards.values.sorted {
             $0.title.localizedStandardCompare($1.title) == .orderedAscending
@@ -554,16 +580,22 @@ final class NotchCompanionModel: NSObject {
                 else { continue }
                 for pane in group.panes {
                     if let sessionID = pane.sessionID {
-                        placement[sessionID] = (board.id.rawValue, card.id.rawValue)
+                        placement[sessionID] = (board.id.rawValue, card.id.rawValue, card.title)
                     }
                 }
             }
         }
+        return (boards, placement)
+    }
+
+    static func windowAgents(for session: WorkspaceSession, windowID: UUID) -> NotchWindowAgents {
+        let (boards, placement) = placements(in: session)
         let terminals = session.terminal.sessions.map { controller in
             terminalInput(
                 for: controller, windowID: windowID,
                 boardID: placement[controller.id]?.board,
-                cardID: placement[controller.id]?.card)
+                cardID: placement[controller.id]?.card,
+                cardTitle: placement[controller.id]?.cardTitle)
         }
         return NotchWindowAgents.build(boards: boards, terminals: terminals)
     }

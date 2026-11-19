@@ -222,3 +222,43 @@ func mascotEyePoses() {
     #expect(working.height < idle.height)
     #expect(RafuMascotGeometry.eyePose(for: .replyReady) == idle)
 }
+
+// MARK: - Card titles
+
+@Test("NotchAgentRow.rows: a terminal on an Ensemble node shows the node's stored name")
+func rowsPreferTheCardTitle() throws {
+    let board = UUID()
+    let card = UUID()
+    let onCard = NotchTerminalInput(
+        id: UUID(), title: "Codex", cli: .codex, status: .bell, boardID: board, cardID: card,
+        cardTitle: "Fix login bug")
+    let loose = NotchTerminalInput(
+        id: UUID(), title: "Codex", cli: .codex, status: .bell, cardTitle: "Ignored")
+    let rows = NotchAgentRow.rows(from: [onCard, loose])
+    #expect(rows.map(\.title) == ["Fix login bug", "Codex"])
+}
+
+@Test("NotchAgentRow.preferredTitle: automatic and empty card names give way to the agent title")
+func cardTitleFallback() {
+    #expect(NotchAgentRow.preferredTitle(cardTitle: nil, fallback: "rafu") == "rafu")
+    #expect(NotchAgentRow.preferredTitle(cardTitle: "  ", fallback: "rafu") == "rafu")
+    #expect(NotchAgentRow.preferredTitle(cardTitle: "Terminal", fallback: "rafu") == "rafu")
+    #expect(NotchAgentRow.preferredTitle(cardTitle: "Terminal Group 2", fallback: "rafu") == "rafu")
+    #expect(
+        NotchAgentRow.preferredTitle(cardTitle: " Fix login bug ", fallback: "rafu")
+            == "Fix login bug")
+}
+
+@Test("NotchAgentRow.preferringCardTitle changes only the title")
+func preferringCardTitleKeepsOtherFields() {
+    let id = UUID()
+    let window = UUID()
+    let original = NotchAgentRow(
+        id: id, title: "Codex", cli: .codex, phase: .needsYou, windowID: window)
+    let renamed = original.preferringCardTitle("Fix login bug")
+    #expect(renamed.title == "Fix login bug")
+    #expect(renamed.id == id && renamed.windowID == window)
+    #expect(renamed.cli == .codex && renamed.phase == .needsYou)
+    #expect(renamed.boardID == nil && renamed.cardID == nil)
+    #expect(original.preferringCardTitle(nil) == original)
+}

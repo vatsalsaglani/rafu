@@ -97,6 +97,9 @@ nonisolated struct NotchTerminalInput: Equatable, Sendable {
     let cause: TerminalAttentionCause?
     let boardID: UUID?
     let cardID: UUID?
+    /// The name stored on the Ensemble node that hosts the terminal, `nil`
+    /// outside an Ensemble. `NotchAgentRow.rows(from:)` prefers it to `title`.
+    let cardTitle: String?
     /// The notch's id for the workspace window that owns the terminal.
     let windowID: UUID?
     /// The phase from agent hooks (`AgentActivityStore`), when a hook
@@ -114,6 +117,7 @@ nonisolated struct NotchTerminalInput: Equatable, Sendable {
         cause: TerminalAttentionCause? = nil,
         boardID: UUID? = nil,
         cardID: UUID? = nil,
+        cardTitle: String? = nil,
         windowID: UUID? = nil,
         trackedPhase: NotchAgentPhase? = nil,
         subagents: [NotchSubagentEntry] = []
@@ -126,6 +130,7 @@ nonisolated struct NotchTerminalInput: Equatable, Sendable {
         self.cause = cause
         self.boardID = boardID
         self.cardID = cardID
+        self.cardTitle = cardTitle
         self.windowID = windowID
         self.trackedPhase = trackedPhase
         self.subagents = subagents
@@ -223,7 +228,9 @@ nonisolated struct NotchAgentRow: Identifiable, Equatable, Sendable {
             guard let cli = terminal.cli else { return nil }
             return NotchAgentRow(
                 id: terminal.id,
-                title: terminal.title,
+                title: terminal.cardID == nil
+                    ? terminal.title
+                    : preferredTitle(cardTitle: terminal.cardTitle, fallback: terminal.title),
                 cli: cli,
                 phase: terminal.trackedPhase
                     ?? NotchAgentPhase.resolve(
@@ -235,6 +242,28 @@ nonisolated struct NotchAgentRow: Identifiable, Equatable, Sendable {
                 windowID: terminal.windowID,
                 subagents: terminal.subagents)
         }
+    }
+
+    /// The name the person gave an Ensemble node, when there is one. An empty
+    /// name and an automatic one ("Terminal", "Terminal Group 2") say nothing
+    /// about the work, so the agent's own title stays.
+    static func preferredTitle(cardTitle: String?, fallback: String) -> String {
+        guard let cardTitle else { return fallback }
+        let trimmed = cardTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !TerminalNaming.isAutomaticGroupName(trimmed) else {
+            return fallback
+        }
+        return trimmed
+    }
+
+    /// The same row with the Ensemble node's name as its title
+    /// (`preferredTitle`). Every other field stays.
+    func preferringCardTitle(_ cardTitle: String?) -> NotchAgentRow {
+        NotchAgentRow(
+            id: id, title: Self.preferredTitle(cardTitle: cardTitle, fallback: title), cli: cli,
+            phase: phase, boardID: boardID, cardID: cardID, windowID: windowID,
+            subagents: subagents, detail: detail, updatedAt: updatedAt,
+            lastMessage: lastMessage, sessionSuffix: sessionSuffix)
     }
 
     /// Most urgent first. Equal urgency keeps the input order.
