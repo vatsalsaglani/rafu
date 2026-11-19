@@ -20,10 +20,12 @@ nonisolated enum TabClickIntent: Equatable, Sendable {
         return .selectAndRename
     }
 
-    /// The intent of the event that is being handled now.
+    /// The intent of the event that is being handled now. The click count is
+    /// read only from a mouse event: a tap on a touch screen, a key or a menu
+    /// action has none, and asking for it raises (`EventClickCount`).
     @MainActor
     static func current() -> Self {
         let event = NSApp?.currentEvent
-        return resolve(clickCount: event?.clickCount ?? 1, eventType: event?.type)
+        return resolve(clickCount: EventClickCount.of(event), eventType: event?.type)
     }
 }

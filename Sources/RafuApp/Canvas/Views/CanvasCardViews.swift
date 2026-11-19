@@ -715,7 +715,10 @@ struct CanvasCardShell: View {
 
     private func finishClick(at location: CGPoint) {
         let flags = NSEvent.modifierFlags
-        let clicks = NSApp.currentEvent?.clickCount ?? 1
+        // A tap on a touch screen ends this gesture inside a direct-touch
+        // event, which has no click count: reading it raised and froze the
+        // window (`EventClickCount`). A tap counts as one click.
+        let clicks = EventClickCount.current()
         focusBoard()
         if flags.contains(.command) || flags.contains(.shift) {
             toggleMembership()
