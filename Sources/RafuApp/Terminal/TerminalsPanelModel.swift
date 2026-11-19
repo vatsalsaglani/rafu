@@ -134,12 +134,21 @@ nonisolated enum TerminalSessionPresentation {
     ///   own name ("Claude Code", "Codex").
     /// - With an agent and a meaningful title (a task name such as
     ///   "✳ Fix tests"), that title.
+    ///
+    /// For Codex and Claude Code the title is first cleaned
+    /// (`cleanAgentTitle`): both agents put a status badge and the prepared
+    /// thread name in the terminal title ("[ ! ] Action Required | Rafu
+    /// terminal"), which says nothing about the work.
     static func title(
         displayName: String, hasUserName: Bool, provider: ConductorCLIID?, shellName: String
     ) -> String {
         guard !hasUserName, let provider else { return displayName }
-        return isGenericTitle(displayName, shellName: shellName, provider: provider)
-            ? provider.displayName : displayName
+        let candidate =
+            cleansTitles(of: provider)
+            ? cleanAgentTitle(displayName, provider: provider, shellName: shellName)
+            : displayName
+        return isGenericTitle(candidate, shellName: shellName, provider: provider)
+            ? provider.displayName : candidate
     }
 
     /// For a surface with its own stored name (an Ensemble node, a Terminal
@@ -148,10 +157,66 @@ nonisolated enum TerminalSessionPresentation {
     static func agentTitle(reportedTitle: String?, provider: ConductorCLIID, shellName: String?)
         -> String
     {
-        guard let reportedTitle,
-            !isGenericTitle(reportedTitle, shellName: shellName, provider: provider)
-        else { return provider.displayName }
-        return reportedTitle
+        guard let reportedTitle else { return provider.displayName }
+        let candidate =
+            cleansTitles(of: provider)
+            ? cleanAgentTitle(reportedTitle, provider: provider, shellName: shellName)
+            : reportedTitle
+        return isGenericTitle(candidate, shellName: shellName, provider: provider)
+            ? provider.displayName : candidate
+    }
+
+    /// Codex and Claude Code report titles with a status badge and Rafu's
+    /// prepared thread name; the other agents do not.
+    private static func cleansTitles(of provider: ConductorCLIID) -> Bool {
+        provider == .codex || provider == .claudeCode
+    }
+
+    /// Words an agent puts in a title segment to show its state.
+    private static let statusSegments: Set<String> = [
+        "action required", "working", "ready", "done", "waiting",
+    ]
+
+    /// The name of the Codex thread Rafu prepares for a terminal
+    /// (`CanvasCodexRPC`). It is the same for every terminal.
+    private static let preparedThreadName = "rafu terminal"
+
+    /// `title` without the parts that are not about the work. The agent
+    /// separates the parts of its title with " | ". This drops:
+    /// - a status badge ("[ ! ]", "[ ]") and a status word ("Action
+    ///   Required", "Working", "Ready", "Done", "Waiting");
+    /// - the prepared thread name ("Rafu terminal");
+    /// - a path and any other generic part (`isGenericTitle`).
+    ///
+    /// A badge in front of real text is cut off and the text stays. The
+    /// parts that stay keep their order, joined by " | ". When nothing stays,
+    /// the result is the agent's own name. A title with no " | " and no badge
+    /// stays unchanged unless it is generic.
+    static func cleanAgentTitle(_ title: String, provider: ConductorCLIID, shellName: String? = nil)
+        -> String
+    {
+        let kept = title.components(separatedBy: " | ").compactMap { raw -> String? in
+            var segment = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let rest = statusBadgeRemainder(segment) { segment = rest }
+            guard !segment.isEmpty else { return nil }
+            let lowered = segment.lowercased()
+            let words = String(lowered.drop(while: { !$0.isLetter && !$0.isNumber }))
+            if statusSegments.contains(words) || words == preparedThreadName { return nil }
+            if isGenericTitle(segment, shellName: shellName, provider: provider) { return nil }
+            return segment
+        }
+        return kept.isEmpty ? provider.displayName : kept.joined(separator: " | ")
+    }
+
+    /// The text after a leading status badge: "[", at most one character,
+    /// "]". `nil` when `segment` has no badge.
+    private static func statusBadgeRemainder(_ segment: String) -> String? {
+        guard segment.hasPrefix("["), let close = segment.firstIndex(of: "]") else { return nil }
+        let inner = segment[segment.index(after: segment.startIndex)..<close]
+            .trimmingCharacters(in: .whitespaces)
+        guard inner.count <= 1 else { return nil }
+        return String(segment[segment.index(after: close)...])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// `true` for a title that says nothing an agent's own name would not:

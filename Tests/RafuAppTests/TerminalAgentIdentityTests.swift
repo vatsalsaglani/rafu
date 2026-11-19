@@ -212,6 +212,75 @@ struct TerminalAgentIdentityTests {
                 reportedTitle: "Review diff", provider: .codex, shellName: nil) == "Review diff")
     }
 
+    // MARK: - Clean agent titles
+
+    @Test(
+        "cleanAgentTitle drops status badges, the prepared thread name, and paths",
+        arguments: [
+            ("[ ! ] Action Required | Rafu terminal | rafu", "rafu"),
+            ("[ ! ] Action Required | Rafu terminal", "Codex"),
+            ("[ ] Working | Rafu terminal | Fix login bug", "Fix login bug"),
+            ("[ ! ] Action Required | Rafu terminal | ~/work/rafu", "Codex"),
+            ("Ready | Rafu terminal", "Codex"),
+            ("[!] Done | rafu | Rafu terminal", "rafu"),
+            ("Waiting | rafu | Fix tests", "rafu | Fix tests"),
+            ("[ ! ] Fix tests | Rafu terminal", "Fix tests"),
+            ("Rafu terminal", "Codex"),
+            ("", "Codex"),
+            ("✳ Rafu orb redesign", "✳ Rafu orb redesign"),
+            ("Refactor parser", "Refactor parser"),
+        ])
+    func cleanCodexTitle(raw: String, expected: String) {
+        #expect(TerminalSessionPresentation.cleanAgentTitle(raw, provider: .codex) == expected)
+    }
+
+    @Test("cleanAgentTitle falls back to the provider's own name")
+    func cleanTitleFallsBackToProviderName() {
+        #expect(
+            TerminalSessionPresentation.cleanAgentTitle(
+                "[ ! ] Action Required | Rafu terminal", provider: .claudeCode) == "Claude Code")
+        #expect(
+            TerminalSessionPresentation.cleanAgentTitle(
+                "[ ] | /tmp | ~/work/rafu", provider: .codex)
+                == "Codex")
+    }
+
+    @Test("Codex and Claude titles are cleaned where the terminal name is built")
+    func cleanedTitlesReachTheTerminalName() {
+        #expect(
+            TerminalSessionPresentation.title(
+                displayName: "[ ! ] Action Required | Rafu terminal | rafu", hasUserName: false,
+                provider: .codex, shellName: "zsh") == "rafu")
+        #expect(
+            TerminalSessionPresentation.title(
+                displayName: "[ ! ] Action Required | Rafu terminal", hasUserName: false,
+                provider: .codex, shellName: "zsh") == "Codex")
+        #expect(
+            TerminalSessionPresentation.title(
+                displayName: "✳ Rafu orb redesign", hasUserName: false, provider: .claudeCode,
+                shellName: "zsh") == "✳ Rafu orb redesign")
+        #expect(
+            TerminalSessionPresentation.agentTitle(
+                reportedTitle: "[ ] Working | Rafu terminal | Review diff", provider: .codex,
+                shellName: "zsh") == "Review diff")
+        #expect(
+            TerminalSessionPresentation.agentTitle(
+                reportedTitle: "[ ! ] Action Required | Rafu terminal", provider: .codex,
+                shellName: nil) == "Codex")
+    }
+
+    @Test("A user name and another agent keep their title")
+    func userNameAndOtherAgentsAreNotCleaned() {
+        let raw = "[ ! ] Action Required | Rafu terminal"
+        #expect(
+            TerminalSessionPresentation.title(
+                displayName: raw, hasUserName: true, provider: .codex, shellName: "zsh") == raw)
+        #expect(
+            TerminalSessionPresentation.title(
+                displayName: raw, hasUserName: false, provider: .geminiCLI, shellName: "zsh")
+                == raw)
+    }
+
     // MARK: - Process mapping
 
     @Test(
