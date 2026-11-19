@@ -12,6 +12,8 @@ Round-2 additions: multi-folder workspaces (`Sources/RafuApp/Workspace/`); Agent
 
 Only report to me in ASD-STE100 Simplified Technical English
 
+Never refer to an ADR, phase, work package, gate, question or ticket by number or ID alone. The user does not remember them. Always say what it is in words and, when possible, give a short example. Wrong: "ADR 0041 needs an update." Right: "The decision record about answering agent requests from the Up next row (ADR 0041) needs an update." The number may follow in brackets. This applies to reports, plan notes and briefs written for agents.
+
 
 ## Sources of truth
 
