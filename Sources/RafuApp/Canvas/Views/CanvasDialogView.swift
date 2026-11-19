@@ -13,6 +13,10 @@ struct CanvasDialogView: View {
             CanvasConnectionDialog(boardID: id, edgeID: edge, session: session)
         case .library:
             CanvasLibrarySheet(session: session)
+        case .deleteSaved(let item):
+            CanvasDeleteConfirmation(item: item, session: session) {
+                session.canvasDialog = nil
+            }
         case .shortcuts:
             CanvasShortcutsSheet(session: session)
         case .reload(let id):
@@ -100,6 +104,7 @@ struct CanvasBasicDialogView: View {
         switch dialog {
         case .newBoard: "New Ensemble"
         case .library: "Open Ensemble"
+        case .deleteSaved: "Delete Ensemble"
         case .renameBoard: "Rename Ensemble"
         case .renameCard: "Rename Card"
         case .web: "Add Web App"
@@ -154,7 +159,7 @@ struct CanvasBasicDialogView: View {
                             ?? "Enter an Ensemble name of 1 to 120 characters."
                         return
                     }
-                case .library, .shortcuts, .reload: break
+                case .library, .deleteSaved, .shortcuts, .reload: break
                 case .renameBoard(let id):
                     try session.canvas.boards[id]?.edit { $0.title = text }
                 case .renameCard(let id, let card):
@@ -261,7 +266,9 @@ struct CanvasLibrarySheet: View {
 
     var body: some View {
         if let pending = session.pendingCanvasDelete {
-            deleteConfirmation(pending)
+            CanvasDeleteConfirmation(item: pending, session: session) {
+                session.pendingCanvasDelete = nil
+            }
         } else {
             library
         }
@@ -348,7 +355,7 @@ struct CanvasLibrarySheet: View {
                     symbol: "magnifyingglass", message: "No Ensemble matches “\(query)”.")
             }
         } else {
-            let openElsewhere = openInOtherWindows()
+            let openElsewhere = session.canvasIDsOpenInOtherWindows()
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 2) {
@@ -388,22 +395,6 @@ struct CanvasLibrarySheet: View {
         }
     }
 
-    private func deleteConfirmation(_ item: CanvasSummary) -> some View {
-        RafuConfirmPopup(
-            symbol: "trash", title: "Delete “\(item.title)”?",
-            message:
-                "This deletes its saved layout and notes. Source files and external apps are not deleted.",
-            actions: [
-                .init("Delete Ensemble", isDestructive: true) {
-                    session.pendingCanvasDelete = nil
-                    Task { _ = await session.canvas.deleteSaved(item) }
-                }
-            ]
-        ) {
-            session.pendingCanvasDelete = nil
-        }
-    }
-
     private var subtitle: String {
         if session.canvas.isLoading, session.canvas.library.isEmpty { return "Loading…" }
         return CanvasLibrarySelection.subtitle(count: session.canvas.library.count)
@@ -421,17 +412,6 @@ struct CanvasLibrarySheet: View {
         return openElsewhere ? "open in another window" : nil
     }
 
-    /// Boards open in another window of the same workspace.
-    private func openInOtherWindows() -> Set<CanvasID> {
-        guard let root = session.rootURL?.standardizedFileURL else { return [] }
-        var ids = Set<CanvasID>()
-        for snapshot in WorkspaceWindowRegistry.shared.sessionSnapshots()
-        where snapshot.session !== session && snapshot.rootURL.standardizedFileURL == root {
-            ids.formUnion(snapshot.session.canvas.boards.keys)
-        }
-        return ids
-    }
-
     private func detail(_ item: CanvasSummary) -> String {
         let count = session.canvas.boards[item.id]?.cards.count ?? item.cardCount
         return CanvasCardSummaryText.libraryDetail(cardCount: count, modified: item.modified)
@@ -445,6 +425,31 @@ struct CanvasLibrarySheet: View {
     private func requestDelete(_ item: CanvasSummary) {
         guard canDelete(item.id) else { return }
         session.pendingCanvasDelete = item
+    }
+}
+
+private struct CanvasDeleteConfirmation: View {
+    let item: CanvasSummary
+    let session: WorkspaceSession
+    let dismiss: () -> Void
+
+    var body: some View {
+        RafuConfirmPopup(
+            symbol: "trash", title: "Delete “\(item.title)”?",
+            message:
+                "This deletes its saved layout and notes. Source files and external apps are not deleted.",
+            actions: [
+                .init("Delete Ensemble", isDestructive: true) {
+                    let root = session.rootURL
+                    dismiss()
+                    Task {
+                        guard session.rootURL == root else { return }
+                        _ = await session.canvas.deleteSaved(item)
+                    }
+                }
+            ],
+            cancel: dismiss
+        )
     }
 }
 

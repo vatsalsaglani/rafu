@@ -189,19 +189,21 @@ struct WorkspaceNavigationRestorationRepairTests {
         #expect(calls.withLock { $0 } == 1)
     }
 
-    @Test("Close flush saves the final navigator and tab state without waiting for debounce")
-    func finalCloseFlush() async throws {
+    @Test(
+        "Close flush saves the final navigator and tab state without waiting for debounce",
+        arguments: [WorkspaceNavigatorMode.sourceControl, .ensemble])
+    func finalCloseFlush(mode: WorkspaceNavigatorMode) async throws {
         let fixture = try RepairFixture(text: "first\n")
         defer { fixture.remove() }
         let session = fixture.session()
         defer { session.descriptor = nil }
         session.openFile(atRelativePath: "file.swift")
         session.navigatorMode = .search
-        session.navigatorMode = .sourceControl
+        session.navigatorMode = mode
         let closeSave = session.flushWorkspaceState()
         await closeSave?.value
         let saved = try #require(try await fixture.store.load())
-        #expect(saved.navigatorMode == .sourceControl)
+        #expect(saved.navigatorMode == mode)
         #expect(saved.openRelativePaths == ["file.swift"])
         #expect(saved.selectedRelativePath == "file.swift")
         #expect(saved.terminalGroupRestoration?.openGroups.isEmpty == true)

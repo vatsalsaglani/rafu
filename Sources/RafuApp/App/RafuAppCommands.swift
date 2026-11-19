@@ -232,6 +232,12 @@ struct RafuAppCommands: Commands {
             .keyboardShortcut("h", modifiers: [.command, .shift])
             .disabled(workspaceSession?.rootURL == nil)
 
+            Button("Show Ensembles") {
+                workspaceSession?.showEnsembles()
+            }
+            .keyboardShortcut("e", modifiers: [.command, .shift])
+            .disabled(workspaceSession?.rootURL == nil)
+
             Divider()
 
             // Rafu Voice (ADR 0035). The menu chord adds ⇧ so it never

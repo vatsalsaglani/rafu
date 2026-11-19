@@ -3,7 +3,7 @@ import SwiftUI
 
 /// The left sidebar's content: whichever section `session.navigatorMode`
 /// selects. Files keeps its own tree view (`WorkspaceSidebarView`); this
-/// hosts the other four sections, each a peer in the same pane.
+/// hosts the other five sections, each a peer in the same pane.
 struct WorkspaceSidebarPanelView: View {
     @Bindable var session: WorkspaceSession
     @Environment(\.rafuTheme) private var theme
@@ -14,7 +14,7 @@ struct WorkspaceSidebarPanelView: View {
             // One sidebar tone for every section, so switching the rail
             // selection never changes the pane's own background — only
             // `WorkspaceSidebarView` painted this before; Search, Source
-            // Control, Terminals, and History now share this same pane.
+            // Control, Terminals, Ensembles, and History now share this same pane.
             .rafuFrameSurface(.sidebar)
     }
 
@@ -29,6 +29,8 @@ struct WorkspaceSidebarPanelView: View {
             SourceControlPanelView(session: session)
         case .terminals:
             WorkspaceTerminalsPanelView(session: session)
+        case .ensemble:
+            CanvasNavigatorPanelView(session: session)
         case .history:
             AgentHistoryPanelView(session: session)
         }
@@ -36,7 +38,7 @@ struct WorkspaceSidebarPanelView: View {
 }
 
 /// The one always-visible left icon rail (user decision 2026-10-19): every
-/// navigator mode (Files, Search, Source Control, Terminals, History) lives
+/// navigator mode (Files, Search, Source Control, Terminals, Ensembles, History) lives
 /// here, selecting which section the left sidebar shows. This supersedes
 /// ADR 0003's right-rail mode placement — there is no right rail and no
 /// right utility panel anymore. The rail itself is never gated on

@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// The Ensemble dialogs and confirmations of one workspace window, in the
-/// Rafu popup language (ADR 0033). Delete Saved Ensemble asks inside Open
-/// Ensemble (`CanvasLibrarySheet`), so it is not here.
+/// Rafu popup language (ADR 0033). The Open Ensemble sheet also hosts its
+/// own delete confirmation so Cancel returns to the library.
 struct CanvasPresentations: ViewModifier {
     @Bindable var session: WorkspaceSession
     func body(content: Content) -> some View {
