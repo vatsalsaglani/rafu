@@ -717,6 +717,15 @@ struct CommandPaletteView: View {
                 session.showNavigator(.sourceControl)
             },
             .init(
+                title: "Show Ensembles", symbolName: WorkspaceNavigatorMode.ensemble.symbolName,
+                keywords: ["board", "nodes", "panel"], shortcut: "⌘⇧E",
+                isEnabled: session.rootURL != nil
+            ) {
+                guard session.rootURL != nil else { return }
+                dismiss()
+                session.showEnsembles()
+            },
+            .init(
                 title: "Show Agent History", symbolName: "clock.arrow.circlepath",
                 keywords: ["claude", "codex", "chat", "sessions", "transcripts"],
                 shortcut: "⌘⇧H"

@@ -291,7 +291,8 @@ struct CanvasFindPanel: View {
 
     private func refresh() {
         let built = CanvasBoardSearchIndex(
-            cards: board.cards, connections: board.connections, terminal: terminalInfo)
+            cards: board.cards, connections: board.connections,
+            terminal: session.canvasSearchTerminalInfo(for:))
         index = built
         // A filter whose chip is no longer on the board (the card was
         // removed) would hide every card with no chip to turn it off.
@@ -309,24 +310,6 @@ struct CanvasFindPanel: View {
         results = built.matches(query, filter: filter)
         if let highlightedID, results.contains(where: { $0.id == highlightedID }) { return }
         highlightedID = results.first?.id
-    }
-
-    /// The live pane behind a terminal card: the agent CLI it runs (the same
-    /// rule as the card header) and the name its header shows.
-    private func terminalInfo(_ card: CanvasCard) -> CanvasSearchTerminalInfo? {
-        guard case .terminal(let groupID) = card.content,
-            let pane = session.terminal.terminalGroup(groupID)?.panes.first
-        else { return nil }
-        var provider: ConductorCLIID?
-        if case .directAgentTerminal(let direct) = pane.runtimeKind {
-            provider = direct
-        } else if pane.status == .live {
-            provider = session.terminal.terminalController(for: pane.id)?.resolvedAgentProvider
-        }
-        let shown =
-            TerminalNaming.isAutomaticGroupName(card.title)
-            ? pane.explicitUserName?.rawValue : nil
-        return CanvasSearchTerminalInfo(providerName: provider?.displayName, shownTitle: shown)
     }
 
     /// Reads `results` when the key arrives, so a key pressed right after a

@@ -15,6 +15,7 @@ nonisolated enum WorkspaceNavigatorMode: String, CaseIterable, Codable, Sendable
     case search
     case sourceControl
     case terminals
+    case ensemble
     case history
 
     var title: String {
@@ -23,6 +24,7 @@ nonisolated enum WorkspaceNavigatorMode: String, CaseIterable, Codable, Sendable
         case .search: "Search"
         case .sourceControl: "Source Control"
         case .terminals: "Terminals"
+        case .ensemble: "Ensembles"
         case .history: "History"
         }
     }
@@ -33,6 +35,7 @@ nonisolated enum WorkspaceNavigatorMode: String, CaseIterable, Codable, Sendable
         case .search: "magnifyingglass"
         case .sourceControl: "arrow.triangle.branch"
         case .terminals: "terminal"
+        case .ensemble: CanvasBoardState.ensembleSymbol
         case .history: "clock.arrow.circlepath"
         }
     }

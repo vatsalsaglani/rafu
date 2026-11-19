@@ -224,7 +224,7 @@ struct WorkbenchDeckPresentationTests {
         #expect(rail.contains("ForEach(WorkspaceNavigatorMode.allCases, id: \\.self)"))
         #expect(
             WorkspaceNavigatorMode.allCases == [
-                .files, .search, .sourceControl, .terminals, .history,
+                .files, .search, .sourceControl, .terminals, .ensemble, .history,
             ])
     }
 

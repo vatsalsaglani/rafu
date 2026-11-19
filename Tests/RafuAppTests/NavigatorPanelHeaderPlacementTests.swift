@@ -99,6 +99,7 @@ struct NavigatorPanelHeaderPlacementTests {
         case .search: "Sources/RafuApp/Views/WorkspaceNavigatorView.swift"
         case .sourceControl: "Sources/RafuApp/Views/GitInspectorView.swift"
         case .terminals: "Sources/RafuApp/Views/WorkspaceTerminalsPanelView.swift"
+        case .ensemble: "Sources/RafuApp/Canvas/Views/CanvasNavigatorPanelView.swift"
         case .history: "Sources/RafuApp/AgentHistory/AgentHistoryPanelView.swift"
         }
     }
@@ -109,6 +110,7 @@ struct NavigatorPanelHeaderPlacementTests {
         case .search: "WorkspaceSearchNavigatorView"
         case .sourceControl: "SourceControlPanelView"
         case .terminals: "WorkspaceTerminalsPanelView"
+        case .ensemble: "CanvasNavigatorPanelView"
         case .history: "AgentHistoryPanelView"
         }
     }

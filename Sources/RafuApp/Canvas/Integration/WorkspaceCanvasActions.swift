@@ -6,6 +6,7 @@ import UniformTypeIdentifiers
 nonisolated enum CanvasDialog: Identifiable {
     case newBoard
     case library
+    case deleteSaved(CanvasSummary)
     case renameBoard(CanvasID)
     case renameCard(CanvasID, CanvasCardID)
     case web(CanvasID)
@@ -18,6 +19,7 @@ nonisolated enum CanvasDialog: Identifiable {
         switch self {
         case .newBoard: "new"
         case .library: "library"
+        case .deleteSaved(let item): "delete-\(item.id.rawValue)"
         case .renameBoard(let id): "rename-\(id.rawValue)"
         case .renameCard(let board, let card): "rename-\(board.rawValue)-\(card.rawValue)"
         case .web(let id): "web-\(id.rawValue)"
