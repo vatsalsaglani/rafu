@@ -813,3 +813,27 @@ Details: `docs/references/ensemble-agent-terminal-tools.md` section 9 and
   reload re-present (D6) was not confirmed in the app; the hit test into a
   SwiftUI `ScrollView` on the scaled board, content insets, hidden editor views
   under the board, momentum delivery, and wheel pan speed in the live app.
+
+## Status (2026-11-19, Ensembles panel in the sidebar activity rail)
+
+User request: add the Ensemble to the left sidebar like Files and Git. Commit
+`721c8c5`, merge `411c450`. Decision: ADR 0002 note 2026-11-19. Details:
+`docs/references/sidebar-panel-anatomy-and-terminal-rows.md`, "Ensembles panel".
+
+- **Delivered.** A sixth navigator mode, `.ensemble`, between Terminals and
+  History. The panel lists saved and open Ensembles (file-bound boards too) and,
+  when an Ensemble tab is selected, its nodes. Open, Rename…, Duplicate, Close and
+  Delete Saved Ensemble… use existing store and session APIs. Delete uses the new
+  `CanvasDialog.deleteSaved`. ⇧⌘E "Show Ensembles" in the View menu and the
+  palette. No new store, format, task or process.
+- **Not in v1.** Rail attention badge, drag from the panel to a board, inline
+  rename, per-board disclosure.
+- **Tests.** `CanvasNavigatorModelTests`, `CanvasNavigatorPanelContractTests`.
+  `ConductorSettingsTests` (allCases count 5 to 6) changed with coordinator
+  approval. On `main` 411c450: `./script/test.sh` (parallel) and
+  `./script/test.sh --no-parallel` both passed, 3959 tests in 324 suites in each
+  mode.
+- **Open checks (manual, in Rafu Lightning; no GUI run yet):** a live "Needs input"
+  glyph update on a terminal node row; keyboard (arrows, Return, Space);
+  VoiceOver; a second window (a board made there appears after Refresh); relaunch
+  restores the mode; Increase Contrast and the frosted base.

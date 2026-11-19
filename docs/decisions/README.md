@@ -11,7 +11,7 @@ Accepted ADRs take precedence over older plan suggestions when they explicitly s
 | ADR | Status | Decision |
 |---|---|---|
 | [0001](0001-swiftpm-bootstrap.md) | Accepted for bootstrap | Use one dependency-free SwiftPM workspace for the initial GUI, CLI, shared core, and tests |
-| [0002](0002-native-workbench-navigation.md) | Partially superseded by 0003; noted 2026-11-15 | Use one native workbench Navigator and editor-hosted details. Note 2026-11-15: the panel × (a second sidebar toggle) is removed; the active rail icon hides the sidebar |
+| [0002](0002-native-workbench-navigation.md) | Partially superseded by 0003; noted 2026-11-15, 2026-11-19 | Use one native workbench Navigator and editor-hosted details. Note 2026-11-15: the panel × (a second sidebar toggle) is removed; the active rail icon hides the sidebar. Note 2026-11-19: a sixth mode, Ensembles (⇧⌘E), sits between Terminals and History |
 | [0003](0003-files-left-utility-right.md) | Superseded by [0030](0030-framed-workbench-left-rail-and-detached-tabs.md) (mode placement and right panel) | Files-only left sidebar; Search and Source Control in a right utility panel |
 | [0004](0004-embedded-terminal.md) | Accepted; terminal presentation details superseded by 0023 | Adopt the lazy, bounded SwiftTerm terminal boundary |
 | [0005](0005-language-intelligence-and-lsp.md) | Accepted | Tree-sitter as the real syntax engine plus an opt-in, memory-bounded LSP client with a transparent, user-controlled server registry |

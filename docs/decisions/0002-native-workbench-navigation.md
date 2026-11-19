@@ -41,6 +41,19 @@ tooltip "Hide <Panel>", VoiceOver value "Selected, sidebar shown" (plus the
 attention count). ⌘B and the titlebar button are unchanged. See ADR 0031 §i and
 [`sidebar-panel-anatomy-and-terminal-rows.md`](../references/sidebar-panel-anatomy-and-terminal-rows.md).
 
+## Note 2026-11-19: Ensembles panel
+
+The Navigator gains a sixth mode, `WorkspaceNavigatorMode.ensemble` (raw value
+`"ensemble"`, title "Ensembles"). It sits after Terminals and before History. It
+lists the workspace's Ensembles and, when an Ensemble tab is selected, that
+board's nodes. This adds a mode; it does not change the decision. The activity
+strip stays icon-only, and there is still one system sidebar toggle. ⇧⌘E and the
+palette entry "Show Ensembles" show the panel. An older build decodes the unknown
+raw value to `.files` through the tolerant decoder, so no migration is needed.
+Merged as 411c450 (commit 721c8c5). Details:
+[`sidebar-panel-anatomy-and-terminal-rows.md`](../references/sidebar-panel-anatomy-and-terminal-rows.md),
+"Ensembles panel".
+
 ## Alternatives considered
 
 - Keep Files left and Git permanently right. Simple, but permanently sacrifices

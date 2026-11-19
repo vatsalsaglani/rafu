@@ -1,7 +1,7 @@
-# Sidebar panel anatomy, segmented picker, and Terminals row naming
+# Sidebar panel anatomy, segmented picker, Terminals row naming, and the Ensembles panel
 
-- Applies to: the five navigator panels (Files, Search, Source Control,
-  Terminals, History) and their shared components in
+- Applies to: the six navigator panels (Files, Search, Source Control,
+  Terminals, Ensembles, History) and their shared components in
   `Sources/RafuApp/Support/RafuWorkbenchStyles.swift`
   (`RafuUtilityPanelHeader`, `RafuPanelHeaderCount`,
   `RafuPanelHeaderOverflowMenu`, `RafuSidebarSectionHeader`,
@@ -16,7 +16,11 @@
   checks below are not done. The Terminals native `List` section (below) is
   [ADR 0040](../decisions/0040-terminals-panel-native-list.md): merged as a8c614b
   (branch commit a6d5bf8); branch parallel 495 tests in 36 suites and 3871 tests
-  in 315 suites; main gate run by coordinator.
+  in 315 suites; main gate run by coordinator. Ensembles panel (2026-11-19): main
+  411c450 (commit 721c8c5), `./script/test.sh` (parallel) and
+  `./script/test.sh --no-parallel` both passed, 3959 tests in 324 suites in each
+  mode. The Ensembles GUI checks are not done. Toolchain for this run: not
+  recorded in the handoff.
 
 ## Rule or observed behavior
 
@@ -30,7 +34,7 @@ component) and [ADR 0002](../decisions/0002-native-workbench-navigation.md)
 - Fills only for state: hover, selection, field. No dividers under control
   blocks. The only hairline is above a pinned footer (Saved Terminal Groups).
   One text edge: `RafuMetrics.sidebarTextInset` (10 pt).
-- One header, `RafuUtilityPanelHeader`, for all five panels: no fill, no
+- One header, `RafuUtilityPanelHeader`, for all six panels: no fill, no
   hairline, no leading icon, no close button. 13 pt semibold title, tail
   truncation, `.isHeader`, tooltip (the title, or the workspace name for
   Files). A 24 pt row (`navigatorHeaderRowHeight`), 19 pt above (puts the title
@@ -152,6 +156,64 @@ Structure and state:
   [`swiftui-macos-click-latency.md`](swiftui-macos-click-latency.md).
 - Not done: "sections by place" (Tabs, Ensemble, Hidden).
 
+### Ensembles panel (2026-11-19)
+
+`WorkspaceNavigatorMode.ensemble` (raw `"ensemble"`, title "Ensembles", symbol
+`CanvasBoardState.ensembleSymbol`) sits after Terminals and before History. An
+older build decodes the unknown raw value to `.files`; there is no migration. The
+rail button, tooltip and VoiceOver value come from `allCases`, and the mode is
+disabled without a workspace. Code: `CanvasNavigatorPanelView`
+(`Canvas/Views/`), the pure row model `CanvasNavigatorModel` (`Canvas/Domain/`),
+and `WorkspaceSession+CanvasNavigator.swift` (`showEnsembles()`,
+`canvasSearchTerminalInfo(for:)` shared with `CanvasFindPanel`,
+`canvasIDsOpenInOtherWindows()` shared with `CanvasLibrarySheet`). The panel is a
+native `List` in the Terminals style (ADR 0040), top-pinned, with the same
+`RafuUtilityPanelHeader`.
+
+Rows:
+
+- **Ensembles section.** The union of the saved library and the boards open in
+  this window, sorted by title. A file-bound `.rafuensemble` board is included,
+  with its relative path as the caption. A trailing word says "Open" or "In
+  another window".
+- **Nodes section.** Shown only when an Ensemble tab is selected. Rows come from
+  `CanvasBoardSearchIndex` items without drawings, in board order.
+
+Keys and menus: click, Return or Space opens an Ensemble (or selects its tab) or
+focuses a node (`focusCanvasCard`). Board context menu: Open; Rename…, Duplicate
+and Close (open boards only); Delete Saved Ensemble… (closed, saved, not
+file-bound only). Delete uses the new `CanvasDialog.deleteSaved(CanvasSummary)`,
+routed to the shared `CanvasDeleteConfirmation` that the library sheet also uses.
+The delete Task is dropped if the workspace root changed. ⇧⌘E "Show Ensembles"
+is in the View menu and the palette ("Show Ensembles"); it is disabled without a
+workspace.
+
+VoiceOver: the row label is the title. The value carries the state (current,
+open, in another window, saved) and the card count; a node value carries its kind
+and, for a terminal, the status word. State is never colour alone.
+
+Refresh rule: rows are rebuilt in `.task(id:)`, not in `body`. The key holds the
+root, the library, the open boards (title, card count, file path), the
+open-elsewhere set, the active board id and instance, `changeStamp`, and a
+Refresh counter. The library reloads on panel appear, on Refresh, and after this
+window's own create, save or delete. A board made in another window appears only
+after Refresh. Selection follows `selectedCanvasID`; opening and focusing happen
+only from an explicit row action, never from a selection observer
+([`sidebar-single-click-opening.md`](sidebar-single-click-opening.md)).
+
+Nuance (reusable): agent status does not move `board.changeStamp`. Agent hook
+updates change `AgentActivityStore` without any edit to the board. A cached row
+would show a stale glyph. So a terminal node row resolves its agent status live
+inside the small row view, and the cached row model holds no status. Do the same
+for any new row that shows agent status.
+
+v1 does not have: a rail attention badge for Ensembles, drag from the panel to a
+board, inline rename, or per-board disclosure.
+
+The integration-owned `ConductorSettingsTests` asserted
+`WorkspaceNavigatorMode.allCases.count == 5`; it was changed to 6 with
+coordinator approval.
+
 ### SF Symbol nuance
 
 `terminal.badge` does not exist on macOS 27.2. A missing symbol fails silently:
@@ -195,12 +257,26 @@ check was done. GUI checks owed:
 - a second window keeps its own expansion and selection;
 - Increase Contrast (selected-row hairline).
 
+Ensembles panel: evidence is tests only (`CanvasNavigatorModelTests`,
+`CanvasNavigatorPanelContractTests`, and updated
+`NavigatorPanelHeaderPlacementTests`, `WorkbenchDeckPresentationTests`,
+`WorkspaceNavigationRestorationRepairTests`). No GUI run. GUI checks owed:
+
+- a live "Needs input" glyph update on a terminal node row;
+- keyboard: arrows, Return and Space in the list;
+- VoiceOver labels and values;
+- a second window: independent selection, and the "In another window" label;
+- relaunch restores the Ensembles mode;
+- Increase Contrast and the frosted base.
+
 ## Verification
 
 ```bash
 swift test --filter AgentSymbolsTests
 swift test --filter NavigatorPanelHeaderPlacementTests
 swift test --filter TerminalsPanelListTests
+swift test --filter CanvasNavigatorModelTests
+swift test --filter CanvasNavigatorPanelContractTests
 rg -n "RafuUtilityPanelHeader|RafuSegmentedPicker" Sources/RafuApp
 ./script/build_and_run.sh --verify
 ```
@@ -208,7 +284,8 @@ rg -n "RafuUtilityPanelHeader|RafuSegmentedPicker" Sources/RafuApp
 ## Related code, ADRs, and phases
 
 - [ADR 0031](../decisions/0031-card-header-tabs-and-themed-chrome.md) (§i),
-  [ADR 0002](../decisions/0002-native-workbench-navigation.md) (2026-11-15 note),
+  [ADR 0002](../decisions/0002-native-workbench-navigation.md) (2026-11-15 and
+  2026-11-19 notes),
   [ADR 0023](../decisions/0023-terminal-groups-and-saved-layouts.md),
   [ADR 0040](../decisions/0040-terminals-panel-native-list.md)
 - [`list-custom-disclosure-group-style.md`](list-custom-disclosure-group-style.md),
