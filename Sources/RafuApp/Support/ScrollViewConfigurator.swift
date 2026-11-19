@@ -165,15 +165,25 @@ final class OverlayScrollerProbeView: NSView {
         if let scrollView, scrollView.window != nil, scrollView.window === window {
             return scrollView
         }
-        guard window != nil, bounds.width > 0, bounds.height > 0 else { return nil }
-        let centre = convert(NSPoint(x: bounds.midX, y: bounds.midY), to: nil)
-        var ancestor = superview
+        let found = Self.listScrollView(around: self)
+        scrollView = found
+        return found
+    }
+
+    /// The `List`'s scroll view for a zero-content probe attached as the
+    /// List's `.background`: the scroll view that contains the probe's
+    /// centre, searching outward from its parent. Shared with
+    /// `ListSelectionHighlightProbeView`.
+    static func listScrollView(around probe: NSView) -> NSScrollView? {
+        guard probe.window != nil, probe.bounds.width > 0, probe.bounds.height > 0 else {
+            return nil
+        }
+        let centre = probe.convert(
+            NSPoint(x: probe.bounds.midX, y: probe.bounds.midY), to: nil)
+        var ancestor = probe.superview
         var level = 0
-        while let current = ancestor, level < Self.maximumAncestorLevels {
-            if let found = Self.scrollView(in: current, containing: centre) {
-                scrollView = found
-                return found
-            }
+        while let current = ancestor, level < maximumAncestorLevels {
+            if let found = scrollView(in: current, containing: centre) { return found }
             ancestor = current.superview
             level += 1
         }

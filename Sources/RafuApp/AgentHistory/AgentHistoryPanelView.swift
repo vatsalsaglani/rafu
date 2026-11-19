@@ -318,10 +318,8 @@ private struct AgentHistorySessionRow: View {
         .padding(.vertical, 3)
         .padding(.horizontal, 4)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: RafuMetrics.radiusDenseSelection, style: .continuous)
-                .fill(isOpen ? theme.palette.selection : Color.clear)
-        )
+        // The reference for every sidebar list's quiet selection.
+        .rafuRowSelection(isSelected: isOpen)
         .contentShape(.rect)
         .onTapGesture(perform: open)
         .focusable(interactions: .activate)

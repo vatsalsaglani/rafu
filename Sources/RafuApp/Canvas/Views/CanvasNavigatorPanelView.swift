@@ -143,7 +143,9 @@ struct CanvasNavigatorPanelView: View {
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .background(OverlayScrollerConfigurator(knobStyle: theme.isDark ? .light : .dark))
-        .tint(theme.palette.selection)
+        // Rows draw the shared quiet fill; the native highlight was the
+        // system accent while the list had the keys, whatever `.tint` said.
+        .rafuQuietListSelection()
         .onKeyPress(keys: [.return, .space]) { _ in
             guard let selection else { return .ignored }
             if let row = boards.first(where: {
@@ -303,7 +305,6 @@ private struct CanvasNavigatorRowLabel<Trailing: View>: View {
     @ViewBuilder let trailing: Trailing
 
     @Environment(\.rafuTheme) private var theme
-    @Environment(\.colorSchemeContrast) private var contrast
     @State private var isHovering = false
 
     var body: some View {
@@ -329,19 +330,7 @@ private struct CanvasNavigatorRowLabel<Trailing: View>: View {
         .padding(.vertical, 4)
         .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
         .contentShape(.rect)
-        .background {
-            if isHovering && !isSelected {
-                RoundedRectangle(cornerRadius: 5).fill(theme.palette.hover)
-            }
-        }
-        .overlay {
-            if isSelected && contrast == .increased {
-                RoundedRectangle(cornerRadius: 5)
-                    .strokeBorder(theme.palette.borderStrong, lineWidth: RafuMetrics.hairline)
-                    .allowsHitTesting(false)
-                    .accessibilityHidden(true)
-            }
-        }
+        .rafuRowSelection(isSelected: isSelected, isHovering: isHovering, cornerRadius: 5)
         .onHover { isHovering = $0 }
         .onTapGesture(perform: activate)
         .help("\(title)\n\(caption)")

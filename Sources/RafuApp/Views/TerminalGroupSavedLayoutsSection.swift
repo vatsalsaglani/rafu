@@ -316,7 +316,9 @@ private struct SavedTerminalGroupRowView: View {
         .padding(.leading, RafuMetrics.sidebarTextInset)
         .padding(.trailing, RafuMetrics.space1)
         .frame(minHeight: TerminalGroupSavedLayoutsPresentation.rowHeight)
-        .background(isHovering && !isSelected ? theme.palette.hover : Color.clear)
+        // The list draws no native highlight (`rafuQuietListSelection`):
+        // this row draws the shared quiet fill, full width like its hover.
+        .rafuRowSelection(isSelected: isSelected, isHovering: isHovering, cornerRadius: 0)
         .contentShape(.rect)
         .onHover { isHovering = $0 }
         // One tap handler (docs/references/swiftui-macos-click-latency.md):

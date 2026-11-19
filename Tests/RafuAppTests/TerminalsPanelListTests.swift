@@ -242,7 +242,11 @@ struct TerminalsPanelListTests {
         #expect(panel.contains(".tag(row.id)"))
         #expect(panel.contains("listStyle(.plain)"))
         #expect(panel.contains(".scrollContentBackground(.hidden)"))
-        #expect(panel.contains(".tint(theme.palette.selection)"))
+        // The native highlight is off; rows draw the shared quiet fill.
+        // `.tint` never reached it (it stayed the system accent).
+        #expect(panel.contains(".rafuQuietListSelection()"))
+        #expect(!panel.contains(".tint(theme.palette.selection)"))
+        #expect(panel.contains(".rafuRowSelection("))
         #expect(panel.contains(".onKeyPress(keys: [.return, .space, .leftArrow, .rightArrow])"))
         #expect(panel.contains("TerminalsPanelListModel.action("))
         #expect(panel.contains(".onChange(of: currentRowID, initial: true)"))

@@ -766,33 +766,15 @@ extension View {
     /// The Terminals panel's native list: `.plain` like the Files tree (rows
     /// draw their own hover; no sidebar insets), no scroll background so the
     /// sidebar (or the frosted window) shows through, overlay scrollers, and
-    /// the system selection tinted with the theme's `selection` token.
+    /// no native selection highlight: rows draw the shared quiet fill
+    /// (`rafuRowSelection`). `.tint` never reached the native highlight,
+    /// which was the system accent while the list had the keys.
     fileprivate func terminalsPanelListStyle(theme: RafuTheme) -> some View {
         listStyle(.plain)
             .environment(\.defaultMinListRowHeight, TerminalPanelRowMetrics.paneRowHeight)
             .scrollContentBackground(.hidden)
             .background(OverlayScrollerConfigurator(knobStyle: theme.isDark ? .light : .dark))
-            .tint(theme.palette.selection)
-    }
-}
-
-/// Under Increase Contrast the selected row also gets a `borderStrong`
-/// hairline, so selection never rests on a low-contrast fill alone.
-private struct TerminalRowSelectionHairline: ViewModifier {
-    let isSelected: Bool
-
-    @Environment(\.rafuTheme) private var theme
-    @Environment(\.colorSchemeContrast) private var contrast
-
-    func body(content: Content) -> some View {
-        content.overlay {
-            if isSelected && contrast == .increased {
-                RoundedRectangle(cornerRadius: TerminalPanelRowMetrics.radius, style: .continuous)
-                    .strokeBorder(theme.palette.borderStrong, lineWidth: RafuMetrics.hairline)
-                    .allowsHitTesting(false)
-                    .accessibilityHidden(true)
-            }
-        }
+            .rafuQuietListSelection()
     }
 }
 
@@ -1023,17 +1005,16 @@ private struct TerminalGroupManagerRowView: View {
                 alignment: .leading
             )
             .contentShape(.rect)
-            .background(
-                RoundedRectangle(cornerRadius: TerminalPanelRowMetrics.radius, style: .continuous)
-                    .fill(isHovering && !isSelected ? theme.palette.hover : Color.clear)
+            .rafuRowSelection(
+                isSelected: isSelected, isHovering: isHovering,
+                cornerRadius: TerminalPanelRowMetrics.radius
             )
-            // `isCurrent: false`: the list draws the selection fill, so the
-            // resolver contributes only the attention border here.
+            // `isCurrent: false`: `rafuRowSelection` draws the selection fill,
+            // so the resolver contributes only the attention border here.
             .rafuTerminalSurfaceBorder(
                 context: .managerRow(isCurrent: false, needsAttention: row.attentionCount > 0),
                 radius: TerminalPanelRowMetrics.radius
             )
-            .modifier(TerminalRowSelectionHairline(isSelected: isSelected))
             .opacity(session.dragInFlight == dragToken ? 0.4 : 1)
             // Carries only the group's id over the private `rafuEnsembleDrag`
             // type, exactly like an Agent History row — never a title, path, or
@@ -1314,11 +1295,10 @@ private struct TerminalPaneRowView: View {
             alignment: .leading
         )
         .contentShape(.rect)
-        .background(
-            RoundedRectangle(cornerRadius: TerminalPanelRowMetrics.radius, style: .continuous)
-                .fill(isHovering && !isSelected ? theme.palette.hover : Color.clear)
+        .rafuRowSelection(
+            isSelected: isSelected, isHovering: isHovering,
+            cornerRadius: TerminalPanelRowMetrics.radius
         )
-        .modifier(TerminalRowSelectionHairline(isSelected: isSelected))
         // One tap handler, as on the group row: plain content, not a
         // `Button`, so a click is never held back inside the list.
         .onTapGesture {
@@ -1510,12 +1490,12 @@ private struct TerminalSessionRowView: View {
             alignment: .leading
         )
         .contentShape(.rect)
-        .background(
-            RoundedRectangle(cornerRadius: TerminalPanelRowMetrics.radius, style: .continuous)
-                .fill(isHovering && !isSelected ? theme.palette.hover : Color.clear)
+        .rafuRowSelection(
+            isSelected: isSelected, isHovering: isHovering,
+            cornerRadius: TerminalPanelRowMetrics.radius
         )
-        // `isCurrent: false`: the list draws the selection fill, so the
-        // resolver contributes only the attention border here.
+        // `isCurrent: false`: `rafuRowSelection` draws the selection fill,
+        // so the resolver contributes only the attention border here.
         .rafuTerminalSurfaceBorder(
             context: .managerRow(
                 isCurrent: false,
@@ -1523,7 +1503,6 @@ private struct TerminalSessionRowView: View {
             ),
             radius: TerminalPanelRowMetrics.radius
         )
-        .modifier(TerminalRowSelectionHairline(isSelected: isSelected))
         // One tap handler. A second `onTapGesture(count: 2)` would make the
         // system hold every single click for the double-click interval before
         // it revealed the row. Select and reveal at once; a double-click (the

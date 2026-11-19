@@ -86,11 +86,42 @@ final class CanvasBoardResources {
         }
         leaveInteractiveContent()
     }
+    /// The board's window is hidden (another Space, a covering app, the
+    /// screen lock). Live content stops and the terminal views go; a terminal
+    /// card that had the keys is remembered, so `windowBecameAvailable` can
+    /// give them back. Without that, the board took the keys and the next
+    /// letter typed "into the terminal" ran a board tool.
     func pause() {
+        let remembered = board.flatMap { board in
+            CanvasContentFocusRestore.remembered(
+                contentIsActive: board.contentIsActive, focusedCardID: board.focusedCardID,
+                focusedCardIsTerminal: board.focusedCardID.map { isTerminalCard($0, on: board) }
+                    ?? false,
+                pending: board.contentFocusToRestore)
+        }
         isWindowAvailable = false
         stopAll()
+        board?.contentFocusToRestore = remembered
     }
-    func windowBecameAvailable() { isWindowAvailable = true }
+    /// The window shows again. A terminal card that had the keys when it was
+    /// hidden gets them back through the same path as a click on it: the
+    /// card claims its lease and makes its terminal the first responder
+    /// (`CanvasTerminalCard`, `onChange(of: active)`).
+    func windowBecameAvailable() {
+        isWindowAvailable = true
+        guard let board, let pending = board.contentFocusToRestore else { return }
+        board.contentFocusToRestore = nil
+        guard
+            let id = CanvasContentFocusRestore.restored(
+                pending: pending, isTerminalCardOnBoard: isTerminalCard(pending, on: board))
+        else { return }
+        board.focus(id)
+    }
+    private func isTerminalCard(_ id: CanvasCardID, on board: CanvasBoardState) -> Bool {
+        guard let card = board.cards.first(where: { $0.id == id }) else { return false }
+        if case .terminal = card.content { return true }
+        return false
+    }
     func stopAll() {
         remoteImages.cancelInFlight()
         if let session, let board {
@@ -126,6 +157,38 @@ final class CanvasBoardResources {
         }
         // Hiding or leaving never sends input and never restarts a resource.
         board.contentIsActive = false
+        // Leaving content, or hiding the board, ends a pending restore too
+        // (`pause` sets it again after this).
+        board.contentFocusToRestore = nil
+    }
+}
+
+/// The keys of a terminal card across a hidden window. Before this, after a
+/// Space or app switch the terminal no longer had the keys, and letters ran
+/// board tools. See `docs/references/ensemble-terminal-focus-restore.md`.
+nonisolated enum CanvasContentFocusRestore {
+    /// The card `pause` remembers: the focused terminal card while its
+    /// content has the keys, else the card a previous `pause` remembered
+    /// (a second hide notification must not forget it).
+    static func remembered(
+        contentIsActive: Bool, focusedCardID: CanvasCardID?, focusedCardIsTerminal: Bool,
+        pending: CanvasCardID?
+    ) -> CanvasCardID? {
+        if contentIsActive, focusedCardIsTerminal, let focusedCardID { return focusedCardID }
+        return pending
+    }
+
+    /// The card to focus when the window shows again: the remembered card
+    /// while it is still a terminal card on the board.
+    static func restored(pending: CanvasCardID?, isTerminalCardOnBoard: Bool) -> CanvasCardID? {
+        isTerminalCardOnBoard ? pending : nil
+    }
+
+    /// Card content has the keys, or a terminal card is about to get them
+    /// back. The board's own keys (letters, Return, arrows, Delete, Tab)
+    /// stay off while this is true.
+    static func contentHoldsKeys(contentIsActive: Bool, pending: CanvasCardID?) -> Bool {
+        contentIsActive || pending != nil
     }
 }
 

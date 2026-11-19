@@ -186,6 +186,7 @@ struct GitCommitGraphView: View {
                             showsRails: showsRails,
                             laneCanvasWidth: laneCanvasWidth
                         )
+                        .rafuRowSelection(isSelected: selection == commit.id)
                         .tag(commit.id)
                         .contentShape(.rect)
                         .onTapGesture { select(commit) }
@@ -229,6 +230,9 @@ struct GitCommitGraphView: View {
                 .listStyle(.inset)
                 .scrollContentBackground(.hidden)
                 .environment(\.defaultMinListRowHeight, GitCommitGraphMetrics.rowHeight)
+                // The selected commit draws the shared quiet fill; the native
+                // highlight turned system-accent blue once the list had the keys.
+                .rafuQuietListSelection()
                 .onScrollPhaseChange { _, phase in
                     if phase != .idle { dismissHoverCard() }
                 }
