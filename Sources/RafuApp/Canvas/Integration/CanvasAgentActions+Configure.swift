@@ -84,6 +84,9 @@ extension CanvasAgentActions {
         prepared.strategy = plan.strategy.rawValue
         prepared.agent = agent.rawValue
         prepared.title = CanvasAgentText.validTitle(card.title) ? card.title : nil
+        // A conversation that ran with full access keeps it when it resumes:
+        // the question says so.
+        if card.fullAccess == true, !prepared.grantsFullAccess { prepared.keepsFullAccess = true }
         return .success(
             CanvasAgentConfigurePrepared(
                 call: prepared, card: card, request: request, plan: plan, readiness: readiness,
@@ -131,16 +134,39 @@ extension CanvasAgentActions {
             result.confirmed = false
             return .init(toolResult: result)
         }
+        grantFullAccess(prepared)
         let outcome = await CanvasAgentConfigureRunner.run(
             prepared.plan, request: prepared.request, terminal: prepared.terminal,
             title: prepared.card.title)
-        guard outcome.completed else { return .init(error: "configure_failed: \(outcome.message)") }
+        guard outcome.completed else {
+            CanvasFullAccessTerminals.shared.revokeGrant(prepared.card.id)
+            return .init(error: "configure_failed: \(outcome.message)")
+        }
+        noteFullAccess(prepared, board: caller.board)
         var result = CanvasAgentToolResult(message: outcome.message)
         result.nodeID = prepared.card.id.rawValue.uuidString
         result.strategy = prepared.plan.strategy.rawValue
         result.confirmed = outcome.confirmed
         result.readback = outcome.readback
         return .init(toolResult: result)
+    }
+
+    /// An approved mode full change: one grant for the resumed Codex start.
+    private static func grantFullAccess(_ prepared: CanvasAgentConfigurePrepared) {
+        guard prepared.call.grantsFullAccess else { return }
+        CanvasFullAccessTerminals.shared.grant(prepared.card.id)
+    }
+
+    /// After a mode full change ran, the node shows the Full access badge.
+    /// Another mode never clears it: a Codex conversation that ran with full
+    /// access keeps it when it resumes (docs/references/codex-full-access.md).
+    private static func noteFullAccess(
+        _ prepared: CanvasAgentConfigurePrepared, board: CanvasBoardState
+    ) {
+        guard prepared.call.grantsFullAccess, case .terminal(let groupID) = prepared.card.content
+        else { return }
+        board.markFullAccess(prepared.card.id)
+        CanvasFullAccessTerminals.shared.insert(groupID)
     }
 
     /// Hands the change to the queue. When the turn ends, the board must
@@ -177,8 +203,20 @@ extension CanvasAgentActions {
                     record("Queued change for \"\(title)\" dropped: the agent was not ready")
                     return
                 }
+                if call.grantsFullAccess, !CanvasFullAccessPreference.isOn() {
+                    record(
+                        "Queued change for \"\(title)\" dropped: \(CanvasAgentFullAccess.switchName) is off"
+                    )
+                    return
+                }
+                grantFullAccess(ready)
                 let outcome = await CanvasAgentConfigureRunner.run(
                     ready.plan, request: ready.request, terminal: terminal, title: ready.card.title)
+                if outcome.completed {
+                    noteFullAccess(ready, board: board)
+                } else {
+                    CanvasFullAccessTerminals.shared.revokeGrant(ready.card.id)
+                }
                 record(
                     "Queued change for \"\(title)\": \(outcome.confirmed ? "confirmed" : "not confirmed")"
                 )

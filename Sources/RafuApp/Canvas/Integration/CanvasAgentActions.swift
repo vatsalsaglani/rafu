@@ -53,7 +53,8 @@ final class CanvasAgentApproval: Identifiable {
     fileprivate let perform: @MainActor () async -> CanvasBridgeResponse
 
     var summary: [String] { call.approvalSummary }
-    var allowsAlways: Bool { call.risk == .edit }
+    /// A full-access call asks every time; "Always" never covers it.
+    var allowsAlways: Bool { call.risk == .edit && !call.grantsFullAccess }
 
     fileprivate init(
         boardID: CanvasID, agentName: String, call: CanvasAgentToolCall, created: Date,
@@ -285,6 +286,11 @@ enum CanvasAgentActions {
             alwaysAllowed: center.isAlwaysAllowed(call.tool, on: board.id))
         // A Live message link is the user's consent for messages, like send_message.
         if routedByLink, decision == .ask { decision = .allow }
+        // Full access needs the user's Settings switch and always asks.
+        if call.grantsFullAccess {
+            decision = CanvasAgentFullAccess.decide(
+                mode: board.agentControlMode, switchIsOn: CanvasFullAccessPreference.isOn())
+        }
         // agent_configure: refuse a busy or unknown agent before asking, and
         // name the strategy in the question. A resume always asks.
         let denied: Bool
@@ -301,7 +307,9 @@ enum CanvasAgentActions {
         case .deny(let reason):
             center.record(
                 board.id, agent: caller.agentName, action: call.tool.actionTitle,
-                outcome: "Blocked: Agent control is Off")
+                outcome: reason == CanvasAgentFullAccess.switchOffMessage
+                    ? "Blocked: \(CanvasAgentFullAccess.switchName) is off"
+                    : "Blocked: Agent control is Off")
             return .init(error: reason)
         case .allow:
             return await perform(call, caller: caller)
@@ -342,6 +350,10 @@ enum CanvasAgentActions {
             guard caller.board.agentControlMode != .off else {
                 return .init(error: CanvasAgentPolicy.offMessage)
             }
+        }
+        // The user may have turned the switch off while the question waited.
+        if call.grantsFullAccess, !CanvasFullAccessPreference.isOn() {
+            return .init(error: CanvasAgentFullAccess.switchOffMessage)
         }
         let before = CanvasAgentProvenanceStore.Before(caller.board)
         let response: CanvasBridgeResponse
@@ -746,8 +758,15 @@ enum CanvasAgentActions {
         let card = CanvasCard(
             title: snapshot.name.rawValue,
             rect: placement(placed, kind: "terminal", caller: caller),
-            content: .terminal(groupID: snapshot.id))
+            content: .terminal(groupID: snapshot.id),
+            fullAccess: call.grantsFullAccess ? true : nil)
         try insert(card, into: board)
+        if call.grantsFullAccess {
+            // The user approved this request: one grant for the node's next
+            // Codex start, which the launcher asks for over the private token.
+            CanvasFullAccessTerminals.shared.insert(snapshot.id)
+            CanvasFullAccessTerminals.shared.grant(card.id)
+        }
         CanvasAgentCenter.shared.noteCreatedTerminal(
             card.id, caller: caller.controllerID, agent: call.agent)
         if let command = call.command, let launched = CanvasAgentLaunch.agent(forCommand: command) {
@@ -775,6 +794,10 @@ enum CanvasAgentActions {
         if !isVoice, call.link != true, call.agent == "claude" || call.agent == "codex" {
             message += " Next: edge_create kind message to it, then link_set_state live."
         }
+        if call.grantsFullAccess {
+            message +=
+                " Codex starts with full access: no approval prompts and no sandbox. The node shows a Full access badge."
+        }
         return linked(
             message, state: report.running ? "running" : "stopped", card: card, call: call,
             caller: caller)
@@ -788,7 +811,8 @@ enum CanvasAgentActions {
             call.command
             ?? call.agent.flatMap {
                 CanvasAgentLaunch.argv(
-                    agent: $0, prompt: call.prompt, model: call.model, effort: call.effort)
+                    agent: $0, prompt: call.prompt, model: call.model, effort: call.effort,
+                    fullAccess: call.grantsFullAccess)
             }
         guard let argv else { throw CanvasAgentToolError.invalidArgument("command") }
         if let refusal = CanvasAgentShell.refusal(for: argv) {

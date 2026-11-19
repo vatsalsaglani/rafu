@@ -1,4 +1,5 @@
 import Foundation
+import RafuCore
 
 /// Why a terminal session asked for attention. The attention pipeline has two
 /// sources that look identical downstream (`.bell`), but they mean different
@@ -104,6 +105,9 @@ nonisolated struct NotchTerminalInput: Equatable, Sendable {
     let trackedPhase: NotchAgentPhase?
     /// The matched hook session's active sub-agents.
     let subagents: [NotchSubagentEntry]
+    /// Rafu started or switched this terminal's Codex to full access
+    /// (`CanvasFullAccessTerminals`).
+    let fullAccess: Bool
 
     init(
         id: UUID,
@@ -116,7 +120,8 @@ nonisolated struct NotchTerminalInput: Equatable, Sendable {
         cardID: UUID? = nil,
         windowID: UUID? = nil,
         trackedPhase: NotchAgentPhase? = nil,
-        subagents: [NotchSubagentEntry] = []
+        subagents: [NotchSubagentEntry] = [],
+        fullAccess: Bool = false
     ) {
         self.id = id
         self.title = title
@@ -129,6 +134,7 @@ nonisolated struct NotchTerminalInput: Equatable, Sendable {
         self.windowID = windowID
         self.trackedPhase = trackedPhase
         self.subagents = subagents
+        self.fullAccess = fullAccess
     }
 }
 
@@ -195,12 +201,14 @@ nonisolated struct NotchAgentRow: Identifiable, Equatable, Sendable {
     let updatedAt: Date?
     let lastMessage: String?
     let sessionSuffix: String?
+    /// The agent runs with full access: the row shows a "Full access" badge.
+    let fullAccess: Bool
 
     init(
         id: UUID, title: String, cli: ConductorCLIID, phase: NotchAgentPhase,
         boardID: UUID? = nil, cardID: UUID? = nil, windowID: UUID? = nil,
         subagents: [NotchSubagentEntry] = [], detail: String? = nil, updatedAt: Date? = nil,
-        lastMessage: String? = nil, sessionSuffix: String? = nil
+        lastMessage: String? = nil, sessionSuffix: String? = nil, fullAccess: Bool = false
     ) {
         self.id = id
         self.title = title
@@ -214,6 +222,15 @@ nonisolated struct NotchAgentRow: Identifiable, Equatable, Sendable {
         self.updatedAt = updatedAt
         self.lastMessage = lastMessage
         self.sessionSuffix = sessionSuffix
+        self.fullAccess = fullAccess
+    }
+
+    /// What VoiceOver reads for the row: title, agent, state, and full
+    /// access when it applies.
+    var accessibilityLabel: String {
+        var parts = [title, cli.displayName, phase.label]
+        if fullAccess { parts.append(CanvasAgentFullAccess.accessibilityLabel) }
+        return parts.joined(separator: ", ")
     }
 
     /// Agent rows for every terminal that runs a recognised agent CLI, in the
@@ -233,7 +250,8 @@ nonisolated struct NotchAgentRow: Identifiable, Equatable, Sendable {
                 boardID: terminal.boardID,
                 cardID: terminal.cardID,
                 windowID: terminal.windowID,
-                subagents: terminal.subagents)
+                subagents: terminal.subagents,
+                fullAccess: terminal.fullAccess)
         }
     }
 

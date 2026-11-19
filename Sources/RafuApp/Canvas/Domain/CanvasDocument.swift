@@ -315,6 +315,10 @@ nonisolated struct CanvasCard: Codable, Equatable, Identifiable, Sendable {
     var title: String
     var rect = CanvasRect()
     var content: CanvasCardContent
+    /// A terminal node whose Codex agent Rafu started or switched to full
+    /// access. Only the badge: a saved board never starts a process, so a
+    /// reopened node starts a plain shell. Absent in older files.
+    var fullAccess: Bool?
 }
 
 nonisolated enum CanvasConnectionBehavior: String, Codable, CaseIterable, Sendable {

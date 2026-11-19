@@ -1,3 +1,4 @@
+import RafuCore
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -8,6 +9,7 @@ struct EnsembleSettingsSection: View {
     @State private var isFolderImporterPresented = false
     @State private var installTask: Task<Void, Never>?
     @AppStorage(CanvasChannelPromptPreference.key) private var confirmsChannelPrompt = true
+    @AppStorage(CanvasFullAccessPreference.key) private var allowsFullAccessAgents = false
 
     var body: some View {
         Section {
@@ -20,6 +22,15 @@ struct EnsembleSettingsSection: View {
             Text("Claude Code Prompt")
         } footer: {
             Text(EnsembleChannelPromptCopy.footer)
+        }
+
+        Section {
+            Toggle(EnsembleFullAccessCopy.toggle, isOn: $allowsFullAccessAgents)
+                .help(EnsembleFullAccessCopy.help)
+        } header: {
+            Text("Full Access Agents")
+        } footer: {
+            Text(EnsembleFullAccessCopy.footer)
         }
 
         Section {
@@ -180,6 +191,18 @@ nonisolated enum EnsembleChannelPromptCopy {
 
     static let footer =
         "When Rafu starts Claude Code in an Ensemble terminal, Claude asks you to confirm Rafu's own channel, server:rafu. With this on and the Ensemble's Agent control set to Allow, Rafu presses Return once to choose \"I am using this for local development\" and shows a notice. Rafu never answers any other prompt, such as folder trust, new MCP servers, or tool permissions. In Ask or Off, you answer the dialog yourself."
+}
+
+/// Plain-words copy for the full-access switch (decision record "Full access
+/// agents in Ensemble terminals").
+nonisolated enum EnsembleFullAccessCopy {
+    static let toggle = CanvasAgentFullAccess.switchName
+
+    static let help =
+        "Lets an agent ask Rafu to start Codex with no approval prompts and no sandbox. Rafu asks you every time."
+
+    static let footer =
+        "Off by default. With this on, an agent in an Ensemble can ask to start Codex with full access, or switch a Codex agent it started to full access. Codex then runs commands with no approval prompts and no sandbox. Rafu asks you every time, also when Agent control is Allow, and the node shows a Full access badge. A saved Ensemble never starts it again by itself. With this off, Rafu refuses every such request. Codex conversations that already have full access keep it when they resume, and a full-access flag typed on codex resume, fork, exec or review is not checked by Rafu."
 }
 
 /// Plain-words copy for the agent skill section.

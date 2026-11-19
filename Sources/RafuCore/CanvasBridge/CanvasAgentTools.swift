@@ -224,6 +224,13 @@ public nonisolated struct CanvasAgentToolCall: Codable, Hashable, Sendable {
     /// `agent_configure`: when the agent is mid-turn, keep the change and run
     /// it when the turn ends.
     public var queue: Bool?
+    /// `terminal_create`: `default` or `full` (Codex only). `full` starts
+    /// Codex with no approval prompts and no sandbox (`CanvasAgentFullAccess`).
+    public var access: String?
+    /// `agent_configure`: set by the app, never parsed, when the node already
+    /// runs with full access, so the question says that the conversation
+    /// keeps it.
+    public var keepsFullAccess: Bool?
 
     public init(tool: CanvasAgentTool) { self.tool = tool }
 
@@ -268,6 +275,17 @@ public nonisolated struct CanvasAgentToolCall: Codable, Hashable, Sendable {
         }
     }
 
+    /// True when the call gives a Codex agent full access: `terminal_create`
+    /// with `access` full, or `agent_configure` with mode full. Such a call
+    /// needs the user's Settings switch and always asks.
+    public var grantsFullAccess: Bool {
+        switch tool {
+        case .terminalCreate: access == CanvasAgentFullAccess.fullAccess
+        case .agentConfigure: mode == CanvasAgentFullAccess.fullAccess
+        default: false
+        }
+    }
+
     /// True when the call starts a shell, an agent or a command.
     public var startsProcess: Bool {
         switch tool {
@@ -298,6 +316,12 @@ public nonisolated struct CanvasAgentToolCall: Codable, Hashable, Sendable {
         add("Agent", agent)
         add("Model", model)
         add("Effort", effort)
+        if grantsFullAccess {
+            lines.append(
+                "Full access: Codex runs commands with no approval prompts and no sandbox")
+        } else if keepsFullAccess == true {
+            lines.append(CanvasAgentFullAccess.keepsFullAccessLine)
+        }
         if let strategy {
             lines.append(
                 strategy == CanvasAgentConfigureStrategy.resume.rawValue
@@ -354,6 +378,7 @@ public nonisolated struct CanvasAgentToolCall: Codable, Hashable, Sendable {
         case .terminalCreate:
             return placement.union([
                 "title", "cwd", "agent", "command", "prompt", "link", "model", "effort",
+                "access",
             ])
         case .terminalSend: return ["node_id", "text", "command"]
         case .edgeCreate: return ["from", "to", "kind", "label"]
@@ -471,6 +496,7 @@ public nonisolated struct CanvasAgentToolCall: Codable, Hashable, Sendable {
         call.model = try string("model")?.lowercased()
         call.effort = try string("effort")?.lowercased()
         call.strategy = try string("strategy")?.lowercased()
+        call.access = try string("access")?.lowercased()
         if let value = arguments["queue"] {
             guard let flag = value as? Bool else { throw .invalidArgument("queue") }
             call.queue = flag
@@ -521,6 +547,10 @@ public nonisolated struct CanvasAgentToolCall: Codable, Hashable, Sendable {
         }
         if let prompt {
             if prompt.isEmpty || prompt.contains("\0") { throw .invalidArgument("prompt") }
+            if CanvasAgentFullAccess.promptLooksLikeOption(prompt) {
+                throw .invalidArgumentReason(
+                    key: "prompt", reason: CanvasAgentFullAccess.promptReason)
+            }
             if prompt.utf8.count > Self.maximumPromptBytes {
                 throw .invalidArgumentReason(
                     key: "prompt",
@@ -550,6 +580,13 @@ public nonisolated struct CanvasAgentToolCall: Codable, Hashable, Sendable {
         }
         if let command, let refusal = CanvasAgentShell.refusal(for: command) {
             throw .invalidArgumentReason(key: "command", reason: refusal.reason())
+        }
+        if let command, CanvasAgentFullAccess.commandRequestsFullAccess(command) {
+            throw .invalidArgumentReason(
+                key: "command", reason: CanvasAgentFullAccess.commandReason)
+        }
+        if let access, !CanvasAgentFullAccess.accessValues.contains(access) {
+            throw .invalidArgument("access")
         }
         if let url, url.isEmpty || url.utf8.count > 2_048 || CanvasAgentText.hasControl(url) {
             throw .invalidArgument("url")
@@ -642,6 +679,10 @@ public nonisolated struct CanvasAgentToolCall: Codable, Hashable, Sendable {
                 }
             }
             if agent != nil, command != nil { throw .invalidArgument("command") }
+            if access != nil, agent != CanvasAgentConfigureAgent.codex.rawValue {
+                throw .invalidArgumentReason(
+                    key: "access", reason: CanvasAgentFullAccess.onlyCodexReason)
+            }
             if model != nil || effort != nil {
                 guard let agent, let known = CanvasAgentConfigureAgent(agent: agent) else {
                     throw .invalidArgumentReason(
@@ -659,7 +700,8 @@ public nonisolated struct CanvasAgentToolCall: Codable, Hashable, Sendable {
             // before any node exists, with the reason.
             if let agent, prompt != nil,
                 let argv = CanvasAgentLaunch.argv(
-                    agent: agent, prompt: prompt, model: model, effort: effort),
+                    agent: agent, prompt: prompt, model: model, effort: effort,
+                    fullAccess: grantsFullAccess),
                 let refusal = CanvasAgentShell.refusal(for: argv)
             {
                 throw .invalidArgumentReason(key: "prompt", reason: refusal.reason(isPrompt: true))
@@ -668,6 +710,9 @@ public nonisolated struct CanvasAgentToolCall: Codable, Hashable, Sendable {
             try require(nodeID, "node_id")
             guard (text == nil) != (command == nil) else { throw .missingArgument("text") }
             if let text, text.isEmpty { throw .invalidArgument("text") }
+            if let text, CanvasAgentFullAccess.textRequestsFullAccess(text) {
+                throw .invalidArgumentReason(key: "text", reason: CanvasAgentFullAccess.textReason)
+            }
             if let text, text.utf8.count > Self.maximumPromptBytes {
                 throw .invalidArgumentReason(
                     key: "text", reason: Self.lineTextReason(bytes: text.utf8.count))
@@ -1028,13 +1073,19 @@ public nonisolated enum CanvasAgentLaunch {
 
     /// The launch vector with model and effort flags before the task:
     /// Claude `--model X --effort Y`, Codex `-m X -c model_reasoning_effort="Y"`.
-    /// nil when model or effort is given for another agent or fails its
+    /// `fullAccess` adds Codex's bypass flag first (Codex only). nil when
+    /// model, effort or full access is given for another agent or fails its
     /// allowlist; `auto` is not a launch effort.
-    public static func argv(agent: String, prompt: String?, model: String?, effort: String?)
-        -> [String]?
-    {
+    public static func argv(
+        agent: String, prompt: String?, model: String?, effort: String?,
+        fullAccess: Bool = false
+    ) -> [String]? {
         guard let executable = executable(for: agent) else { return nil }
         var head = [executable]
+        if fullAccess {
+            guard agent == CanvasAgentConfigureAgent.codex.rawValue else { return nil }
+            head.append(CanvasAgentFullAccess.codexBypassFlag)
+        }
         if model != nil || effort != nil {
             guard let known = CanvasAgentConfigureAgent(agent: agent) else { return nil }
             if let model, !CanvasAgentConfigurePlan.isValidModel(model) { return nil }
@@ -1047,6 +1098,8 @@ public nonisolated enum CanvasAgentLaunch {
             prompt, maxBytes: CanvasAgentToolCall.maximumPromptBytes
         )
         .trimmingCharacters(in: .whitespaces)
+        // A task that starts with "-" would be read as an option.
+        guard !line.hasPrefix("-") else { return nil }
         return line.isEmpty ? head : head + [line]
     }
 }
@@ -1389,6 +1442,10 @@ public nonisolated enum CanvasAgentToolCatalog {
                             "boolean",
                             "Also add a message link from your node to the new terminal, Paused until you call link_set_state live. Do this for a claude or codex peer; the link turns Live when both run an agent."
                         ),
+                        "access": property(
+                            "string",
+                            "Codex only. default (Codex asks for approvals as usual) or full (Codex runs commands with no approval prompts and no sandbox). full is refused until the user turns on Settings > Ensemble > Allow Full access agents, and it always asks the user, also in Allow. The node shows a Full access badge.",
+                            ["enum": CanvasAgentFullAccess.accessValues]),
                         "near": near, "x": x, "y": y,
                     ])
             )
@@ -1474,7 +1531,7 @@ public nonisolated enum CanvasAgentToolCatalog {
             "\($0.rawValue): \($0.modes.joined(separator: ", "))"
         }.joined(separator: "; ")
         return (
-            "Change the model, effort or mode of a claude or codex agent running in a terminal node, also in the middle of its conversation. Claude Code changes model and effort in place (Rafu types /model and /effort); a mode change, and every Codex change, uses strategy resume: the agent quits and resumes the same conversation with the new flags. Refused with agent_busy while the agent is mid-turn; pass queue true to run the change when the turn ends. The result has strategy (in_place, resume or queued), confirmed (the terminal showed the new value) and readback (the newest terminal lines, scrubbed). Say whether it was confirmed; never retry on your own. Only a terminal you created. Asks the user unless Agent control is Allow; a resume always asks.",
+            "Change the model, effort or mode of a claude or codex agent running in a terminal node, also in the middle of its conversation. Claude Code changes model and effort in place (Rafu types /model and /effort); a mode change, and every Codex change, uses strategy resume: the agent quits and resumes the same conversation with the new flags. Refused with agent_busy while the agent is mid-turn; pass queue true to run the change when the turn ends. The result has strategy (in_place, resume or queued), confirmed (the terminal showed the new value) and readback (the newest terminal lines, scrubbed). Say whether it was confirmed; never retry on your own. Only a terminal you created. Asks the user unless Agent control is Allow; a resume always asks. Codex mode full removes approval prompts and the sandbox: it is refused until the user turns on Settings > Ensemble > Allow Full access agents.",
             schema(
                 [
                     "node_id": nodeID,

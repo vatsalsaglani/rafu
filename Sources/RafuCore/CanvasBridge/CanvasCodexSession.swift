@@ -41,11 +41,25 @@ public nonisolated enum CanvasCodexSession {
     /// Both are seams for tests. A line never carries the token, an endpoint,
     /// a thread ID or message text.
     static func run(
-        executable: String, arguments: [String], environment: [String: String],
+        executable: String, arguments requested: [String], environment: [String: String],
         serverArguments: [String],
         exchange: @escaping @Sendable (CanvasBridgeRequest) throws -> CanvasBridgeResponse,
         report: @escaping @Sendable (String) -> Void
     ) -> Int32 {
+        // `codex --remote … resume <id>` refuses permission flags, so the
+        // full-access flag always leaves the terminal UI. It becomes
+        // configuration of this terminal's own server only when the app grants
+        // this start: the user turned the setting on and approved the request.
+        let split = CanvasAgentFullAccess.splitCodexArguments(requested)
+        let arguments = split.terminal
+        var fullAccessServer: [String] = []
+        if !split.server.isEmpty {
+            if grantsFullAccess(environment: environment, exchange: exchange) {
+                fullAccessServer = split.server
+            } else {
+                report(CanvasAgentFullAccess.noGrantNotice)
+            }
+        }
         var phase = StartupPhase.directory
         var bindRefusal: String?
         let directory = "/tmp/rafu-cdx-\(UUID().uuidString)"
@@ -119,7 +133,8 @@ public nonisolated enum CanvasCodexSession {
         do {
             server = try spawn(
                 executable: executable,
-                arguments: ["app-server", "--listen", endpoint] + serverArguments + additions,
+                arguments: ["app-server", "--listen", endpoint] + serverArguments + additions
+                    + fullAccessServer,
                 environment: environment, isolatedGroup: true, discardIO: true
             )
         } catch {
@@ -375,6 +390,21 @@ public nonisolated enum CanvasCodexSession {
             metadata.st_uid == getuid(), metadata.st_mode & S_IFMT == S_IFDIR,
             metadata.st_mode & 0o777 == 0o700, socketIsOwned(path)
         else { throw SessionError.invalidEndpoint }
+    }
+
+    /// Asks the app, over this terminal's private token, for its one-time
+    /// full-access grant. Any error, refusal or missing bridge is "no".
+    static func grantsFullAccess(
+        environment: [String: String],
+        exchange: @Sendable (CanvasBridgeRequest) throws -> CanvasBridgeResponse
+    ) -> Bool {
+        guard let token = environment["RAFU_CANVAS_TOKEN"], !token.isEmpty,
+            environment["RAFU_CANVAS_SOCKET"] != nil
+        else { return false }
+        let request = CanvasBridgeRequest(
+            token: token, operation: CanvasAgentFullAccess.grantOperation, provider: "codex")
+        guard let response = try? exchange(request) else { return false }
+        return response.error == nil
     }
 
     static func shouldPrepareThread(_ arguments: [String]) -> Bool {

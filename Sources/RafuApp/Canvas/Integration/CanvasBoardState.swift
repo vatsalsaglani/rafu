@@ -793,6 +793,23 @@ final class CanvasBoardState: Identifiable {
     /// it through `edit`, so a grant is one undo step.
     var remoteImageConsent: CanvasRemoteImageConsent? { document.permissions?.remoteImages }
 
+    /// Marks a terminal node as full access (`CanvasCard.fullAccess`). No
+    /// undo step: the badge follows the agent, not an edit, so undo and redo
+    /// snapshots get the same mark and never hide it.
+    func markFullAccess(_ id: CanvasCardID) {
+        func mark(_ value: inout CanvasDocument) {
+            guard let index = value.cards.firstIndex(where: { $0.id == id }) else { return }
+            value.cards[index].fullAccess = true
+        }
+        guard let card = document.cards.first(where: { $0.id == id }), card.fullAccess != true
+        else { return }
+        mark(&document)
+        for index in undo.indices { mark(&undo[index]) }
+        for index in redo.indices { mark(&redo[index]) }
+        markDirty()
+        requestSave?()
+    }
+
     private func markDirty() {
         changeStamp &+= 1
         isDirty = true

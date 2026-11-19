@@ -39,11 +39,13 @@ struct VoiceConfirmRequest: Equatable {
     let summary: [String]
     /// `agent_configure` with strategy resume: the agent quits and resumes.
     let restartsAgent: Bool
+    /// The call gives Codex full access: no session grant ever covers it.
+    let grantsFullAccess: Bool
 
     /// Removals and agent restarts are destructive (ADR 0033): Return never
     /// runs them, and they never get a session grant.
     var isDestructive: Bool { tool == .nodeRemove || tool == .edgeRemove || restartsAgent }
-    var offersSessionGrant: Bool { !isDestructive }
+    var offersSessionGrant: Bool { !isDestructive && !grantsFullAccess }
     var actionTitle: String {
         if restartsAgent { return "Restart" }
         return isDestructive ? "Remove" : "Allow Once"
@@ -58,6 +60,7 @@ struct VoiceConfirmRequest: Equatable {
         tool = call.tool
         boardID = board.id
         ensemble = CanvasAgentText.singleLine(board.title, limit: 80)
+        grantsFullAccess = call.grantsFullAccess
         restartsAgent =
             call.tool == .agentConfigure
             && call.strategy == CanvasAgentConfigureStrategy.resume.rawValue
@@ -76,7 +79,7 @@ struct VoiceConfirmRequest: Equatable {
     /// A grant key: one tool on one Ensemble. A restart has its own key, so a
     /// session grant for an in-place change never covers it.
     var grantKey: String {
-        "\(tool.rawValue)\(restartsAgent ? "+restart" : "")|\(boardID.rawValue.uuidString)"
+        "\(tool.rawValue)\(restartsAgent ? "+restart" : "")\(grantsFullAccess ? "+full" : "")|\(boardID.rawValue.uuidString)"
     }
 }
 

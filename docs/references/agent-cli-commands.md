@@ -26,7 +26,8 @@ Last verified: Swift 6.4.2, macOS 27, 2026-11-10, against Claude Code 2.1.319 an
 | Codex | `/quit` | quits to the shell | **unverified** name (`/exit` is a likely alias) |
 | Codex | `/status` | exists; Rafu reads it back after a resume | output format **unverified** |
 | Codex | `codex resume <id> -c model="X" -c model_reasoning_effort="Y"` | keeps the thread; `-c` works on `resume`, `-m` does not | `-c` verified; the key `model_reasoning_effort` **unverified** |
-| Codex | `-c sandbox_mode="read-only\|workspace-write"` on resume | mode change | key **unverified** |
+| Codex | `-c sandbox_mode="read-only\|workspace-write"` on resume | mode change | **refused** by `codex --remote … resume` in 0.170.0 ("Permission overrides are not supported when resuming a remote task"), so a Rafu `read_only`/`workspace_write` change does not apply; see [`codex-full-access.md`](codex-full-access.md) |
+| Codex | `--dangerously-bypass-approvals-and-sandbox` | full access; the launcher always removes it from the terminal UI and, only with the app's one-time grant for an approved request, starts the private app server with `-c approval_policy="never" -c sandbox_mode="danger-full-access"` | verified 0.170.0, 2026-11-19 ([`codex-full-access.md`](codex-full-access.md)) |
 | Codex | launch `-m/--model`, `-c key=value`, `-a on-request\|never`, `-s read-only\|workspace-write\|danger-full-access` | — | verified |
 
 ## Rules
@@ -34,8 +35,9 @@ Last verified: Swift 6.4.2, macOS 27, 2026-11-10, against Claude Code 2.1.319 an
 - **Allowlists, never free text.** `model` matches `^[a-z0-9][a-z0-9._-]{0,63}$`. `effort`: Claude
   `low medium high xhigh max auto`; Codex `low medium high` until more are verified. `mode` is a per-agent enum of
   wire tokens: Claude `default accept_edits plan` (`--permission-mode default|acceptEdits|plan`), Codex
-  `read_only workspace_write` (`sandbox_mode`). The modes that remove every check (Claude `bypassPermissions`, Codex
-  `danger-full-access`) are deliberately absent. Every typed agent line is a fixed template (`/model `, `/effort `,
+  `read_only workspace_write full` (`sandbox_mode`; `full` is the bypass flag, gated by the Settings switch "Allow
+  Full access agents" and asked every time, see [`codex-full-access.md`](codex-full-access.md)). Claude
+  `bypassPermissions` is deliberately absent. Every typed agent line is a fixed template (`/model `, `/effort `,
   `/status`, `/exit`, `/quit`) plus one allowlisted token. Shell lines are argument vectors quoted by
   `CanvasAgentShell` (its refusal checks apply), never a shell string.
 - **Strategies.** Claude default `in_place`: type `/model <m>`, then `/effort <e>`, as separate lines through the

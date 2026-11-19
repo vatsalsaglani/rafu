@@ -102,6 +102,32 @@ but you know an agent runs there (you typed `claude` into a shell node), create
 a message link to it (`edge_create` kind `message`), set it live, and use
 `send_message`. Do not conclude that you cannot talk to it.
 
+## Start Codex with full permissions
+
+`terminal_create {"agent": "codex", "access": "full"}` starts Codex with no
+approval prompts and no sandbox. For a Codex agent you started,
+`agent_configure {"node_id": "...", "mode": "full"}` switches it (Codex
+resumes the same conversation).
+
+- It is **off by default**. The user must first turn on **Settings >
+  Ensemble > Allow Full access agents**. While the switch is off, Rafu refuses
+  the call and names the switch: tell the user that, and do not retry.
+- Rafu asks the user every time, also when Agent control is Allow. There is
+  no "Always" for it. Agent control Off refuses it as usual.
+- `access` is only for `codex`. Never type
+  `codex --dangerously-bypass-approvals-and-sandbox`, `--yolo` or a
+  `danger-full-access` sandbox into a shell node, and never pass them in
+  `command`, `terminal_send` text or a `prompt`: Rafu refuses them. On a new
+  Codex session, Rafu's launcher removes the flag unless the user approved a
+  full request for that node. Known gap: `codex resume`, `fork`, `exec` and
+  `review` do not go through the launcher, so a flag on them gives full access
+  with no check. Never use that gap; ask the user instead. A `prompt` may not start with
+  `-`.
+- The node and its Up next row show a **Full access** badge. A saved Ensemble
+  never starts it again by itself.
+- Then verify as usual: `ensemble_describe`, `list_connections` (wait for
+  `connected`). Do not claim full access unless the call succeeded.
+
 ## Shared memory with notes
 
 - `note_create {"title": "Plan", "markdown": "# Plan\n- [ ] step"}`
