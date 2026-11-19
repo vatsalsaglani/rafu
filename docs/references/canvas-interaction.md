@@ -104,6 +104,13 @@ pending).
   card, so Return reached the board's "enter content" handler, which handled
   the key: the field lost focus and the name was discarded. A rename from the
   context menu did not select the card, so it seemed to work.
+- **A terminal card that is about to get the keys back counts as active
+  content (2026-11-19).** Hiding the window (`CanvasBoardResources.pause`)
+  ends content focus; `board.contentFocusToRestore` holds the terminal card
+  until the window shows again, and both `boardTakesKeys` and
+  `CanvasToolKeyHandler.keysActive` read it through
+  `CanvasContentFocusRestore.contentHoldsKeys`. See
+  [`ensemble-terminal-focus-restore.md`](ensemble-terminal-focus-restore.md).
 - **The paused-links notice stacks below the tool palette.** Both are
   top-centre overlays on the board, so they are one `VStack`
   (`WorkspaceCanvasView.boardTopOverlay`: palette, then notice, 8 pt apart, 10

@@ -103,8 +103,27 @@ clipping, no extra gap); the delete confirmation when the header scrolls away; n
 sticky slab in Frosted; Full Keyboard Access; VoiceOver; a second window keeps
 its own expansion and selection; Increase Contrast.
 
+## Amendment 2026-11-19: the selection fill is drawn by the row
+
+The revisit trigger fired. The user saw a bright system-blue selected row in
+Terminals, Ensembles and Source Control Changes, while Agent History looked
+right. `.tint(theme.palette.selection)` never reaches the native List
+highlight: it is the system accent while the list is first responder in the
+key window.
+
+The "Selection fill" decision above is replaced. The List keeps
+`List(selection:)`, its keyboard and its accessibility selected state, but
+calls `.rafuQuietListSelection()` (`selectionHighlightStyle = .none` on the
+backing table view). Each row draws the shared Agent History fill with
+`.rafuRowSelection(isSelected:isHovering:cornerRadius:)`: `selection`, `hover`,
+and a `borderStrong` hairline under Increase Contrast. The same rule applies to
+every sidebar `List(selection:)`: Ensembles, Source Control Changes and
+History. Evidence and SDK facts:
+[`sidebar-list-selection-style.md`](../references/sidebar-list-selection-style.md).
+
 ## Related
 
+- [`sidebar-list-selection-style.md`](../references/sidebar-list-selection-style.md)
 - [`sidebar-panel-anatomy-and-terminal-rows.md`](../references/sidebar-panel-anatomy-and-terminal-rows.md)
 - [`list-custom-disclosure-group-style.md`](../references/list-custom-disclosure-group-style.md)
 - [`swiftui-macos-click-latency.md`](../references/swiftui-macos-click-latency.md)

@@ -65,6 +65,13 @@ final class CanvasBoardState: Identifiable {
     }
     var focusedCardID: CanvasCardID?
     var contentIsActive = false
+    /// View state, not saved: the terminal card that had the keys when the
+    /// board's window was hidden (another Space, a covering app, the screen
+    /// lock). Hiding the window releases the terminal's view and focus;
+    /// showing it again gives the keys back to this card
+    /// (`CanvasBoardResources.windowBecameAvailable`). While it is set the
+    /// board's letter keys stay off (`CanvasContentFocusRestore`).
+    var contentFocusToRestore: CanvasCardID?
     var visibleSize: CGSize = .zero
     var connectingFrom: CanvasCardID?
     /// View state, not saved: the "Show Links" choice (review 7.6).

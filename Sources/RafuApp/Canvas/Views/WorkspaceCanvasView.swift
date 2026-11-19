@@ -487,8 +487,12 @@ struct WorkspaceCanvasView: View {
     /// the letter shortcuts reach the board before the field: Return opened
     /// the card instead of saving the new name.
     private var boardTakesKeys: Bool {
+        // A terminal card waiting to get the keys back after a hidden window
+        // counts as active content, so N or T never reaches the board first.
         CanvasInlineRename.boardTakesKeys(
-            contentIsActive: board.contentIsActive, renamingCardID: board.renamingCardID,
+            contentIsActive: CanvasContentFocusRestore.contentHoldsKeys(
+                contentIsActive: board.contentIsActive, pending: board.contentFocusToRestore),
+            renamingCardID: board.renamingCardID,
             isFindPresented: board.isFindPresented)
     }
 

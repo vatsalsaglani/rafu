@@ -6,6 +6,9 @@ private enum GitPanelMetrics {
     static let fileRowHeight: CGFloat = 24
     /// Side of the rounded status-letter square.
     static let statusBadgeSize: CGFloat = 16
+    /// How far a selected file row's fill reaches past its checkbox and
+    /// status letter, so neither sits on the fill's edge.
+    static let selectionBleed: CGFloat = 4
 }
 
 struct SourceControlPanelView: View {
@@ -484,6 +487,10 @@ struct GitInspectorView: View {
                 .listStyle(.inset)
                 .scrollContentBackground(.hidden)
                 .environment(\.defaultMinListRowHeight, GitPanelMetrics.fileRowHeight)
+                // Rows draw the shared quiet fill (`rafuRowSelection`); the
+                // native highlight was the system accent while the list had
+                // the keys.
+                .rafuQuietListSelection()
             }
             GitCommitComposerView(session: session)
         }
@@ -639,6 +646,10 @@ struct GitInspectorView: View {
             toggleStaged: {
                 Task { await session.setStaged(scope != .staged, change: change) }
             }
+        )
+        .rafuRowSelection(
+            isSelected: session.gitSelectedChangeIDs.contains(change.id),
+            horizontalBleed: GitPanelMetrics.selectionBleed
         )
         .tag(change.id)
         .contentShape(.rect)
@@ -1212,6 +1223,10 @@ private struct GitChangeTreeRows: View {
             toggleStaged: {
                 Task { await session.setStaged(!isFullyStaged, change: change) }
             }
+        )
+        .rafuRowSelection(
+            isSelected: session.gitSelectedChangeIDs.contains(change.id),
+            horizontalBleed: GitPanelMetrics.selectionBleed
         )
         .tag(change.id)
         .padding(.leading, CGFloat(depth) * Self.indentUnit)

@@ -225,9 +225,14 @@ struct CanvasToolPalette: View {
 @MainActor
 enum CanvasToolKeyHandler {
     /// The letters act only while the board itself has keyboard focus, no
-    /// card content is active and no card title is being renamed.
+    /// card content is active (or about to get the keys back after a hidden
+    /// window, `CanvasContentFocusRestore`) and no card title is being
+    /// renamed.
     static func keysActive(boardFocused: Bool, board: CanvasBoardState) -> Bool {
-        boardFocused && !board.contentIsActive && board.renamingCardID == nil
+        boardFocused
+            && !CanvasContentFocusRestore.contentHoldsKeys(
+                contentIsActive: board.contentIsActive, pending: board.contentFocusToRestore)
+            && board.renamingCardID == nil
     }
 
     /// Returns true when the key was used. N and T are left to the board

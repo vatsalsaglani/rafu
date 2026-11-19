@@ -113,13 +113,15 @@ Naming is pure, in `TerminalNaming` and `TerminalsPanelModel.hierarchyRows`.
   attention only; the session colour is the dot only.
   `Emphasis.managerCurrent` was removed. Since ADR 0040, rows pass
   `isCurrent: false`, so the resolver draws only the attention border; the
-  selection fill is the system List highlight (see below).
+  row draws the selection fill (`rafuRowSelection`, 2026-11-19; see below).
 
 ### Terminals as a native List (ADR 0040, 2026-11-15)
 
 The panel is one `List(selection:)` (`.listStyle(.plain)`,
-`.scrollContentBackground(.hidden)`, overlay scrollers,
-`.tint(theme.palette.selection)`). This replaced the stacked custom rows, and
+`.scrollContentBackground(.hidden)`, overlay scrollers, and since 2026-11-19
+`.rafuQuietListSelection()` with a row-drawn `rafuRowSelection` fill; `.tint`
+never reached the native highlight, see
+[`sidebar-list-selection-style.md`](sidebar-list-selection-style.md)). This replaced the stacked custom rows, and
 arrow-key movement is no longer deferred. Decision, rejected alternatives and
 VoiceOver contract: [ADR 0040](../decisions/0040-terminals-panel-native-list.md).
 
@@ -244,8 +246,10 @@ Terminals native List (ADR 0040): evidence is tests only: `TerminalsPanelListTes
 `TerminalGroupManagerHierarchyTests` and `TerminalManagerPresentationTests`. No GUI
 check was done. GUI checks owed:
 
-- whether `.tint(theme.palette.selection)` changes the plain List selection
-  highlight (if not, it is the system accent; check Khadi contrast);
+- (answered 2026-11-19: `.tint` does not change the highlight; it was the
+  system accent. Rows now draw the fill, see
+  [`sidebar-list-selection-style.md`](sidebar-list-selection-style.md).)
+  Still owed: the quiet fill in Khadi and Indigo;
 - `.onKeyPress` on the List gets Return and Space before the List does;
 - a row click gives the List key focus;
 - inline rename focus, and Escape, inside List rows;
