@@ -25,6 +25,8 @@ final class CanvasLiveBridge {
     /// With a bound Codex route it marks a peer as still starting.
     @ObservationIgnored private let expectsAgent: @MainActor (CanvasCardID) -> Bool
     @ObservationIgnored private let sendToCodex: CodexSend
+    /// Agent requests that wait for an answer from the Up next row.
+    @ObservationIgnored private let agentRequests: AgentRequestStore
     /// Held only while at least one terminal has a live agent route. See `updateActivity`.
     @ObservationIgnored private var activity: (any NSObjectProtocol)?
 
@@ -47,7 +49,8 @@ final class CanvasLiveBridge {
         sendToCodex: @escaping CodexSend = { executable, endpoint, thread, text in
             try await CanvasCodexSession.send(
                 executable: executable, endpoint: endpoint, threadID: thread, text: text)
-        }
+        },
+        agentRequests: AgentRequestStore = .shared
     ) {
         resolveLocation = location
         self.now = now
@@ -57,6 +60,7 @@ final class CanvasLiveBridge {
         self.terminalIO = terminalIO
         self.expectsAgent = expectsAgent
         self.sendToCodex = sendToCodex
+        self.agentRequests = agentRequests
     }
     private enum SuspensionReason: String {
         case sessionChanged
@@ -210,6 +214,7 @@ final class CanvasLiveBridge {
     /// Installs one private terminal capability without starting a process.
     func install(controller: WorkspaceTerminalController, token: String) {
         endpoints = endpoints.filter { $0.value.controller?.id != controller.id }
+        agentRequests.clear(controllerID: controller.id)
         endpoints[token] = Endpoint(
             controller: controller, generation: controller.generation, lastSeen: now())
         updateActivity()
@@ -244,6 +249,7 @@ final class CanvasLiveBridge {
             delivery.task.cancel()
         }
         endpoints = endpoints.filter { $0.value.controller?.id != controller.id }
+        agentRequests.clear(controllerID: controller.id)
         if let directory = directories.removeValue(forKey: controller.id) {
             Task.detached { try? FileManager.default.removeItem(at: directory) }
         }
@@ -432,6 +438,39 @@ final class CanvasLiveBridge {
         for delivery in pending { _ = await delivery.task.result }
     }
 
+    /// `approvalOpen`, `approvalPoll` and `approvalClose` from the Codex
+    /// supervisor of a bound, live route. The caller already refused a
+    /// suspended route. Request text is never logged.
+    private func handleApproval(
+        _ request: CanvasBridgeRequest, controllerID: UUID, source: Endpoint
+    ) -> CanvasBridgeResponse {
+        guard request.provider == "codex", source.provider == "codex",
+            let route = request.endpoint, source.endpoint == route,
+            let thread = request.threadID, source.threadID == thread
+        else { return .init(error: "This terminal cannot exchange that Codex request.") }
+        switch request.operation {
+        case CanvasAgentRequest.openOperation:
+            guard let approval = request.approval else {
+                return .init(error: "Invalid agent request.")
+            }
+            switch agentRequests.open(approval, controllerID: controllerID) {
+            case .opened, .alreadyOpen: return .init()
+            case .conflict: return .init(error: "Invalid agent request.")
+            case .full: return .init(error: "Too many agent requests wait in this terminal.")
+            }
+        case CanvasAgentRequest.pollOperation:
+            return .init(approvalDecision: agentRequests.pendingDecision(for: controllerID))
+        case CanvasAgentRequest.closeOperation:
+            // A stale or unknown key is not an error: the request is gone either way.
+            if let key = request.approvalKey {
+                agentRequests.close(controllerID: controllerID, key: key)
+            }
+            return .init()
+        default:
+            return .init(error: "Unsupported bridge request.")
+        }
+    }
+
     func handle(_ request: CanvasBridgeRequest) async -> CanvasBridgeResponse {
         guard UUID(uuidString: request.clientID) != nil,
             var source = endpoints[request.token], let controller = source.controller,
@@ -443,6 +482,7 @@ final class CanvasLiveBridge {
                 "unregister",
                 "tool", CanvasChannelPrompt.launchOperation,
             ].contains(request.operation)
+                || CanvasAgentRequest.operations.contains(request.operation)
         else {
             return .init(error: "Unsupported bridge request.")
         }
@@ -465,6 +505,7 @@ final class CanvasLiveBridge {
             source.suspended = true
             source.inbox = []
             endpoints[request.token] = source
+            agentRequests.clear(controllerID: controller.id)
             notice = source.suspensionReason.notice
             updateActivity()
             revision &+= 1
@@ -510,6 +551,7 @@ final class CanvasLiveBridge {
             source.suspended = false
             source.lastSeen = now()
             endpoints[request.token] = source
+            agentRequests.clear(controllerID: controller.id)
             clearSuspensionNotice()
             updateActivity()
             revision &+= 1
@@ -539,6 +581,7 @@ final class CanvasLiveBridge {
                 source.inbox = []
                 source.suspended = false
                 source.suspensionReason = .sessionChanged
+                agentRequests.clear(controllerID: controller.id)
                 clearSuspensionNotice()
             }
             source.provider = "codex"
@@ -567,6 +610,9 @@ final class CanvasLiveBridge {
         }
         if source.suspended && request.operation != "register" {
             return .init(error: source.suspensionReason.status)
+        }
+        if CanvasAgentRequest.operations.contains(request.operation) {
+            return handleApproval(request, controllerID: controller.id, source: source)
         }
         if request.operation == "register" {
             guard request.provider == "claude" || request.provider == "codex" else {
@@ -615,6 +661,9 @@ final class CanvasLiveBridge {
                     return .init(error: "Invalid session identity.")
                 }
                 source.threadID = threadID
+            }
+            if source.endpoint != request.endpoint {
+                agentRequests.clear(controllerID: controller.id)
             }
             source.endpoint = request.endpoint
             source.executable = request.executable
