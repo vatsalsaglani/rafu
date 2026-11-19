@@ -220,10 +220,11 @@ struct CanvasAgentRequestTests {
         #expect(!wide.permits(.answers(["q": "Option 0"])))
     }
 
-    @Test("Secret, free-text and unclean questions need the terminal")
+    @Test("Secret and unclean questions need the terminal")
     func terminalOnlyQuestions() throws {
         #expect(try userInput([question("s", isSecret: true)]).terminalOnly)
-        #expect(try userInput([question("o", isOther: true)]).terminalOnly)
+        // Codex marks every model question isOther; its choices stay answerable.
+        #expect(try !userInput([question("o", isOther: true)]).terminalOnly)
         #expect(try userInput([question("n", labels: [])]).terminalOnly)
         #expect(try userInput([question("l", labels: ["Yes\u{1B}", "No"])]).terminalOnly)
         #expect(try userInput([question("d"), question("d")]).terminalOnly)

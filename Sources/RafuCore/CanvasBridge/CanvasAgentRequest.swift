@@ -52,15 +52,18 @@ public nonisolated struct CanvasAgentRequest: Codable, Hashable, Sendable {
         /// bounds exactly. Only the terminal can answer it.
         public let terminalOnly: Bool
 
-        /// Sanitizes one question. `isOther` (a free-text "Other" answer) and
-        /// `isSecret` make it terminal-only.
+        /// Sanitizes one question. `isSecret` makes it terminal-only.
+        /// `isOther` does not: Codex 0.170.0 sets it on every question the
+        /// model asks (the terminal shows "None of the above"). The listed
+        /// choices stay answerable from Up next; a free-text answer still
+        /// needs the terminal.
         public init(
             id: String, header: String, text: String, choices: [Choice],
             isOther: Bool = false, isSecret: Bool = false, terminalOnly: Bool = false
         ) {
             let cleanID = CanvasAgentRequest.clean(
                 id, limit: Limits.identifierBytes, keepsLineBreaks: false)
-            var restricted = terminalOnly || isOther || isSecret || cleanID.altered
+            var restricted = terminalOnly || isSecret || cleanID.altered
             restricted = restricted || cleanID.text.isEmpty || choices.isEmpty
             restricted = restricted || choices.count > Limits.choices
             var kept: [Choice] = []
