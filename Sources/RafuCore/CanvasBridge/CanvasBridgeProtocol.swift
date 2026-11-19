@@ -14,13 +14,18 @@ public nonisolated struct CanvasBridgeRequest: Codable, Hashable, Sendable {
     public var reason: String?
     /// Present only for `operation == "tool"`. Older peers ignore it.
     public var agentCall: CanvasAgentToolCall?
+    /// Present only for `approvalOpen`: the sanitized request. Older peers ignore it.
+    public var approval: CanvasAgentRequest?
+    /// Present only for `approvalClose`: the request that no longer waits.
+    public var approvalKey: UUID?
 
     public init(
         token: String, operation: String, clientID: String = UUID().uuidString,
         provider: String? = nil,
         threadID: String? = nil, endpoint: String? = nil, executable: String? = nil,
         destination: String? = nil, text: String? = nil, reason: String? = nil,
-        agentCall: CanvasAgentToolCall? = nil
+        agentCall: CanvasAgentToolCall? = nil, approval: CanvasAgentRequest? = nil,
+        approvalKey: UUID? = nil
     ) {
         self.token = token
         self.clientID = clientID
@@ -33,6 +38,8 @@ public nonisolated struct CanvasBridgeRequest: Codable, Hashable, Sendable {
         self.text = text
         self.reason = reason
         self.agentCall = agentCall
+        self.approval = approval
+        self.approvalKey = approvalKey
     }
 }
 
@@ -45,6 +52,9 @@ public nonisolated struct CanvasBridgeResponse: Codable, Hashable, Sendable {
     /// A stable class for an error the peer can act on without matching text.
     /// Optional; older peers ignore it.
     public var code: String?
+    /// The answer `approvalPoll` returns, when the user chose one. Optional
+    /// for older peers.
+    public var approvalDecision: CanvasAgentRequestAnswer?
 
     /// The app no longer knows this client. The MCP server registers again.
     public static let unregisteredCode = "unregistered"
@@ -53,13 +63,14 @@ public nonisolated struct CanvasBridgeResponse: Codable, Hashable, Sendable {
     public init(
         error: String? = nil, peers: [CanvasBridgePeer] = [],
         messages: [CanvasBridgeMessage] = [], toolResult: CanvasAgentToolResult? = nil,
-        code: String? = nil
+        code: String? = nil, approvalDecision: CanvasAgentRequestAnswer? = nil
     ) {
         self.error = error
         self.peers = peers
         self.messages = messages
         self.toolResult = toolResult
         self.code = code
+        self.approvalDecision = approvalDecision
     }
 }
 
