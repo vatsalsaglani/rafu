@@ -364,6 +364,14 @@ enum VoiceToolExecutor {
         case .confirm, .run, .runWithNotice:
             break
         }
+        // Full access needs the user's Settings switch and always shows the
+        // Confirm card.
+        if call.grantsFullAccess {
+            guard CanvasFullAccessPreference.isOn() else {
+                return failure("full_access_off", CanvasAgentFullAccess.switchOffMessage)
+            }
+            decision = .confirm
+        }
         // agent_configure: a busy or unknown agent is refused before the
         // Confirm card, and the card names the strategy. A restart always asks.
         if call.tool == .agentConfigure {

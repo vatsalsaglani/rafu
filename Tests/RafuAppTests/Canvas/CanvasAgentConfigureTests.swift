@@ -397,3 +397,73 @@ struct VoiceAgentConfigureTests {
         #expect(fake.typed == ["/quit"])
     }
 }
+
+@Suite("agent_configure and full access")
+@MainActor
+struct CanvasAgentConfigureFullAccessTests {
+    /// A Codex node with a known conversation, so a resume can be planned.
+    private func codexFixture() async throws -> ConfigureFixture {
+        let fixture = try await ConfigureFixture(title: "Tests", agent: "codex")
+        fixture.fake.front = .codex
+        fixture.fake.sessionID = "t-1"
+        return fixture
+    }
+
+    @Test("A change to a full-access node says in the question that full access stays")
+    func questionNamesKeptFullAccess() async throws {
+        let fixture = try await codexFixture()
+        fixture.board.markFullAccess(fixture.card.id)
+        let task = Task { try await fixture.handle(["model": "gpt-5"]) }
+        let boardID = fixture.board.id
+        _ = await waitUntil { !CanvasAgentCenter.shared.approvals(for: boardID).isEmpty }
+        let approval = try #require(CanvasAgentCenter.shared.approvals(for: boardID).first)
+        #expect(approval.summary.contains(CanvasAgentFullAccess.keepsFullAccessLine))
+        CanvasAgentCenter.shared.decide(approval.id, .deny)
+        _ = try await task.value
+        #expect(fixture.fake.typed.isEmpty)
+    }
+
+    @Test("A queued mode full change is dropped at replay when the switch is Off")
+    func queuedFullDroppedWhenSwitchOff() async throws {
+        let fixture = try await codexFixture()
+        fixture.board.setAgentControlMode(.allow)
+        fixture.fake.state = .working
+        let toggle = CanvasFullAccessPreference.TestSwitch(true)
+        let boardID = fixture.board.id
+        try await CanvasFullAccessPreference.$override.withValue(toggle) {
+            let task = Task { try await fixture.handle(["mode": "full", "queue": true]) }
+            _ = await waitUntil { !CanvasAgentCenter.shared.approvals(for: boardID).isEmpty }
+            let approval = try #require(CanvasAgentCenter.shared.approvals(for: boardID).first)
+            CanvasAgentCenter.shared.decide(approval.id, .once)
+            let response = try await task.value
+            #expect(response.toolResult?.strategy == "queued")
+            toggle.isOn = false
+            fixture.fake.state = .finished
+            // The queue removes the entry first, then runs it in a new task.
+            #expect(
+                await waitUntil {
+                    CanvasAgentCenter.shared.log(for: boardID).contains {
+                        $0.outcome.contains("Allow Full access agents is off")
+                    }
+                })
+        }
+        #expect(!CanvasAgentConfigureQueue.shared.isPending(fixture.card.id))
+        #expect(fixture.fake.typed.isEmpty)
+        #expect(fixture.board.cards.first?.fullAccess == nil)
+        #expect(!CanvasFullAccessTerminals.shared.hasGrant(fixture.card.id))
+    }
+
+    @Test("By voice, mode full with the switch Off is refused before any Confirm card")
+    func voiceSwitchOff() async throws {
+        let fixture = try await VoiceConfigureFixture(title: "Tests", agent: "codex")
+        defer { TestDefaultsSuite.remove(fixture.suite) }
+        fixture.base.fake.front = .codex
+        fixture.base.fake.sessionID = "t-1"
+        let outcome = await CanvasFullAccessPreference.$override.withValue(.init(false)) {
+            await fixture.run(#"{"node_id":"Tests","mode":"full"}"#)
+        }
+        #expect(outcome.output.contains("full_access_off"))
+        #expect(fixture.confirm.requests.isEmpty)
+        #expect(fixture.base.fake.typed.isEmpty)
+    }
+}

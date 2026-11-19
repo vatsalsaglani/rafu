@@ -34,13 +34,14 @@ public nonisolated enum CanvasAgentConfigureAgent: String, CaseIterable, Sendabl
     }
 
     /// Modes, as wire tokens (`mode`). Claude: the permission mode for
-    /// `--permission-mode`. Codex: the sandbox for `-c sandbox_mode`. The
-    /// modes that remove every check (Claude `bypassPermissions`, Codex
-    /// `danger-full-access`) are deliberately absent.
+    /// `--permission-mode`. Codex: the sandbox for `-c sandbox_mode`, or
+    /// `full` (`CanvasAgentFullAccess`): no approval prompts and no sandbox,
+    /// which the app allows only with the user's Settings switch on and
+    /// always asks for. Claude `bypassPermissions` is deliberately absent.
     public var modes: [String] {
         switch self {
         case .claude: ["default", "accept_edits", "plan"]
-        case .codex: ["read_only", "workspace_write"]
+        case .codex: ["read_only", "workspace_write", CanvasAgentFullAccess.fullAccess]
         }
     }
 
@@ -52,6 +53,7 @@ public nonisolated enum CanvasAgentConfigureAgent: String, CaseIterable, Sendabl
         case (.claude, "plan"): "plan"
         case (.codex, "read_only"): "read-only"
         case (.codex, "workspace_write"): "workspace-write"
+        case (.codex, CanvasAgentFullAccess.fullAccess): CanvasAgentFullAccess.codexSandboxValue
         default: nil
         }
     }
@@ -441,12 +443,17 @@ extension CanvasAgentConfigureAgent {
         return flags
     }
 
-    /// The mode flag for a resume line.
+    /// The mode flag for a resume line. Codex `full` is the bypass flag;
+    /// Rafu's launcher hands it to the private app server.
     func modeFlags(_ mode: String?) -> [String] {
         guard let mode, let value = cliMode(mode) else { return [] }
         switch self {
         case .claude: return ["--permission-mode", value]
-        case .codex: return ["-c", "sandbox_mode=\"\(value)\""]
+        case .codex:
+            if mode == CanvasAgentFullAccess.fullAccess {
+                return [CanvasAgentFullAccess.codexBypassFlag]
+            }
+            return ["-c", "sandbox_mode=\"\(value)\""]
         }
     }
 }

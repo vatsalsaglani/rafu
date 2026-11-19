@@ -399,6 +399,12 @@ struct CanvasCardShell: View {
             {
                 CanvasAgentProvenanceBadge(record: provenance)
             }
+            if let fullAccess = CanvasFullAccessBadge.badge(for: card) {
+                CanvasHeaderBadge(text: fullAccess.text, symbol: fullAccess.symbol)
+                    .help(fullAccess.help)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(fullAccess.accessibilityLabel)
+            }
             if let agentStatus {
                 AgentStatusPill(
                     status: agentStatus, elapsed: agentElapsedLabel(for: agentStatus, scale: scale))

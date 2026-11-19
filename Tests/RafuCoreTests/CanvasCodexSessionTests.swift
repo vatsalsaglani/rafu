@@ -106,9 +106,13 @@ struct CanvasCodexSessionTests {
         let lines = Mutex<[String]>([])
         let bindReply = Mutex(CanvasBridgeResponse())
         let bindFailure = Mutex<(any Error)?>(nil)
+        let grantReply = Mutex(CanvasBridgeResponse())
 
         func exchange(_ request: CanvasBridgeRequest) throws -> CanvasBridgeResponse {
             requests.withLock { $0.append(request) }
+            if request.operation == CanvasAgentFullAccess.grantOperation {
+                return grantReply.withLock { $0 }
+            }
             if request.operation == "bind" {
                 if let failure = bindFailure.withLock({ $0 }) { throw failure }
                 return bindReply.withLock { $0 }
@@ -116,9 +120,9 @@ struct CanvasCodexSessionTests {
             return CanvasBridgeResponse()
         }
 
-        func run(_ fixture: Fixture) -> Int32 {
+        func run(_ fixture: Fixture, arguments: [String] = []) -> Int32 {
             CanvasCodexSession.run(
-                executable: fixture.executable.path, arguments: [],
+                executable: fixture.executable.path, arguments: arguments,
                 environment: ProcessInfo.processInfo.environment.merging([
                     "RAFU_CANVAS_TOKEN": "fixture-private-token",
                     "RAFU_CANVAS_SOCKET": "/tmp/fixture-bridge.sock",
@@ -141,6 +145,42 @@ struct CanvasCodexSessionTests {
         #expect(requests.allSatisfy { $0.token == "fixture-private-token" })
         // A normal exit prints nothing.
         #expect(probe.lines.withLock { $0.isEmpty })
+    }
+
+    @Test func fullAccessReachesTheServerOnlyWithTheAppsGrant() throws {
+        let bypass = CanvasAgentFullAccess.codexBypassFlag
+        for granted in [true, false] {
+            let fixture = try Fixture()
+            defer { fixture.remove() }
+            let probe = BridgeProbe()
+            if !granted {
+                probe.grantReply.withLock {
+                    $0 = CanvasBridgeResponse(error: CanvasAgentFullAccess.noGrantNotice)
+                }
+            }
+            #expect(probe.run(fixture, arguments: [bypass, "fix it"]) == 23)
+            let server = try #require(fixture.read("server.json")["arguments"] as? [String])
+            let terminal = try #require(fixture.read("terminal.json")["arguments"] as? [String])
+            #expect(!terminal.contains(bypass))
+            #expect(terminal.last == "fix it")
+            let overrides = CanvasAgentFullAccess.serverOverrides
+            #expect(Array(server.suffix(overrides.count)) == overrides || !granted)
+            #expect(server.contains(where: { $0.contains("danger-full-access") }) == granted)
+            let operations = probe.requests.withLock { $0.map(\.operation) }
+            #expect(operations == [CanvasAgentFullAccess.grantOperation, "bind", "release"])
+            let lines = probe.lines.withLock { $0 }
+            #expect(lines == (granted ? [] : [CanvasAgentFullAccess.noGrantNotice]))
+        }
+    }
+
+    @Test func noFlagAsksForNoGrant() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let probe = BridgeProbe()
+        #expect(probe.run(fixture, arguments: ["fix it"]) == 23)
+        let server = try #require(fixture.read("server.json")["arguments"] as? [String])
+        #expect(!server.contains(where: { $0.contains("danger-full-access") }))
+        #expect(probe.requests.withLock { $0.map(\.operation) } == ["bind", "release"])
     }
 
     @Test func refusedBindReportsTheAppReasonAndANextStep() throws {

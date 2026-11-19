@@ -452,7 +452,8 @@ final class NotchCompanionModel: NSObject {
 
     static func terminalInput(
         for controller: WorkspaceTerminalController, windowID: UUID? = nil,
-        boardID: UUID? = nil, cardID: UUID? = nil, cardTitle: String? = nil
+        boardID: UUID? = nil, cardID: UUID? = nil, cardTitle: String? = nil,
+        fullAccess: Bool = false
     ) -> NotchTerminalInput {
         let store = AgentActivityStore.shared
         let session = store.trackedSession(for: controller)
@@ -469,7 +470,8 @@ final class NotchCompanionModel: NSObject {
             windowID: windowID,
             trackedPhase: AgentTrackedPhase.terminalPhase(
                 session: session, status: controller.status, now: store.now),
-            subagents: AgentTrackedPhase.subagentEntries(session))
+            subagents: AgentTrackedPhase.subagentEntries(session),
+            fullAccess: fullAccess)
     }
 
     /// Every agent terminal in every registered window. Reads only the
@@ -478,9 +480,12 @@ final class NotchCompanionModel: NSObject {
     var allAgentRows: [NotchAgentRow] {
         entries.flatMap { entry -> [NotchAgentRow] in
             guard let session = entry.session else { return [] }
+            let fullAccess = CanvasFullAccessTerminals.shared
             return NotchAgentRow.rows(
                 from: session.terminal.sessions.map {
-                    Self.terminalInput(for: $0, windowID: entry.id)
+                    Self.terminalInput(
+                        for: $0, windowID: entry.id,
+                        fullAccess: fullAccess.contains(sessionID: $0.id, in: session.terminal))
                 })
         }
     }
@@ -595,7 +600,9 @@ final class NotchCompanionModel: NSObject {
                 for: controller, windowID: windowID,
                 boardID: placement[controller.id]?.board,
                 cardID: placement[controller.id]?.card,
-                cardTitle: placement[controller.id]?.cardTitle)
+                cardTitle: placement[controller.id]?.cardTitle,
+                fullAccess: CanvasFullAccessTerminals.shared.contains(
+                    sessionID: controller.id, in: session.terminal))
         }
         return NotchWindowAgents.build(boards: boards, terminals: terminals)
     }

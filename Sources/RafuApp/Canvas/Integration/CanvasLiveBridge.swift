@@ -480,7 +480,7 @@ final class CanvasLiveBridge {
             [
                 "bind", "suspend", "resume", "release", "register", "list", "send", "receive",
                 "unregister",
-                "tool", CanvasChannelPrompt.launchOperation,
+                "tool", CanvasChannelPrompt.launchOperation, CanvasAgentFullAccess.grantOperation,
             ].contains(request.operation)
                 || CanvasAgentRequest.operations.contains(request.operation)
         else {
@@ -488,6 +488,9 @@ final class CanvasLiveBridge {
         }
         if request.operation == CanvasChannelPrompt.launchOperation {
             return recordClaudeLaunch(request, controller: controller, source: source)
+        }
+        if request.operation == CanvasAgentFullAccess.grantOperation {
+            return fullAccessGrant(request, controller: controller)
         }
         if request.operation == "suspend" {
             guard request.provider == "codex", source.provider == "codex",
@@ -1031,6 +1034,23 @@ final class CanvasLiveBridge {
     /// yet. A `launch` while a Claude client is bound and fresh (the same
     /// freshness rule as `register`) is refused: an agent in the terminal can read
     /// the token and must not be able to open a new watch for its own Claude.
+    /// The launcher asks before it starts Codex's server with full access.
+    /// Yes only once per approved request for this terminal's node, with the
+    /// Settings switch on and Agent control not Off.
+    private func fullAccessGrant(
+        _ request: CanvasBridgeRequest, controller: WorkspaceTerminalController
+    ) -> CanvasBridgeResponse {
+        let refusal = CanvasBridgeResponse(error: CanvasAgentFullAccess.noGrantNotice)
+        guard request.provider == "codex", let place = location(of: controller.id) else {
+            return refusal
+        }
+        // Consume first: a refused start never leaves a grant behind.
+        let granted = CanvasFullAccessTerminals.shared.consumeGrant(place.card.id, now: now())
+        guard granted, CanvasFullAccessPreference.isOn(), place.board.agentControlMode != .off
+        else { return refusal }
+        return .init()
+    }
+
     private func recordClaudeLaunch(
         _ request: CanvasBridgeRequest, controller: WorkspaceTerminalController,
         source: Endpoint

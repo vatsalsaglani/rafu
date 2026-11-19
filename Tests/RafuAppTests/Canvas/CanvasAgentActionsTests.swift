@@ -1114,3 +1114,233 @@ struct CanvasTerminalStartTests {
         return id
     }
 }
+
+@Suite("Full access for Codex in Ensemble terminals")
+@MainActor
+struct CanvasFullAccessActionTests {
+    private let bypass = CanvasAgentFullAccess.codexBypassFlag
+
+    /// Asks for a full-access Codex node with the switch On and approves it once.
+    private func createApproved(_ fixture: CanvasAgentFixture) async throws
+        -> CanvasBridgeResponse
+    {
+        try await CanvasFullAccessPreference.$override.withValue(.init(true)) {
+            try await withShortStartWait {
+                let task = Task {
+                    try await fixture.call("terminal_create", ["agent": "codex", "access": "full"])
+                }
+                let approval = try #require(await fixture.pendingApproval())
+                #expect(approval.call.grantsFullAccess)
+                #expect(!approval.allowsAlways)
+                #expect(approval.summary.contains { $0.hasPrefix("Full access:") })
+                CanvasAgentCenter.shared.decide(approval.id, .once)
+                return try await task.value
+            }
+        }
+    }
+
+    @Test("With the switch Off, a full request is refused with the switch's name and adds no node")
+    func switchOffRefuses() async throws {
+        let fixture = try await CanvasAgentFixture()
+        fixture.board.setAgentControlMode(.allow)
+        let response = try await CanvasFullAccessPreference.$override.withValue(.init(false)) {
+            try await fixture.call("terminal_create", ["agent": "codex", "access": "full"])
+        }
+        #expect(response.error == CanvasAgentFullAccess.switchOffMessage)
+        #expect(response.error?.contains("Allow Full access agents") == true)
+        #expect(fixture.board.cards.count == 2)
+        #expect(CanvasAgentCenter.shared.approvals(for: fixture.board.id).isEmpty)
+    }
+
+    @Test("Agent control Off still refuses a full request, with the Off message")
+    func agentControlOffRefuses() async throws {
+        let fixture = try await CanvasAgentFixture()
+        fixture.board.setAgentControlMode(.off)
+        let response = try await CanvasFullAccessPreference.$override.withValue(.init(true)) {
+            try await fixture.call("terminal_create", ["agent": "codex", "access": "full"])
+        }
+        #expect(response.error == CanvasAgentPolicy.offMessage)
+        #expect(fixture.board.cards.count == 2)
+    }
+
+    @Test("A full request asks even in Allow, never offers Always, and marks the node")
+    func asksAndMarksTheNode() async throws {
+        let fixture = try await CanvasAgentFixture()
+        fixture.board.setAgentControlMode(.allow)
+        let response = try await createApproved(fixture)
+        #expect(response.error == nil)
+        #expect(response.toolResult?.message?.contains("full access") == true)
+        let card = try #require(fixture.board.cards.last)
+        #expect(card.fullAccess == true)
+        #expect(CanvasFullAccessBadge.badge(for: card) == .full)
+        guard case .terminal(let groupID) = card.content else {
+            Issue.record("not a terminal card")
+            return
+        }
+        #expect(CanvasFullAccessTerminals.shared.groupIDs.contains(groupID))
+        // The launch line Rafu types carries the flag.
+        var typed: [String] = []
+        _ = fixture.board.drainPendingTerminalLines(for: card.id, limit: 8) {
+            typed.append($0)
+            return true
+        }
+        #expect(typed.count == 1)
+        #expect(typed.first?.hasPrefix("codex \(bypass)") == true)
+    }
+
+    @Test("A denied full request adds no node")
+    func deniedAddsNothing() async throws {
+        let fixture = try await CanvasAgentFixture()
+        let response = try await CanvasFullAccessPreference.$override.withValue(.init(true)) {
+            let task = Task {
+                try await fixture.call("terminal_create", ["agent": "codex", "access": "full"])
+            }
+            let approval = try #require(await fixture.pendingApproval())
+            CanvasAgentCenter.shared.decide(approval.id, .deny)
+            return try await task.value
+        }
+        #expect(response.error == CanvasAgentActions.deniedMessage)
+        #expect(fixture.board.cards.count == 2)
+    }
+
+    @Test("A saved board keeps the badge but never starts full access by itself")
+    func savedLayoutStaysInert() async throws {
+        let fixture = try await CanvasAgentFixture()
+        fixture.board.setAgentControlMode(.allow)
+        _ = try await createApproved(fixture)
+        let saved = try JSONEncoder().encode(fixture.board.snapshot())
+        let text = String(decoding: saved, as: UTF8.self)
+        #expect(!text.contains(bypass))
+        #expect(!text.contains("danger-full-access"))
+        let reopened = CanvasBoardState(
+            document: try JSONDecoder().decode(CanvasDocument.self, from: saved))
+        let card = try #require(reopened.cards.last)
+        #expect(card.fullAccess == true)
+        #expect(CanvasFullAccessBadge.badge(for: card) != nil)
+        #expect(reopened.pendingTerminalLineCount(for: card.id) == 0)
+        #expect(reopened.terminalStartRequest == nil)
+        // The row badge comes back from the node flag; no grant does.
+        guard case .terminal(let groupID) = card.content else {
+            Issue.record("not a terminal card")
+            return
+        }
+        CanvasFullAccessTerminals.shared.adopt(reopened.cards)
+        #expect(CanvasFullAccessTerminals.shared.groupIDs.contains(groupID))
+    }
+
+    @Test("The badge is only for a marked terminal node, and old files decode without it")
+    func badgeModel() throws {
+        let group = TerminalGroupID()
+        var terminal = CanvasCard(title: "Codex", content: .terminal(groupID: group))
+        #expect(CanvasFullAccessBadge.badge(for: terminal) == nil)
+        terminal.fullAccess = true
+        let badge = try #require(CanvasFullAccessBadge.badge(for: terminal))
+        #expect(badge.text == "Full access")
+        #expect(badge.accessibilityLabel == "Full access, skips approval prompts")
+        #expect(!badge.symbol.isEmpty)
+        var note = CanvasCard(title: "Plan", content: .note(snapshot: ""))
+        note.fullAccess = true
+        #expect(CanvasFullAccessBadge.badge(for: note) == nil)
+        let legacy = try JSONEncoder().encode(
+            CanvasCard(title: "Codex", content: .terminal(groupID: group)))
+        #expect(!String(decoding: legacy, as: UTF8.self).contains("fullAccess"))
+        #expect(try JSONDecoder().decode(CanvasCard.self, from: legacy).fullAccess == nil)
+    }
+
+    @Test("Turning the switch Off while the question waits refuses the approved call")
+    func switchOffWhileWaiting() async throws {
+        let fixture = try await CanvasAgentFixture()
+        let toggle = CanvasFullAccessPreference.TestSwitch(true)
+        let response = try await CanvasFullAccessPreference.$override.withValue(toggle) {
+            let task = Task {
+                try await fixture.call("terminal_create", ["agent": "codex", "access": "full"])
+            }
+            let approval = try #require(await fixture.pendingApproval())
+            toggle.isOn = false
+            CanvasAgentCenter.shared.decide(approval.id, .once)
+            return try await task.value
+        }
+        #expect(response.error == CanvasAgentFullAccess.switchOffMessage)
+        #expect(fixture.board.cards.count == 2)
+    }
+
+    @Test("The activity log names the switch, not Agent control, when the switch is Off")
+    func logNamesTheSwitch() async throws {
+        let fixture = try await CanvasAgentFixture()
+        _ = try await CanvasFullAccessPreference.$override.withValue(.init(false)) {
+            try await fixture.call("terminal_create", ["agent": "codex", "access": "full"])
+        }
+        let outcome = CanvasAgentCenter.shared.log(for: fixture.board.id).last?.outcome
+        #expect(outcome == "Blocked: Allow Full access agents is off")
+    }
+
+    @Test("A prompt that is a flag is refused before any node or question")
+    func promptFlagRefused() async throws {
+        let fixture = try await CanvasAgentFixture()
+        fixture.board.setAgentControlMode(.allow)
+        await #expect(throws: CanvasAgentToolError.self) {
+            try await fixture.call(
+                "terminal_create", ["agent": "codex", "prompt": " " + bypass])
+        }
+        #expect(fixture.board.cards.count == 2)
+    }
+
+    @Test("The launcher's grant is given once, only after an approved full request")
+    func launcherGrantIsOneTime() async throws {
+        let fixture = try await CanvasAgentFixture()
+        fixture.board.setAgentControlMode(.allow)
+        let lead = fixture.cards[0].id
+        let request = CanvasBridgeRequest(
+            token: fixture.token, operation: CanvasAgentFullAccess.grantOperation,
+            provider: "codex")
+        try await CanvasFullAccessPreference.$override.withValue(.init(true)) {
+            // No approved request: no grant, as for a flag the user typed by hand.
+            #expect(await fixture.bridge.handle(request).error != nil)
+            CanvasFullAccessTerminals.shared.grant(lead)
+            #expect(await fixture.bridge.handle(request).error == nil)
+            #expect(await fixture.bridge.handle(request).error != nil)
+            // A grant is refused, and used up, when Agent control is Off.
+            CanvasFullAccessTerminals.shared.grant(lead)
+            fixture.board.setAgentControlMode(.off)
+            #expect(await fixture.bridge.handle(request).error != nil)
+            #expect(!CanvasFullAccessTerminals.shared.hasGrant(lead))
+            fixture.board.setAgentControlMode(.allow)
+            _ = try await createApproved(fixture)
+        }
+        let created = try #require(fixture.board.cards.last)
+        #expect(CanvasFullAccessTerminals.shared.hasGrant(created.id))
+        // With the switch Off, a grant gives nothing.
+        CanvasFullAccessTerminals.shared.grant(lead)
+        await CanvasFullAccessPreference.$override.withValue(.init(false)) {
+            #expect(await fixture.bridge.handle(request).error != nil)
+        }
+    }
+
+    @Test("A voice Confirm for full access offers no session grant and has its own key")
+    func voiceConfirmNeverGrantsForTheSession() throws {
+        let board = CanvasBoardState(document: CanvasDocument(title: "Voice"))
+        let full = VoiceConfirmRequest(
+            call: try CanvasAgentToolCall.parse(
+                tool: "terminal_create", arguments: ["agent": "codex", "access": "full"]),
+            board: board)
+        let plain = VoiceConfirmRequest(
+            call: try CanvasAgentToolCall.parse(
+                tool: "terminal_create", arguments: ["agent": "codex"]),
+            board: board)
+        #expect(!full.offersSessionGrant)
+        #expect(plain.offersSessionGrant)
+        #expect(full.grantKey != plain.grantKey)
+    }
+
+    @Test("Agent rows carry full access to the badge and to VoiceOver")
+    func agentRows() {
+        let rows = NotchAgentRow.rows(from: [
+            NotchTerminalInput(
+                id: UUID(), title: "Codex", cli: .codex, status: .bell, fullAccess: true),
+            NotchTerminalInput(id: UUID(), title: "Plain", cli: .codex, status: .bell),
+        ])
+        #expect(rows.map(\.fullAccess) == [true, false])
+        #expect(rows[0].accessibilityLabel.hasSuffix("Full access, skips approval prompts"))
+        #expect(!rows[1].accessibilityLabel.contains("Full access"))
+    }
+}

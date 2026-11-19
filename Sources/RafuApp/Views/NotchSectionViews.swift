@@ -218,6 +218,9 @@ struct CompanionAgentRowView: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
                 Spacer(minLength: RafuMetrics.space2)
+                if row.fullAccess {
+                    CompanionFullAccessBadge()
+                }
                 Image(systemName: row.phase.symbol)
                     .font(.system(size: 10))
                     .accessibilityHidden(true)
@@ -236,8 +239,28 @@ struct CompanionAgentRowView: View {
         }
         .buttonStyle(.plain)
         .help("Show \(row.title) in its window")
-        .accessibilityLabel("\(row.title), \(row.cli.displayName), \(row.phase.label)")
+        .accessibilityLabel(row.accessibilityLabel)
         .accessibilityHint("Activates to show this agent")
+    }
+}
+
+/// "Full access" on an agent row: a shield and the words, never colour
+/// alone. The row's own label carries it for VoiceOver.
+private struct CompanionFullAccessBadge: View {
+    var body: some View {
+        HStack(spacing: 2) {
+            Image(systemName: CanvasFullAccessBadge.full.symbol)
+                .font(.system(size: 9))
+            Text(CanvasFullAccessBadge.full.text)
+                .font(.system(size: 10, weight: .semibold))
+                .lineLimit(1)
+                .fixedSize()
+        }
+        .padding(.horizontal, 5)
+        .padding(.vertical, 1)
+        .background(Capsule().fill(Color.white.opacity(0.12)))
+        .help(CanvasFullAccessBadge.full.help)
+        .accessibilityHidden(true)
     }
 }
 

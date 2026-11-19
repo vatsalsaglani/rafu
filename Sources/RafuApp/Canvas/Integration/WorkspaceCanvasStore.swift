@@ -356,6 +356,7 @@ final class WorkspaceCanvasStore {
         boards[document.id]?.requestSave = nil
         boards[document.id]?.requestAttentionFlush = nil
         let board = CanvasBoardState(document: document)
+        CanvasFullAccessTerminals.shared.adopt(board.cards)
         board.requestAttentionFlush = { [weak self, weak board] in
             guard let self, let board else { return }
             Task(name: "Save Ensemble attention") { await self.flushAttention(board) }

@@ -20,7 +20,7 @@ Off blocks edit and sensitive tools.
 | `node_create` | edit | `kind` (note, terminal, file, image, web, mermaid, shape, text, service_icon, frame) and per kind: `text`, `path`, `url`, `shape`, `pack_id`+`icon_id`+`label`, `member_ids`; `title`?, `width`?, `height`?, `near`?, `x`?, `y`? |
 | `node_update` | edit | `node_id`, `title`?, `x`?, `y`?, `width`? (96–2000), `height`? (64–2000) |
 | `node_remove` | sensitive | `node_id` (not your own node) |
-| `terminal_create` | edit; sensitive with `agent` or `command` | `title`?, `cwd`? (workspace-relative folder), `agent`?, `command`? (argument array, ≤ 32 items, ≤ 1,024 bytes each), `prompt`? (claude or codex, ≤ 1,024 bytes), `model`? and `effort`? (claude or codex only), `link`? (true adds a message link, returns `edge_id` and `mention`), `near`?, `x`?, `y`? |
+| `terminal_create` | edit; sensitive with `agent` or `command` | `title`?, `cwd`? (workspace-relative folder), `agent`?, `command`? (argument array, ≤ 32 items, ≤ 1,024 bytes each), `prompt`? (claude or codex, ≤ 1,024 bytes), `model`? and `effort`? (claude or codex only), `access`? (codex only: `default` or `full`), `link`? (true adds a message link, returns `edge_id` and `mention`), `near`?, `x`?, `y`? |
 | `agent_configure` | sensitive; a resume always asks | `node_id` (a terminal you created), and `model`?, `effort`?, `mode`?; `strategy`? (`in_place` for Claude Code, `resume`), `queue`? |
 | `terminal_start` | sensitive | `node_id` |
 | `terminal_send` | Live link, else sensitive | `node_id`, and `text` (≤ 4 KiB) or `command` (argument array) |
@@ -97,7 +97,7 @@ agent in a terminal you created, also in the middle of its conversation.
   (default, accept_edits, plan) needs `strategy: resume`.
 - **Codex, resume (default):** Codex quits and resumes the same conversation
   with `-c` config. Efforts: low, medium, high. Modes: read_only,
-  workspace_write.
+  workspace_write, full (see Full access below).
 - **Busy:** while the agent is mid-turn, or waits on an approval or a
   question, the call fails with `agent_busy`. Pass `queue: true` to run it
   when the turn ends (needs agent hooks; one change per node; 15 minutes).
@@ -108,6 +108,25 @@ agent in a terminal you created, also in the middle of its conversation.
 - To start an agent with a model, use `terminal_create` with `model` and
   `effort` (claude `--model`/`--effort`; codex `-m` and
   `model_reasoning_effort`).
+
+## Full access (Codex only)
+
+`terminal_create {"agent": "codex", "access": "full"}` starts Codex with no
+approval prompts and no sandbox. `agent_configure` with `mode: "full"`
+switches a Codex agent you started.
+
+- Off by default. The user must first turn on **Settings > Ensemble > Allow
+  Full access agents**. While it is off, Rafu refuses the call and names the
+  switch. Tell the user; do not retry.
+- Rafu asks the user every time, also when Agent control is Allow. There is
+  no "Always" for it.
+- `access` for another agent is refused. A `command` or `terminal_send`
+  text that holds `--dangerously-bypass-approvals-and-sandbox`, `--yolo` or
+  `danger-full-access` is refused, and so is a `prompt` that starts with `-`.
+  A flag typed into a shell gives no full access: Rafu's launcher removes it
+  unless the user approved a full request for that node.
+- The node and its Up next row show a **Full access** badge. A saved
+  Ensemble never starts it again by itself.
 
 ## Placement
 
