@@ -183,3 +183,25 @@ cases were run" (seen with Swift 6.4.2).
 - [`notch-companion.md`](notch-companion.md): the approval rows that show these requests.
 - [`codex-app-server-approvals.md`](codex-app-server-approvals.md): the Codex side of the same Up next answer path.
 - [`agent-hooks-and-now-playing.md`](agent-hooks-and-now-playing.md): the normal hook helper, the spool and the merge.
+
+## Claude Code questions use a different hook
+
+Verified with Claude Code 2.1.329 and Haiku in an interactive terminal on
+2026-11-20. A blocking `PreToolUse` hook for `AskUserQuestion` hides the
+question until the hook exits. Do not use this hook to wait for an Up next
+answer. A user at the terminal would have to wait for the helper to exit
+before they could select a choice.
+
+To reproduce, use a temporary settings file with a `PreToolUse` command hook
+that matches `AskUserQuestion`. Have the hook record its start and end times,
+wait 12 seconds, and exit with no output. Run Claude with
+`--model haiku --permission-mode default --setting-sources project --settings <temporary-file>`.
+Ask it to use the question tool with two choices. Compare the hook times with
+the time the selectable choices first appear in the terminal.
+
+The hook received `tool_input.questions`, an array. Each question contained
+`question` and `header` strings, an `options` array of objects with `label`
+and `description` strings, and `multiSelect: false`. The terminal showed a
+running-hook indicator during the wait. The first selectable choices appeared
+about 20 ms after hook exit. The safety check ended the probe at that point.
+Answer injection and timeout behavior remain unverified for this hook.
