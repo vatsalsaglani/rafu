@@ -122,6 +122,9 @@ build OK; 466 tests in 33 suites (parallel) and 3726 tests in 301 suites
    the bounded preview, and its parent PID chain (at most 16 PIDs, read with
    `proc_pidinfo(PROC_PIDTBSDINFO)`; no command lines, no environment).
    Prompts, tool inputs and outputs, and transcript paths are discarded.
+   One exception: the `--answer` mode for a Claude `PermissionRequest` keeps a
+   bounded summary of the command or file path (see
+   [`claude-permission-request-hook.md`](claude-permission-request-hook.md)).
    Unknown event names are dropped.
 5. The second argument must be an absolute path that ends in
    `AgentTracking/spool`; otherwise the helper writes nothing.

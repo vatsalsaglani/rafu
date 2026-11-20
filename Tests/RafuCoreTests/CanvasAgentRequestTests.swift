@@ -262,6 +262,29 @@ struct CanvasAgentRequestTests {
         #expect(try roundTrip(answer) == answer)
     }
 
+    @Test("A request that cannot grant a session drops that option and survives a round trip")
+    func sessionAllowFlag() throws {
+        for kind in [CanvasAgentRequest.Kind.command, .fileChange] {
+            let codex = CanvasAgentRequest(kind: kind, command: "ls")
+            let claude = CanvasAgentRequest(kind: kind, command: "ls", offersSessionAllow: false)
+            #expect(codex.offersSessionAllow)
+            #expect(codex.permits(.acceptForSession))
+            #expect(!claude.offersSessionAllow)
+            #expect(!claude.permits(.acceptForSession))
+            #expect(claude.options.map(\.decision) == [.accept, .decline, .cancel])
+            #expect(try roundTrip(claude) == claude)
+            #expect(try roundTrip(claude).offersSessionAllow == false)
+        }
+        // An older peer sends no key: the Codex answers all stay available.
+        let request = CanvasAgentRequest(kind: .command, command: "ls")
+        var object = try #require(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(request)) as? [String: Any])
+        object["offersSessionAllow"] = nil
+        let legacy = try JSONDecoder().decode(
+            CanvasAgentRequest.self, from: JSONSerialization.data(withJSONObject: object))
+        #expect(legacy == request)
+    }
+
     @Test("The wire form carries the opaque key and no JSON-RPC id")
     func wireShape() throws {
         let request = try #require(
