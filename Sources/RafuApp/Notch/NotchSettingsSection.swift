@@ -15,6 +15,7 @@ struct NotchSettingsSection: View {
         true
     @AppStorage(NotchDisplayPreferenceStore.usageGlancePositionKey)
     private var usageGlancePosition: UsageGlancePosition = .belowIsland
+    @AppStorage(NotchDisplayPreferenceStore.approvalPeekKey) private var approvalPeek = true
 
     /// The kind of the companion's screen: notch, Dynamic Island, or plain.
     private var surface: NotchCompanionSurface { NotchCompanionModel.shared.surface }
@@ -76,6 +77,11 @@ struct NotchSettingsSection: View {
             }
             .help(positionHelp)
             .disabled(!companionEnabled)
+            Toggle("Show approval peek", isOn: $approvalPeek)
+                .help(
+                    "Shows a small card below the notch, the pill or the menu bar item when an agent asks for approval. Off: requests show only in Up next."
+                )
+                .disabled(!companionEnabled)
             ForEach(NotchSection.allCases) { section in
                 NotchSectionToggle(section: section)
                     .disabled(!companionEnabled)
@@ -106,6 +112,9 @@ struct NotchSettingsSection: View {
             NotchCompanionModel.shared.displayPreferencesDidChange()
         }
         .onChange(of: usageGlancePosition) { _, _ in
+            NotchCompanionModel.shared.displayPreferencesDidChange()
+        }
+        .onChange(of: approvalPeek) { _, _ in
             NotchCompanionModel.shared.displayPreferencesDidChange()
         }
     }

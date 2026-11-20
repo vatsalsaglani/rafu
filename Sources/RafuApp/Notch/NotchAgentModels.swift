@@ -409,6 +409,19 @@ nonisolated enum CompanionUpNextContent {
     {
         upNext.filter { !feedSessionIDs.contains($0.id) }
     }
+
+    /// The second line of a "Needs you" row that Rafu has no request for:
+    /// where the person answers. `nil` for any other row, or a row with no
+    /// window (an agent outside Rafu).
+    static func needsYouHint(
+        phase: NotchAgentPhase, cli: ConductorCLIID, hasWindow: Bool, claudeAnswersEnabled: Bool
+    ) -> String? {
+        guard phase == .needsYou, hasWindow else { return nil }
+        if cli == .claudeCode, !claudeAnswersEnabled {
+            return "Turn on Answers from Up next in Settings to answer here"
+        }
+        return "Answer in the terminal"
+    }
 }
 
 /// What the Agents tab shows: the list, or one empty-state line. Pure.

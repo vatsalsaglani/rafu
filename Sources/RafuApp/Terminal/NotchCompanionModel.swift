@@ -140,6 +140,9 @@ final class NotchCompanionModel: NSObject {
     /// pill below the island, or the plain-display pill), or a status item
     /// in the menu bar on any Mac (`CompanionPresence`).
     private(set) var usageGlancePosition: UsageGlancePosition = .belowIsland
+    /// Settings ▸ "Show approval peek": a small card shows below the
+    /// companion when an agent asks for approval (`ApprovalPeekController`).
+    private(set) var isApprovalPeekEnabled = true
     /// Now Playing, read through public API only (`NotchNowPlaying`).
     let nowPlaying = NotchNowPlaying()
     @ObservationIgnored
@@ -657,6 +660,8 @@ final class NotchCompanionModel: NSObject {
         let store = displayPreferences
         isMascotEnabled = store.isMascotEnabled()
         allowsPill = store.showsPillOnPlainDisplays()
+        let peek = store.isApprovalPeekEnabled()
+        if isApprovalPeekEnabled != peek { isApprovalPeekEnabled = peek }
         let position = store.usageGlancePosition()
         if usageGlancePosition != position { usageGlancePosition = position }
         applySurfacePolicy()
@@ -774,6 +779,36 @@ final class NotchCompanionModel: NSObject {
         case .settings:
             openSettings()
         }
+    }
+
+    /// A surface can show Up next with the request rows: the menu bar card,
+    /// the notch or pill panel with its Up next tab on, or the island card
+    /// (it shows the request rows while a request is pending).
+    var canRevealUpNext: Bool {
+        if usageMenuBarItem != nil { return menuBarSections.contains(.upNext) }
+        guard panel != nil else { return false }
+        return surface == .island || visibleSections.contains(.upNext)
+    }
+
+    /// Shows Up next for the approval peek's "Show in Up next": the menu bar
+    /// card on its Up next tab, the notch or pill panel pinned open on Up
+    /// next, or the island card. Does nothing when no surface shows Up next
+    /// (`canRevealUpNext`). Presentation only.
+    func revealUpNext() {
+        guard canRevealUpNext else { return }
+        if let usageMenuBarItem {
+            usageMenuBarItem.revealCard()
+            select(.upNext, host: .menuBar)
+            return
+        }
+        if surface != .island { select(.upNext) }
+        if hoverState != .pinned { clicked() }
+    }
+
+    /// The status item's window frame in screen coordinates, or `nil` when
+    /// the companion is not in the menu bar or macOS hid the item.
+    var menuBarAnchorFrame: CGRect? {
+        usageMenuBarItem?.anchorFrame
     }
 
     /// The menu bar card opens: Up next first when something waits for
@@ -1021,6 +1056,9 @@ final class NotchCompanionModel: NSObject {
             } ?? .none
         syncUsageMenuBarItem(installed: wanted.showsMenuBarItem)
         observeAgentTurnEnds()
+        // The approval peek watches the requests from here on. Started only
+        // here, so a headless test never makes its panel.
+        ApprovalPeekController.shared.start(model: self)
         guard wanted.showsPanel,
             let metrics = screen,
             NotchCompanionGeometry.restingFrame(for: metrics, allowsPill: allowsPill) != nil
