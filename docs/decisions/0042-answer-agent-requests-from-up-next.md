@@ -1,8 +1,9 @@
 # ADR 0042: Answer agent requests from the Up next row
 
 - **Status:** Accepted (2026-11-20) on the user's direction (answer an agent's approval request from the Up next row
-  of the notch, the island card or the menu bar card, with no trip to the terminal). GUI checks pending (listed
-  below).
+  of the notch, the island card or the menu bar card, with no trip to the terminal). Amended the same day after a
+  read-only review (the full command always shows, more terminal-only cases, file changes are terminal-only, and a
+  live check of a late hook answer). GUI checks pending (listed below).
 - **Date:** 2026-11-20
 - **Related:** [`codex-app-server-approvals.md`](../references/codex-app-server-approvals.md),
   [`claude-permission-request-hook.md`](../references/claude-permission-request-hook.md),
@@ -23,8 +24,10 @@ dialog must stay usable, and an answer must never be typed into a terminal as ke
 ## Decision
 
 1. **The row shows the request and answers it.** A terminal with a pending request shows a "Needs approval" badge
-   (words and a symbol, not color alone) and a request row in Up next. The row shows what runs (the full command or
-   the files, the working folder, the reason) and the buttons that the request permits. The island card shows the
+   (words and a symbol, not color alone) and a request row in Up next. The row shows what runs (the full command,
+   the working folder, the reason) and the buttons that the request permits. The command always shows whole: there
+   is no line limit and no "Show all" control, so no part of a command can be out of view while Run is active. A
+   file change shows its title, path or reason and "Open terminal" only (decision 10). The island card shows the
    request while one is pending, and shows Usage again when the last one closes, with no change to the user's saved
    section. Requests exist in memory only. They are never saved and never logged (no command, reason, question or
    answer text).
@@ -41,11 +44,20 @@ dialog must stay usable, and an answer must never be typed into a terminal as ke
 4. **One request is shown per terminal at a time**: the oldest. The app keeps at most 8 requests for one terminal.
    The proxy tracks at most 8 per connection, and only for the bound thread. More are not announced, and the user
    answers them in the terminal.
-5. **Sanitizer limits.** Text is cut at a bound, control characters and bidirectional overrides are removed, and a
+5. **Sanitizer limits.** Text is cut at a bound, control characters and format characters (Unicode category Cf:
+   bidirectional controls, zero-width spaces and joiners such as U+200B, U+2060 and U+FEFF, the soft hyphen U+00AD,
+   the Arabic letter mark U+061C) are removed, and a
    request is `terminalOnly` (the row shows "Open terminal" only) when what the user reads would not be exactly what
    runs. Bounds: command 2 KiB, reason 512 bytes, folder 1 KiB, at most 4 questions with at most 6 choices each,
    label 128 bytes, detail 256 bytes, at most 8 permission lines of 256 bytes. `terminalOnly` cases:
    - a command that sanitizing changed, or an empty command, or a command kind Rafu does not know;
+   - a command with blank space that could push its end out of view: more than 2 blank lines in a row, or more than
+     64 spaces and tabs in a row (for example `ls`, four empty lines, then `; curl … | sh`);
+   - a Codex command request that carries `networkApprovalContext` (it asks for network access to a host that the
+     row does not show);
+   - a Claude Bash request with `tool_input.dangerouslyDisableSandbox` set to true (it asks to run outside the
+     sandbox, which the row does not show);
+   - every file change (decision 10);
    - a permissions request that is incomplete, has more than 8 lines, or has a line that changed;
    - a question that is secret, has no choice, has more than 6 choices, a changed label or a repeated id; more than
      4 questions;
@@ -56,7 +68,7 @@ dialog must stay usable, and an answer must never be typed into a terminal as ke
    above"). That flag alone does not make a question terminal-only: the listed choices are answered from the row. A
    free-text answer still needs the terminal.
 7. **Claude has no "Allow for this session".** The hook could grant it only through `updatedPermissions`, which Rafu
-   does not send. The row offers Run or Apply, Deny, and Deny and stop. Deny carries a fixed text ("The user denied
+   does not send. The row offers Run, Deny, and Deny and stop. Deny carries a fixed text ("The user denied
    this request in Rafu."); no user text travels.
 8. **Claude answers are opt-in with an explicit review.** Settings > Agents > "Answers from Up next" has a switch
    that is off by default and an "Answer hook" row with its own reviewed Connect and Disconnect (Connect needs
@@ -71,6 +83,13 @@ dialog must stay usable, and an answer must never be typed into a terminal as ke
    (the terminal must stay usable while Rafu waits), so the safety check failed. Details: the section "Claude Code
    questions use a different hook" in
    [`claude-permission-request-hook.md`](../references/claude-permission-request-hook.md).
+
+10. **File changes are terminal-only (coordinator decision after the review).** A Codex `fileChange` approval and a
+    Claude Code Edit, MultiEdit or Write request show the title ("Apply file changes"), the path or reason, the
+    write root when Codex sends one, and "Open terminal". The row offers no Apply or Deny. Reason: the row cannot show
+    the change itself (Codex sends no diff with the request; Rafu reads only the Claude `file_path`), so "what the
+    row shows is what runs" cannot hold. `CanvasAgentRequest` makes every `fileChange` terminal-only, also when one
+    is decoded from the bridge.
 
 ## Alternatives considered
 
@@ -98,28 +117,34 @@ coordinator's brief named the first three, and their reasons are listed as far a
   Claude hook decision cannot touch a later request (verified: only that hook's own output decides its dialog).
 - **Claude Code specific.** The hook behaviour was verified on Claude Code 2.1.328 only. A later version can
   change it.
-- **Not verified live: "No" in the Claude terminal.** Whether Claude Code sends any hook event when the person
-  answers "No" in the terminal was not probed. If it sends none, the Claude request stays until the next prompt or
-  until the helper wait ends.
 - **Parallel tools.** A finished tool of another kind does not end a request, because parallel tools exist. Two
   parallel tools of the same kind can end the wrong request.
 - **The helper waits up to 285 s** (hook timeout 300 s, last-resort alarm 290 s). A timeout kills the hook and the
   terminal dialog stays.
-- A terminal answer does not stop the Claude hook by itself. Rafu must write a dismiss, or the helper runs to its
-  own end.
+- A "Yes" in the Claude terminal does not stop the hook: Rafu must write a dismiss, or the helper runs to its own
+  end. A "No" in the terminal does stop it (see the live check below).
+- **Live check: a late hook "allow" after a terminal "No" is not obeyed** (Claude Code 2.1.329, Haiku, 2026-11-20).
+  A hook that waited 10 s and then printed allow did not make the denied `touch` run: the file was never created.
+  Claude Code ends the turn ("Interrupted · What should Claude do instead?") and sends SIGTERM to the hook about
+  45 ms after the "No". A hook that ignored SIGTERM also never printed. Claude Code sends no hook event for the
+  "No" (no `PostToolUse`, `PostToolUseFailure`, `PermissionDenied` or `Stop`), so the Up next request stays until
+  the next prompt (`UserPromptSubmit`) or the helper wait ends; its helper is already gone, so an answer from the
+  row then has no effect. Details: [`claude-permission-request-hook.md`](../references/claude-permission-request-hook.md),
+  observation 10.
 - Claude answer files older than 10 minutes are removed. The spool file limit rose from 8 KiB to 16 KiB so the
   largest summary fits.
 - The release app and Rafu Lightning never share an answer channel (the answers folder is a sibling of the spool).
 - The Claude install step was verified with unit tests only. No live probe of the full app path exists yet.
-- Codex permission replies with scope `session` and the file change request were not run live. They follow the same
-  schema.
+- Codex permission replies with scope `session` were not run live. They follow the same schema. File changes are no
+  longer answered from the row (decision 10).
 - **Claude Code questions stay terminal-only (decision 9).** The row cannot answer an `AskUserQuestion` question.
 
 ## Revisit trigger
 
 A Claude Code release that changes the `PermissionRequest` hook (decision JSON, timeout, stdin keys, or whether the
 dialog shows at the same time), a Codex release that changes server request resolution or the `isOther` meaning, a
-verified hook event for a "No" in the Claude terminal, or a Claude Code version in which the `AskUserQuestion`
+a Claude Code release in which a "No" in the terminal no longer stops the hook or sends a hook event, a way to show
+the full change of a file change request in the row (then decision 10 can be reconsidered), or a Claude Code version in which the `AskUserQuestion`
 question shows in the terminal while a blocking hook waits (then Claude Code questions can be reconsidered).
 
 ## GUI checks pending

@@ -277,6 +277,7 @@ struct CompanionUpNextSectionView: View {
     @Environment(\.rafuTheme) private var theme
 
     @State private var feedback: String?
+    @State private var clickGuard = ApprovalClickGuard()
 
     private var ink: NotchInk { NotchInk(theme: theme) }
 
@@ -286,6 +287,9 @@ struct CompanionUpNextSectionView: View {
             $0.windowID != nil && AgentRequestStore.shared.current(for: $0.id) != nil
         }
         let ids = Set(approvals.map(\.id))
+        let approvalKeys = approvals.compactMap {
+            AgentRequestStore.shared.current(for: $0.id)?.key
+        }
         let waiting = CompanionUpNextContent.waitingRows(
             rows.filter { !ids.contains($0.id) },
             feedSessionIDs: Set(model.feedItems.map(\.sessionID)))
@@ -315,10 +319,19 @@ struct CompanionUpNextSectionView: View {
                         if let request = AgentRequestStore.shared.current(for: row.id) {
                             CompanionRequestView(
                                 row: row, request: request, openTerminal: { model.focusAgent(row) },
-                                report: { feedback = $0 }
+                                report: { feedback = $0 }, allowsClick: { clickGuard.allowsClick }
                             )
                             .id(request.key)
                             .padding(.horizontal, CompanionChromeMetrics.contentHorizontalPadding)
+                            .onContinuousHover { phase in
+                                if case .active = phase, host != .menuBar {
+                                    model.noteApprovalInteraction()
+                                }
+                            }
+                            .simultaneousGesture(
+                                TapGesture().onEnded {
+                                    if host != .menuBar { model.noteApprovalInteraction() }
+                                })
                         }
                     }
                     if host != .islandCard {
@@ -341,12 +354,15 @@ struct CompanionUpNextSectionView: View {
                 .frame(maxWidth: .infinity, alignment: .top)
             }
             .scrollIndicators(.automatic)
+            .onChange(of: approvalKeys, initial: true) { _, keys in
+                clickGuard.noteRows(keys)
+            }
             .onChange(of: model.hoverState == .pinned && !approvals.isEmpty, initial: true) {
-                _, engaged in
-                if host != .menuBar { model.setApprovalControlsEngaged(engaged) }
+                _, visible in
+                if host != .menuBar { model.setApprovalRowsVisible(visible) }
             }
             .onDisappear {
-                if host != .menuBar { model.setApprovalControlsEngaged(false) }
+                if host != .menuBar { model.setApprovalRowsVisible(false) }
             }
         }
     }

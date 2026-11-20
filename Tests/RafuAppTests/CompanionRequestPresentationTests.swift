@@ -8,12 +8,11 @@ import Testing
     let requests: [CanvasAgentRequest] = [
         .init(kind: .command, command: "swift test"),
         .init(kind: .command, isHumanCheckpoint: true, command: "swift test"),
-        .init(kind: .fileChange, grantRoot: "/tmp/test"),
         .init(kind: .permissions, permissions: ["Network access"]),
     ]
     let expected: [[CanvasAgentRequestDecision]] = [
         [.accept, .acceptForSession, .decline, .cancel], [.accept, .decline, .cancel],
-        [.accept, .acceptForSession, .decline, .cancel], [.accept, .acceptForSession, .decline],
+        [.accept, .acceptForSession, .decline],
     ]
     for (request, decisions) in zip(requests, expected) {
         let model = CompanionRequestPresentation(request: request, decision: nil)
@@ -38,6 +37,9 @@ import Testing
             == .questions([question]))
     let restricted = CanvasAgentRequest(kind: .userInput, questions: [question], terminalOnly: true)
     #expect(CompanionRequestPresentation(request: restricted, decision: nil).controls == .terminal)
+    // A file change shows only "Open terminal": the row cannot show the change.
+    let change = CanvasAgentRequest(kind: .fileChange, grantRoot: "/tmp/test")
+    #expect(CompanionRequestPresentation(request: change, decision: nil).controls == .terminal)
     #expect(
         CompanionRequestPresentation.message(for: .stale) == "This request was already answered.")
     #expect(CompanionRequestPresentation.message(for: .alreadyChosen) == nil)

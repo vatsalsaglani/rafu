@@ -1,13 +1,19 @@
 import RafuCore
 import SwiftUI
 
+/// One Up next approval row. What the row shows is what runs: the command is
+/// always shown whole (it is at most 2 KiB, and a command with blank space
+/// that could push its end out of view is terminal-only), never cut to a few
+/// lines while the answer buttons are active.
 struct CompanionRequestView: View {
     let row: NotchAgentRow
     let request: CanvasAgentRequest
     let openTerminal: () -> Void
     let report: (String) -> Void
+    /// False just after the rows changed (`ApprovalClickGuard`): a click then
+    /// is ignored, so a double-click cannot answer the next request.
+    var allowsClick: () -> Bool = { true }
 
-    @State private var expanded = false
     @State private var answers: [String: String] = [:]
 
     var body: some View {
@@ -23,13 +29,10 @@ struct CompanionRequestView: View {
             if let command = request.command {
                 Text(verbatim: command)
                     .font(.system(.body, design: .monospaced))
-                    .lineLimit(expanded ? nil : 3)
+                    .lineLimit(nil)
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
                     .accessibilityLabel("\(row.cli.displayName) asks to run \(command)")
-                if !request.terminalOnly {
-                    Button(expanded ? "Show less" : "Show all") { expanded.toggle() }
-                }
             }
             if let cwd = request.cwd { Text("In \(cwd)") }
             if let root = request.grantRoot { Text("Write access to \(root)") }
@@ -80,6 +83,7 @@ struct CompanionRequestView: View {
     }
 
     private func choose(_ decision: CanvasAgentRequestDecision) {
+        guard allowsClick() else { return }
         let result = AgentRequestStore.shared.choose(
             controllerID: row.id, key: request.key, decision: decision)
         if let message = CompanionRequestPresentation.message(for: result) { report(message) }

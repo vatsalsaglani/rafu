@@ -849,11 +849,17 @@ Details: [`codex-app-server-approvals.md`](../../references/codex-app-server-app
 
 - **Delivered.** One shared request contract (`CanvasAgentRequest`, `AgentRequestStore`, bridge operations
   `approvalOpen`, `approvalPoll`, `approvalClose`). Codex: the proxy answers on the terminal UI's own connection
-  (commands, file changes, permissions, questions with listed choices). Claude Code: a separate blocking
+  (commands, permissions, questions with listed choices). Claude Code: a separate blocking
   `PermissionRequest` hook entry (helper `--answer`) for Bash, Edit, MultiEdit and Write; Settings > Agents
   "Answers from Up next" switch (off by default) and an "Answer hook" Connect and Disconnect with a review. Up
   next: "Needs approval" badge, request rows, island card shows the request. The terminal dialog always stays;
   no output means the terminal decides. Claude has no "Allow for this session".
+- **Review fixes (2026-11-20).** The command always shows whole (no "Show all"). Terminal-only: every file change
+  (Codex and Claude; the row cannot show the change), a command with more than 2 blank lines or 64 spaces in a row,
+  a Codex command with `networkApprovalContext`, a Claude Bash request with `dangerouslyDisableSandbox`, and text
+  with Unicode format characters. Clicks on answer buttons are ignored for 0.5 s after the rows change. A pinned
+  panel takes key status for request rows only after a click or pointer movement over them. Live check: a late
+  hook allow after a terminal "No" is not obeyed (Claude Code 2.1.329).
 - **Not built, decided.** Claude Code `AskUserQuestion` questions stay terminal-only: a blocking `PreToolUse` hook
   hides the terminal question while it waits (spike, Claude Code 2.1.329). Revisit when a Claude Code version
   shows the question while the hook waits.

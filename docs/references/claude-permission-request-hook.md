@@ -12,7 +12,7 @@ switch and the Connect step). Tests: `Tests/RafuCoreTests/AgentAnswerChannelTest
 `AgentPermissionRequestSummaryTests.swift`, `AgentHookConfigurationTests.swift` (suite "Agent hook answer entry"),
 `Tests/RafuAppTests/ClaudePermissionAnswerBridgeTests.swift`, `ClaudePermissionAnswerCoordinatorTests.swift`.
 
-Last verified: Swift 6.4.2, macOS 27.2.1, 2026-11-20, Claude Code 2.1.328 (live probes below, with the real `claude`
+Last verified: Swift 6.4.2, macOS 27.2.1, 2026-11-20, Claude Code 2.1.328 and 2.1.329 for observation 10 (live probes below, with the real `claude`
 in a pseudo-terminal, model `haiku`, a temporary settings file, and the real helper binary). The install step was
 verified with unit tests only (temporary folders, a fixed clock); no live probe of the full app path yet.
 
@@ -50,6 +50,23 @@ the request lifetime and the Up next row that shows and answers a request exist 
    Rafu comes from the helper, not from Claude.
 9. **Non-interactive mode** (`claude -p`) was not probed: the documented behaviour is that `PermissionRequest`
    hooks do not run there. Rafu's Ensemble terminals run the interactive UI.
+10. **A "No" in the terminal stops the hook, and a late allow is not obeyed** (Claude Code 2.1.329, model `haiku`,
+   2026-11-20). Method: the pty probe in "Reproduce" with a `PermissionRequest` command hook (`timeout` 60) that
+   logged its start, waited 10 s, printed `{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":
+   {"behavior":"allow"}}}` and logged its end; logging hooks on `PreToolUse`, `PostToolUse`, `PostToolUseFailure`,
+   `PermissionDenied`, `Stop`, `StopFailure`, `SubagentStop`, `UserPromptSubmit`, `Notification` and `SessionEnd`;
+   the prompt asked for `touch <scratch>/x`. The driver answered the dialog 2 s after it showed. Four runs:
+   - "No" by the key `4` (the dialog lists 1 Yes, 2 Yes and always allow, 3 Yes and auto mode, 4 No) and by Esc
+     ("Esc to cancel") behave the same: the screen shows "Interrupted · What should Claude do instead?" and the
+     turn ends.
+   - The hook got SIGTERM about 45 ms after the "No". A hook with default signal handling ended at once. A hook that
+     ignored SIGTERM, HUP and INT also never reached its print (it was gone before its 10 s wait ended).
+   - The file was never created (checked 1 s after the "No", 18 s later, and after exit). So no late allow was
+     obeyed.
+   - No hook event follows the "No": no `PostToolUse`, `PostToolUseFailure`, `PermissionDenied` or `Stop`. The next
+     event was `SessionEnd` when the driver quit. A `Notification` (`permission_prompt`) came about 6 s after the
+     dialog in runs where the dialog stayed open.
+   Compare observation 6: a "Yes" in the terminal does not signal the hook.
 
 ## The design that follows
 
@@ -73,11 +90,16 @@ the request lifetime and the Up next row that shows and answers a request exist 
 - **The fixed denial text.** A `deny` carries `The user denied this request in Rafu.` No user text travels.
 - **The request key is the event id.** `ClaudePermissionAnswerBridge.request(for:)` sets
   `CanvasAgentRequest.key = event.id`, so the store's `CanvasAgentRequestAnswer.key` is the answer file name.
-- **Options.** Run or Apply, Deny, Deny and stop. "Allow for this session" is not offered
+- **Options.** Run, Deny, Deny and stop (a Bash request only; a file change is terminal-only, see below). "Allow for this session" is not offered
   (`offersSessionAllow == false`): the hook could only grant it through `updatedPermissions`, which Rafu does not send.
   Deny and stop maps to `interrupt: true`.
-- **What the row shows is what runs.** A command over 2 KiB, a path over 480 bytes, or text that sanitizing changed
-  makes the request terminal-only (`isComplete == false`): the row shows "Open terminal" only.
+- **What the row shows is what runs.** A command over 2 KiB, a path over 480 bytes, text that sanitizing changed
+  (control characters, and format characters such as U+200B, U+FEFF or U+00AD), a command with more than 2 blank
+  lines or more than 64 spaces and tabs in a row, or a Bash `tool_input.dangerouslyDisableSandbox` of `true` makes
+  the request terminal-only (`isComplete == false`): the row shows "Open terminal" only.
+- **File changes are terminal-only.** An Edit, MultiEdit or Write request shows "Change file: <path>" and "Open
+  terminal", never Apply or Deny: the row cannot show the change itself (decision record "Answer agent requests
+  from the Up next row", decision 10). The helper still waits for it, so a dismiss still matters.
 - **Spool size.** `AgentHookSpool.maximumFileBytes` rose from 8 KiB to 16 KiB, and the spool encoder no longer
   escapes `/`, so the largest summary (2 KiB of escaped command, 512 of description) fits a file.
 
@@ -153,15 +175,19 @@ the request lifetime and the Up next row that shows and answers a request exist 
     requests without writing (the free lock stops each helper).
 - **File work off the main actor.** Answer and dismiss files are written by `ClaudeAnswerIO.perform` (`@concurrent`).
   Each event id gets at most one write from the coordinator, because the request leaves the book before the write.
-- **Not verified live.** Whether Claude Code sends any hook event when the person answers "No" in the terminal was not
-  probed. If it sends none, the request stays until the next prompt (`UserPromptSubmit`) or the expiry.
+- **A "No" in the terminal.** Verified live (observation 10): Claude Code sends no hook event for it and kills the
+  helper. The request stays in Up next until the next prompt (`UserPromptSubmit`) or the expiry; an answer from the
+  row then goes to a helper that no longer runs and has no effect (the answer file is pruned after 10 min).
 
 ## Reproduce
 
 A stand-in hook script logged its stdin, slept, and printed one decision. The run used a pseudo-terminal (Python
 `pty`), `claude --model haiku --setting-sources project --settings <temp file> --permission-mode default`, a clean
 environment (no Rafu variables), and the prompt "Use the Bash tool to run exactly this command: touch spike-made.txt".
-(`echo` alone is auto-allowed and never asks.) The first run in a new folder shows a trust dialog: press Down, then
+(`echo` alone is auto-allowed and never asks.) Run the real binary (`~/.local/bin/claude`), not a Rafu terminal shim
+that may be first in `PATH`. With the screen text, match after you remove spaces: cursor-move codes stand in for
+spaces, so "Do you want to proceed" arrives as "Doyouwanttoproceed". After a probe, delete the transcripts under
+`~/.claude/projects/<the scratch folder with / replaced by ->`. The first run in a new folder shows a trust dialog: press Down, then
 Return. The end-to-end check used the built helper with a stand-in app (a script that held the lock, drained the
 spool and wrote the answer file) for allow, deny with stop, dismiss, and no Rafu at all. Never edit the real
 `~/.claude/settings.json`: `--settings` adds a file for one run.
