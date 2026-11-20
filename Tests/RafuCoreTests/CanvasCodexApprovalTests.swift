@@ -267,13 +267,29 @@ struct CanvasCodexApprovalTests {
                 })
         }
 
+        private let requestsRead = Mutex(0)
+        private let clearsRead = Mutex(0)
+
+        /// The next request in arrival order. Each signal stands for one
+        /// append, so the n-th wait returns the n-th request even when
+        /// several arrive before the test reads them.
         func awaitRequest() -> CanvasAgentRequest? {
-            requestSignal.wait(timeout: .now() + 10) == .success
-                ? requests.withLock { $0.last } : nil
+            guard requestSignal.wait(timeout: .now() + 10) == .success else { return nil }
+            let index = requestsRead.withLock { read in
+                defer { read += 1 }
+                return read
+            }
+            return requests.withLock { $0.indices.contains(index) ? $0[index] : nil }
         }
 
+        /// The next cleared key in arrival order.
         func awaitClear() -> UUID? {
-            clearSignal.wait(timeout: .now() + 10) == .success ? cleared.withLock { $0.last } : nil
+            guard clearSignal.wait(timeout: .now() + 10) == .success else { return nil }
+            let index = clearsRead.withLock { read in
+                defer { read += 1 }
+                return read
+            }
+            return cleared.withLock { $0.indices.contains(index) ? $0[index] : nil }
         }
     }
 
