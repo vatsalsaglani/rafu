@@ -13,8 +13,9 @@ import RafuCore
 /// sends `dismiss`, or the wait times out. It never logs a command, a path, or
 /// an answer.
 enum AgentEventHelper {
-    /// The command-line flag that selects the answer mode.
-    static let answerFlag = "--answer"
+    /// The command-line flag that selects the answer mode. The same constant
+    /// that Rafu writes into the answer hook entry.
+    static let answerFlag = AgentHookConfiguration.answerFlag
 
     /// Whether `arguments` select the answer mode (the flag comes last).
     static func isAnswerMode(_ arguments: [String]) -> Bool {

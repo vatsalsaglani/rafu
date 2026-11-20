@@ -191,6 +191,11 @@ build OK; 466 tests in 33 suites (parallel) and 3726 tests in 301 suites
     spool path). Disconnect removes only Rafu's entries, keeps other hooks in
     a shared entry, and drops an event key or `hooks` only when it becomes
     empty. Keys are written sorted (JSONSerialization), array order is kept.
+    Claude Code's opt-in answer entry (command ends in ` --answer`, timeout
+    300) is a separate scope: the activity Connect and "connected" test ignore
+    it, the activity Disconnect removes it too, and its own Connect and
+    Disconnect touch only it. See
+    [`claude-permission-request-hook.md`](claude-permission-request-hook.md).
 14. Refusals, with nothing written: a symbolic-link file or folder, invalid
     JSON or a non-object top level, `hooks` or an event list of another
     shape, a file over 1 MiB, Cursor `version` other than 1, and a file that

@@ -298,4 +298,189 @@ struct AgentHookInstallerTests {
                 removing: false)
         }
     }
+
+    @Test("The answer entry is written, read and removed in a temporary settings file")
+    func answerEntryOnDisk() throws {
+        let fixture = try fixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let activity = try AgentHookInstaller.prepare(
+            provider: .claude, destination: fixture.destination, paths: fixture.paths,
+            removing: false)
+        try AgentHookInstaller.apply(
+            activity, paths: fixture.paths, bundledHelper: fixture.bundledHelper)
+        #expect(
+            !AgentHookInstaller.isAnswerConnected(
+                destination: fixture.destination, paths: fixture.paths))
+        let answers = try AgentHookInstaller.prepare(
+            provider: .claude, destination: fixture.destination, paths: fixture.paths,
+            removing: false, scope: .answers)
+        try AgentHookInstaller.apply(
+            answers, paths: fixture.paths, bundledHelper: fixture.bundledHelper)
+        #expect(
+            AgentHookInstaller.isAnswerConnected(
+                destination: fixture.destination, paths: fixture.paths))
+        let undo = try AgentHookInstaller.prepare(
+            provider: .claude, destination: fixture.destination, paths: fixture.paths,
+            removing: true, scope: .answers)
+        try AgentHookInstaller.apply(undo, paths: fixture.paths, bundledHelper: nil)
+        #expect(
+            !AgentHookInstaller.isAnswerConnected(
+                destination: fixture.destination, paths: fixture.paths))
+        #expect(
+            AgentHookInstaller.isConnected(
+                provider: .claude, destination: fixture.destination, paths: fixture.paths))
+    }
+}
+
+private func planAnswers(_ existing: Data?, removing: Bool = false) throws -> AgentHookChange {
+    try AgentHookConfiguration.plan(
+        provider: .claude,
+        destination: URL(fileURLWithPath: "/Users/me/.claude/settings.json"),
+        existing: existing,
+        helper: paths.helper,
+        spool: paths.spool,
+        removing: removing,
+        scope: .answers)
+}
+
+/// The Rafu command hooks of one event, in file order.
+private func rafuCommands(_ data: Data, event: String) throws -> [[String: Any]] {
+    let hooks = try #require(try json(data)["hooks"] as? [String: Any])
+    let entries = hooks[event] as? [[String: Any]] ?? []
+    return entries.flatMap { ($0["hooks"] as? [[String: Any]]) ?? [] }.filter {
+        AgentHookConfiguration.isRafuCommand(
+            $0["command"] as? String ?? "", helper: paths.helper)
+    }
+}
+
+@Suite("Agent hook answer entry")
+struct AgentHookAnswerEntryTests {
+    @Test("The answer command is the helper command plus the answer flag")
+    func command() {
+        let command = AgentHookConfiguration.answerCommand(helper: paths.helper, spool: paths.spool)
+        #expect(
+            command
+                == AgentHookConfiguration.command(
+                    helper: paths.helper, provider: .claude, spool: paths.spool) + " --answer")
+        #expect(AgentHookConfiguration.isRafuCommand(command, helper: paths.helper))
+        #expect(AgentHookConfiguration.isAnswerCommand(command, helper: paths.helper))
+        #expect(
+            !AgentHookConfiguration.isAnswerCommand(
+                AgentHookConfiguration.command(
+                    helper: paths.helper, provider: .claude, spool: paths.spool),
+                helper: paths.helper))
+        #expect(!AgentHookConfiguration.isAnswerCommand("other --answer", helper: paths.helper))
+    }
+
+    @Test("Answer Connect adds one PermissionRequest entry with the long timeout")
+    func connect() throws {
+        let activity = try plan(.claude, existing: nil)
+        let change = try planAnswers(activity.after)
+        #expect(change.scope == .answers)
+        #expect(change.changedEvents == ["PermissionRequest"])
+        let commands = try rafuCommands(change.after, event: "PermissionRequest")
+        #expect(commands.count == 2)
+        #expect(commands[0]["command"] as? String == activity.command)
+        #expect(commands[0]["timeout"] as? Int == 1)
+        #expect(commands[1]["command"] as? String == change.command)
+        #expect(commands[1]["timeout"] as? Int == AgentAnswerChannel.hookTimeoutSeconds)
+        #expect(
+            AgentHookConfiguration.isAnswerConnected(existing: change.after, helper: paths.helper))
+        #expect(
+            AgentHookConfiguration.isConnected(
+                provider: .claude, existing: change.after, helper: paths.helper))
+        // The review shows exactly the answer entry.
+        #expect(change.preview.contains("--answer"))
+        #expect(change.preview.contains("\"timeout\" : 300"))
+        #expect(!change.preview.contains("SessionStart"))
+        // Connecting again is a no-op.
+        #expect(try planAnswers(change.after).isNoOp)
+    }
+
+    @Test("The answer entry alone does not count as activity tracking, and the reverse")
+    func separateConnectedChecks() throws {
+        let answersOnly = try planAnswers(nil)
+        #expect(
+            AgentHookConfiguration.isAnswerConnected(
+                existing: answersOnly.after, helper: paths.helper))
+        #expect(
+            !AgentHookConfiguration.isConnected(
+                provider: .claude, existing: answersOnly.after, helper: paths.helper))
+        let activityOnly = try plan(.claude, existing: nil)
+        #expect(
+            !AgentHookConfiguration.isAnswerConnected(
+                existing: activityOnly.after, helper: paths.helper))
+    }
+
+    @Test("Activity Connect keeps the answer entry and adds its own")
+    func activityConnectKeepsAnswer() throws {
+        let answers = try planAnswers(nil)
+        let activity = try plan(.claude, existing: answers.after)
+        #expect(activity.changedEvents == AgentHookProvider.claude.hookEventNames)
+        let commands = try rafuCommands(activity.after, event: "PermissionRequest")
+            .compactMap { $0["command"] as? String }
+        #expect(commands == [answers.command, activity.command])
+        #expect(!activity.preview.contains("--answer"))
+        #expect(try plan(.claude, existing: activity.after).isNoOp)
+    }
+
+    @Test("Answer Disconnect removes only the answer entry")
+    func answerDisconnect() throws {
+        let activity = try plan(.claude, existing: nil)
+        let both = try planAnswers(activity.after)
+        let change = try planAnswers(both.after, removing: true)
+        #expect(change.changedEvents == ["PermissionRequest"])
+        #expect(change.preview.contains("--answer"))
+        #expect(change.after == activity.after)
+        #expect(
+            !AgentHookConfiguration.isAnswerConnected(existing: change.after, helper: paths.helper))
+        #expect(
+            AgentHookConfiguration.isConnected(
+                provider: .claude, existing: change.after, helper: paths.helper))
+        #expect(try planAnswers(change.after, removing: true).isNoOp)
+    }
+
+    @Test("Activity Disconnect also removes the answer entry and shows it in the review")
+    func activityDisconnectRemovesAnswer() throws {
+        let both = try planAnswers(try plan(.claude, existing: nil).after)
+        let change = try plan(.claude, existing: both.after, removing: true)
+        #expect(change.preview.contains("--answer"))
+        #expect(change.preview.contains("\"timeout\" : 300"))
+        #expect(try json(change.after)["hooks"] == nil)
+        #expect(
+            !AgentHookConfiguration.isAnswerConnected(existing: change.after, helper: paths.helper))
+    }
+
+    @Test("Answer Connect replaces a stale answer entry and keeps other hooks")
+    func staleAnswer() throws {
+        let stale =
+            AgentHookConfiguration.shellQuoted(paths.helper.path)
+            + " claude '/old/AgentTracking/spool' --answer"
+        let existing = try JSONSerialization.data(withJSONObject: [
+            "hooks": [
+                "PermissionRequest": [
+                    ["hooks": [["type": "command", "command": "my-hook"]]],
+                    ["hooks": [["type": "command", "command": stale, "timeout": 300]]],
+                ]
+            ]
+        ])
+        let change = try planAnswers(existing)
+        let hooks = try #require(try json(change.after)["hooks"] as? [String: Any])
+        let entries = try #require(hooks["PermissionRequest"] as? [[String: Any]])
+        let commands = entries.flatMap { ($0["hooks"] as? [[String: Any]]) ?? [] }
+            .compactMap { $0["command"] as? String }
+        #expect(commands == ["my-hook", change.command])
+    }
+
+    @Test("Codex and Cursor have no answer entry")
+    func otherProviders() throws {
+        for provider in [AgentHookProvider.codex, .cursor] {
+            let change = try AgentHookConfiguration.plan(
+                provider: provider, destination: URL(fileURLWithPath: "/tmp/hooks.json"),
+                existing: nil, helper: paths.helper, spool: paths.spool, removing: false,
+                scope: .answers)
+            #expect(change.isNoOp)
+            #expect(AgentHookConfiguration.eventNames(provider: provider, scope: .answers).isEmpty)
+        }
+    }
 }
