@@ -56,6 +56,12 @@ public enum AgentHookEventError: Error, Equatable, Sendable {
 ///
 /// The sub-agent fields are optional, so the schema stays version 1: an
 /// event from an older installed helper decodes with them `nil`.
+///
+/// The second exception is the answer mode of the helper
+/// (`rafu-agent-events claude <spool> --answer`): a Claude Code
+/// `PermissionRequest` then carries a sanitized, bounded `requestSummary`
+/// (see `AgentPermissionRequestSummary`) so Up next can show what is asked.
+/// The normal helper mode never sets it.
 public struct AgentHookEvent: Codable, Equatable, Identifiable, Sendable {
     public static let currentSchemaVersion = 1
     /// The longest sub-agent type or model name kept.
@@ -105,6 +111,9 @@ public struct AgentHookEvent: Codable, Equatable, Identifiable, Sendable {
     /// from the agent's prompt-side input, so it is kept in memory only and
     /// never logged.
     public let subagentDescription: String?
+    /// The command or file a Claude `PermissionRequest` asks about. Set only
+    /// by the helper's answer mode; kept in memory only, never logged.
+    public let requestSummary: AgentPermissionRequestSummary?
 
     public init(
         id: UUID = UUID(),
@@ -122,8 +131,10 @@ public struct AgentHookEvent: Codable, Equatable, Identifiable, Sendable {
         time: Date = Date(),
         subagentType: String? = nil,
         subagentModel: String? = nil,
-        subagentDescription: String? = nil
+        subagentDescription: String? = nil,
+        requestSummary: AgentPermissionRequestSummary? = nil
     ) {
+        self.requestSummary = requestSummary
         self.subagentType = subagentType
         self.subagentModel = subagentModel
         self.subagentDescription = subagentDescription
@@ -145,12 +156,14 @@ public struct AgentHookEvent: Codable, Equatable, Identifiable, Sendable {
 
     /// Normalizes one hook payload from `provider`. Throws for anything that
     /// is not a known event with a session id; the helper then writes
-    /// nothing.
+    /// nothing. `includesRequestSummary` is set only by the helper's answer
+    /// mode; it reads a Claude `PermissionRequest`'s command or file path.
     public init(
         provider: AgentHookProvider,
         payload: Data,
         id: UUID = UUID(),
-        time: Date = Date()
+        time: Date = Date(),
+        includesRequestSummary: Bool = false
     ) throws {
         guard payload.count <= Self.maximumPayloadBytes else {
             throw AgentHookEventError.payloadTooLarge
@@ -199,7 +212,12 @@ public struct AgentHookEvent: Codable, Equatable, Identifiable, Sendable {
             time: time,
             subagentType: subagentType,
             subagentModel: isSpawn ? Self.subagentLabel(spawn?["model"]) : nil,
-            subagentDescription: isSpawn ? Self.subagentDescription(spawn?["description"]) : nil)
+            subagentDescription: isSpawn ? Self.subagentDescription(spawn?["description"]) : nil,
+            requestSummary: includesRequestSummary && provider == .claude
+                && event == "PermissionRequest"
+                ? AgentPermissionRequestSummary(
+                    toolName: toolName, toolInput: object["tool_input"])
+                : nil)
     }
 
     /// `provider:session`, the ledger key.

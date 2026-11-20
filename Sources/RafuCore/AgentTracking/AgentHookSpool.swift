@@ -26,6 +26,17 @@ public struct AgentTrackingPaths: Equatable, Sendable {
 
     public var spool: URL { root.appending(path: "spool", directoryHint: .isDirectory) }
 
+    /// `AgentTracking/answers/`: the private channel back to a waiting helper
+    /// (0700 directory, 0600 files). See `AgentAnswerChannel`.
+    public var answers: URL { Self.answersDirectory(forSpool: spool) }
+
+    /// The answers folder that belongs to `spool`: its sibling. The helper
+    /// derives it from its spool argument, so the two app identities never
+    /// share an answer channel.
+    public static func answersDirectory(forSpool spool: URL) -> URL {
+        spool.deletingLastPathComponent().appending(path: "answers", directoryHint: .isDirectory)
+    }
+
     public var helper: URL {
         root.appending(path: "bin", directoryHint: .isDirectory)
             .appending(path: Self.helperName, directoryHint: .notDirectory)
@@ -50,8 +61,9 @@ public enum AgentHookSpoolError: Error, Equatable, Sendable {
 /// calls `drain`. Both sides use only file-system calls, so both are tested on
 /// any platform.
 public enum AgentHookSpool {
-    /// The largest spool file, in bytes.
-    public static let maximumFileBytes = 8_192
+    /// The largest spool file, in bytes. A Claude permission request (answer
+    /// mode) carries up to 2 KiB of command text that JSON may double.
+    public static let maximumFileBytes = 16_384
     /// The helper stops writing when the spool holds this many files (the app
     /// is not running or not draining).
     public static let maximumFiles = 2_048
@@ -70,7 +82,9 @@ public enum AgentHookSpool {
         try fileManager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
         guard try fileManager.contentsOfDirectory(atPath: directory.path).count < maximumFiles
         else { throw AgentHookSpoolError.spoolFull }
-        let data = try JSONEncoder().encode(event)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.withoutEscapingSlashes]
+        let data = try encoder.encode(event)
         guard data.count <= maximumFileBytes else { throw AgentHookSpoolError.eventTooLarge }
         let name = event.id.uuidString + ".json"
         let temporary = directory.appending(path: "." + name + ".tmp")

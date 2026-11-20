@@ -147,6 +147,9 @@ public nonisolated struct CanvasAgentRequest: Codable, Hashable, Sendable {
     /// exactly, the command text was changed by sanitizing, or a question needs
     /// free text or a secret. The row then offers only "Open terminal".
     public let terminalOnly: Bool
+    /// The agent can grant "allow for this session". False for a Claude Code
+    /// request answered through its hook, which has no such answer.
+    public let offersSessionAllow: Bool
     public let receivedAt: Date
 
     /// Builds a sanitized approval. Text over a bound is cut; control
@@ -156,7 +159,7 @@ public nonisolated struct CanvasAgentRequest: Codable, Hashable, Sendable {
         key: UUID = UUID(), kind: Kind, isHumanCheckpoint: Bool = false,
         command: String? = nil, cwd: String? = nil, reason: String? = nil,
         grantRoot: String? = nil, permissions: [String] = [], questions: [Question] = [],
-        terminalOnly: Bool = false, receivedAt: Date = Date()
+        terminalOnly: Bool = false, offersSessionAllow: Bool = true, receivedAt: Date = Date()
     ) {
         var restricted = terminalOnly
         // Only a command request carries a command.
@@ -198,6 +201,7 @@ public nonisolated struct CanvasAgentRequest: Codable, Hashable, Sendable {
         self.permissions = kind == .permissions ? lines : []
         self.questions = kept
         self.terminalOnly = restricted
+        self.offersSessionAllow = offersSessionAllow
         self.receivedAt = receivedAt
     }
 
@@ -215,19 +219,19 @@ public nonisolated struct CanvasAgentRequest: Codable, Hashable, Sendable {
                 Option(decision: .cancel, label: "Deny and stop"),
             ]
         case .command:
-            return [
+            return withSessionOption([
                 Option(decision: .accept, label: "Run"),
                 Option(decision: .acceptForSession, label: "Allow for this session"),
                 Option(decision: .decline, label: "Deny"),
                 Option(decision: .cancel, label: "Deny and stop"),
-            ]
+            ])
         case .fileChange:
-            return [
+            return withSessionOption([
                 Option(decision: .accept, label: "Apply"),
                 Option(decision: .acceptForSession, label: "Allow for this session"),
                 Option(decision: .decline, label: "Deny"),
                 Option(decision: .cancel, label: "Deny and stop"),
-            ]
+            ])
         case .permissions:
             return [
                 Option(decision: .accept, label: "Allow for this turn"),
@@ -237,6 +241,10 @@ public nonisolated struct CanvasAgentRequest: Codable, Hashable, Sendable {
         case .userInput:
             return []
         }
+    }
+
+    private func withSessionOption(_ options: [Option]) -> [Option] {
+        offersSessionAllow ? options : options.filter { $0.decision != .acceptForSession }
     }
 
     /// True when `decision` is a valid answer to this request. Answers must
@@ -259,7 +267,7 @@ public nonisolated struct CanvasAgentRequest: Codable, Hashable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case key, kind, isHumanCheckpoint, command, cwd, reason, grantRoot, permissions
-        case questions, terminalOnly, receivedAt
+        case questions, terminalOnly, offersSessionAllow, receivedAt
     }
 
     /// Decodes, then re-sanitizes. A value that the sanitizer would change is
@@ -277,6 +285,9 @@ public nonisolated struct CanvasAgentRequest: Codable, Hashable, Sendable {
             permissions: container.decode([String].self, forKey: .permissions),
             questions: container.decode([Question].self, forKey: .questions),
             terminalOnly: container.decode(Bool.self, forKey: .terminalOnly),
+            // An older peer does not send it; the Codex answers all allow a session.
+            offersSessionAllow: container.decodeIfPresent(Bool.self, forKey: .offersSessionAllow)
+                ?? true,
             receivedAt: container.decode(Date.self, forKey: .receivedAt),
             unchecked: ()
         )
@@ -285,7 +296,7 @@ public nonisolated struct CanvasAgentRequest: Codable, Hashable, Sendable {
             command: decoded.command, cwd: decoded.cwd, reason: decoded.reason,
             grantRoot: decoded.grantRoot, permissions: decoded.permissions,
             questions: decoded.questions, terminalOnly: decoded.terminalOnly,
-            receivedAt: decoded.receivedAt)
+            offersSessionAllow: decoded.offersSessionAllow, receivedAt: decoded.receivedAt)
         guard sanitized == decoded else {
             throw DecodingError.dataCorrupted(
                 .init(
@@ -299,7 +310,7 @@ public nonisolated struct CanvasAgentRequest: Codable, Hashable, Sendable {
     private init(
         key: UUID, kind: Kind, isHumanCheckpoint: Bool, command: String?, cwd: String?,
         reason: String?, grantRoot: String?, permissions: [String], questions: [Question],
-        terminalOnly: Bool, receivedAt: Date, unchecked: Void
+        terminalOnly: Bool, offersSessionAllow: Bool, receivedAt: Date, unchecked: Void
     ) {
         self.key = key
         self.kind = kind
@@ -311,6 +322,7 @@ public nonisolated struct CanvasAgentRequest: Codable, Hashable, Sendable {
         self.permissions = permissions
         self.questions = questions
         self.terminalOnly = terminalOnly
+        self.offersSessionAllow = offersSessionAllow
         self.receivedAt = receivedAt
     }
 
