@@ -51,11 +51,12 @@ Not run live: a permissions reply with scope `session`, and the file change requ
 ## Codex marks every model question `isOther`
 
 `item/tool/requestUserInput` arrives with `isOther: true` for the question the model asks. The TUI shows it as a
-third row, "None of the above (add details in notes)". A labelled option is still a valid answer. The request
-contract in `CanvasAgentRequest.Question` makes a question terminal-only when `isOther` is set. With that rule, every
-Codex question is terminal-only and the Up next row cannot answer it. With the `isOther` term removed from
-that one condition (a local probe, not shipped here), the request was answerable and the labelled answer worked.
-Open decision: stop treating `isOther` as terminal-only, and show only the labelled options.
+third row, "None of the above (add details in notes)". A labelled option is still a valid answer. An early contract
+made a question terminal-only when `isOther` was set. Then every Codex question was terminal-only and the Up next row
+could not answer any. A local probe with the `isOther` term removed from that condition showed the request was
+answerable and the labelled answer worked. Decision (2026-11-20): `isOther` alone does not make a question
+terminal-only (`CanvasAgentRequest.Question.init`, test in `CanvasAgentRequestTests`). The row shows only the labelled
+options. A free-text answer still needs the terminal.
 
 ## Rules
 
@@ -100,3 +101,10 @@ session in `~/.codex`; archive it with the `thread/archive` request.
 ```bash
 swift test --filter CanvasCodexApprovalTests
 ```
+
+## Related
+
+- Decision: [`0042-answer-agent-requests-from-up-next.md`](../decisions/0042-answer-agent-requests-from-up-next.md)
+  (answer on the agent's own channel; the terminal stays in charge).
+- [`claude-permission-request-hook.md`](claude-permission-request-hook.md): the Claude Code side of the same path.
+- [`notch-companion.md`](notch-companion.md): the approval rows that show these requests.

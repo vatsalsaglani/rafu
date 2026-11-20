@@ -837,3 +837,30 @@ User request: add the Ensemble to the left sidebar like Files and Git. Commit
   glyph update on a terminal node row; keyboard (arrows, Return, Space);
   VoiceOver; a second window (a board made there appears after Refresh); relaunch
   restores the mode; Increase Contrast and the frosted base.
+
+## Status (2026-11-20, answer agent requests from the Up next row)
+
+User request: answer an agent's approval request from the Up next row. Merged on `main` (last merge:
+"Up next approval rows"). Decision:
+[`0042-answer-agent-requests-from-up-next.md`](../../decisions/0042-answer-agent-requests-from-up-next.md).
+Details: [`codex-app-server-approvals.md`](../../references/codex-app-server-approvals.md),
+[`claude-permission-request-hook.md`](../../references/claude-permission-request-hook.md),
+[`notch-companion.md`](../../references/notch-companion.md) rule 19.
+
+- **Delivered.** One shared request contract (`CanvasAgentRequest`, `AgentRequestStore`, bridge operations
+  `approvalOpen`, `approvalPoll`, `approvalClose`). Codex: the proxy answers on the terminal UI's own connection
+  (commands, file changes, permissions, questions with listed choices). Claude Code: a separate blocking
+  `PermissionRequest` hook entry (helper `--answer`) for Bash, Edit, MultiEdit and Write; Settings > Agents
+  "Answers from Up next" switch (off by default) and an "Answer hook" Connect and Disconnect with a review. Up
+  next: "Needs approval" badge, request rows, island card shows the request. The terminal dialog always stays;
+  no output means the terminal decides. Claude has no "Allow for this session".
+- **Not built, decided.** Claude Code `AskUserQuestion` questions stay terminal-only: a blocking `PreToolUse` hook
+  hides the terminal question while it waits (spike, Claude Code 2.1.329). Revisit when a Claude Code version
+  shows the question while the hook waits.
+- **Tests.** On `main`, parallel and `--no-parallel` both passed (the coordinator reported "4040 + 634 tests"; the
+  handoff did not split the counts by mode or test target). Claude install step: unit tests only; no live probe of the full app path.
+- **Open checks (manual, in Rafu Lightning; no GUI run yet):** answer from the row and answer from the terminal;
+  a stale click (message "This request was already answered."); keyboard on a pinned panel; VoiceOver for the
+  badge, row and island card; contrast; a second window; island card expansion and the return to Usage; the
+  Settings switch and the Connect review (and Disconnect) for the Answer hook. Also not verified live: a "No"
+  in the Claude terminal and its hook event.

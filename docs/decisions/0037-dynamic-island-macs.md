@@ -418,3 +418,6 @@ When a Rafu terminal has a pending request, the island pill shows an attention
 badge. Opening the pill shows the request and its controls. After the last
 request closes, the card shows Usage again. This temporary view does not change
 the user's saved section selection.
+
+Decision and limits of the request itself:
+[`0042-answer-agent-requests-from-up-next.md`](0042-answer-agent-requests-from-up-next.md).

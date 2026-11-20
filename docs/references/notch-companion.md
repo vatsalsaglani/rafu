@@ -449,6 +449,51 @@ Owed device checks (not verified):
 - Mismatch between the content inset (SwiftUI) and the AppKit panel frame
   animation while the panel opens.
 
+**19. Approval rows (2026-11-20).** Last verified: the coordinator reported both
+test modes passing on `main` (4040 and 634 tests); toolchain and OS version not
+stated in the handoff. NOT checked in the GUI. Decision:
+[`0042-answer-agent-requests-from-up-next.md`](../decisions/0042-answer-agent-requests-from-up-next.md).
+Code: `CompanionRequestView.swift`, `CompanionRequestPresentation.swift`,
+`CompanionUpNextSectionView` in `NotchSectionViews.swift`,
+`NotchCompanionModel.setApprovalControlsEngaged(_:)`. The request source is
+`AgentRequestStore.shared` (see
+[`codex-app-server-approvals.md`](codex-app-server-approvals.md) and
+[`claude-permission-request-hook.md`](claude-permission-request-hook.md)).
+
+- **Badge.** While any request is pending, a "Needs approval" label (symbol
+  `exclamationmark.bubble`, help text and VoiceOver text "Needs approval") takes
+  the place of the attention dot in the resting status and of the usage glance
+  in the island lobe. The island lobe accessibility label becomes "Rafu, Needs
+  approval". The panel summary label adds "Needs approval".
+- **Row.** Up next lists one request row per terminal row that has a window and
+  a current request (the oldest request of that terminal). A row has the
+  terminal title (opens the agent in its window), the title ("Run command",
+  "Apply file changes", "Grant permissions", "Answer questions"), the command
+  (3 lines, "Show all" expands), the folder, the reason, the buttons the request
+  permits, and always "Open terminal". A `terminalOnly` request shows only
+  "Open terminal". While an answer waits for the supervisor the row shows
+  "Sending answer…". Rows with a request leave the normal feed and waiting
+  lists.
+- **Island card.** While a request is pending, the island card shows a "Close"
+  button and the Up next section (request rows only, no feed and no waiting
+  rows) instead of the saved section. When the last request closes, the card
+  shows the saved section again; the saved selection never changed. On the
+  notch panel, a click that pins the panel selects Up next when a request is
+  pending and Up next is offered.
+- **Key status only while pinned.** `approvalControlsEngaged` is true only when
+  the panel is `.pinned`, a request row is shown, and the host is not the menu
+  bar card (that card is its own key panel). `updateKeyStatus()` combines it
+  with the reply and search flags, so the non-activating panel takes key status
+  for the buttons only while pinned. An approval row never makes a resting or
+  peek panel key.
+  `clearKeyEngagement()` (lost key, teardown) and the section's `onDisappear`
+  reset it.
+- **Stale click.** The buttons call `AgentRequestStore.choose`. A request that
+  was answered or closed in the meantime gives the message "This request was
+  already answered." (an answer that is not valid gives "This answer is
+  unavailable. Open the terminal to continue."). The message shows above the
+  rows with a "Dismiss" button.
+
 ## Why it matters
 
 The companion is a persistent, always-on overlay near the menu bar; any
@@ -522,3 +567,7 @@ rg -n "NotchScreenSelection|currentMetrics" Sources/RafuApp/Terminal
 - [`agent-hooks-and-now-playing.md`](agent-hooks-and-now-playing.md) (X11:
   hook-based agent phases in the notch, "Other agents", and the system Now
   Playing source with its Music/Spotify fallback)
+- [`0042-answer-agent-requests-from-up-next.md`](../decisions/0042-answer-agent-requests-from-up-next.md)
+  (rule 19, approval rows), with
+  [`codex-app-server-approvals.md`](codex-app-server-approvals.md) and
+  [`claude-permission-request-hook.md`](claude-permission-request-hook.md)

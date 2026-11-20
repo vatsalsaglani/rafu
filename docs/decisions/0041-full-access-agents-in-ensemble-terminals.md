@@ -5,8 +5,8 @@
   the app. GUI checks pending (listed below).
 - **Date:** 2026-11-19
 - **Number note:** 0041 was free on main when this was written. The decision record about answering agent
-  requests from the Up next row may also claim 0041; whichever merges second takes the next free number and fixes
-  its links.
+  requests from the Up next row took the next number, 0042
+  ([`0042-answer-agent-requests-from-up-next.md`](0042-answer-agent-requests-from-up-next.md)).
 - **Related:** [`codex-full-access.md`](../references/codex-full-access.md),
   [`agent-cli-commands.md`](../references/agent-cli-commands.md), the Ensemble Agent control model
   ([`ensemble-canvas.md`](../plans/phases/ensemble-canvas.md)).

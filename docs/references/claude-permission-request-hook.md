@@ -16,9 +16,10 @@ Last verified: Swift 6.4.2, macOS 27.2.1, 2026-11-20, Claude Code 2.1.328 (live 
 in a pseudo-terminal, model `haiku`, a temporary settings file, and the real helper binary). The install step was
 verified with unit tests only (temporary folders, a fixed clock); no live probe of the full app path yet.
 
-Status: the helper mode, the answer channel, the app mapping, the hook entry, the Settings switch, the Connect step
-and the request lifetime exist and are tested. The Up next row that shows and answers a request is built separately;
-until it exists, a request opens in `AgentRequestStore` and ends by the rules in "The install step (built)".
+Status: the helper mode, the answer channel, the app mapping, the hook entry, the Settings switch, the Connect step,
+the request lifetime and the Up next row that shows and answers a request exist and are tested (see
+[`notch-companion.md`](notch-companion.md), "Approval rows"). GUI hand checks of the row are pending. Claude Code questions
+(`AskUserQuestion`) are not answered from Up next; see the section "Claude Code questions use a different hook".
 
 ## Observations (Claude Code 2.1.328)
 
@@ -177,5 +178,8 @@ cases were run" (seen with Swift 6.4.2).
 
 ## Related
 
+- Decision: [`0042-answer-agent-requests-from-up-next.md`](../decisions/0042-answer-agent-requests-from-up-next.md)
+  (answer on the agent's own channel; the terminal stays in charge; the Claude switch is off by default).
+- [`notch-companion.md`](notch-companion.md): the approval rows that show these requests.
 - [`codex-app-server-approvals.md`](codex-app-server-approvals.md): the Codex side of the same Up next answer path.
 - [`agent-hooks-and-now-playing.md`](agent-hooks-and-now-playing.md): the normal hook helper, the spool and the merge.
