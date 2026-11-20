@@ -3,6 +3,36 @@ import Testing
 
 @testable import RafuApp
 
+@Test("CompanionRequestActions: primary, Deny and the menu for each kind of request")
+func companionRequestActions() {
+    let command = CompanionRequestActions(request: .init(kind: .command, command: "swift test"))
+    #expect(command.primary?.decision == .accept)
+    #expect(command.primaryLabel == "Allow")
+    #expect(command.deny?.decision == .decline)
+    #expect(command.overflow.map(\.decision) == [.acceptForSession, .cancel])
+    #expect(command.overflow.map(\.label) == ["Allow for this session", "Deny and stop"])
+
+    // A Claude Code request answered through its hook has no session answer.
+    let claude = CompanionRequestActions(
+        request: .init(kind: .command, command: "swift test", offersSessionAllow: false))
+    #expect(claude.overflow.map(\.decision) == [.cancel])
+
+    let checkpoint = CompanionRequestActions(
+        request: .init(kind: .command, isHumanCheckpoint: true, command: "swift test"))
+    #expect(checkpoint.primaryLabel == "Allow")
+    #expect(checkpoint.overflow.map(\.decision) == [.cancel])
+
+    let permissions = CompanionRequestActions(
+        request: .init(kind: .permissions, permissions: ["Network access"]))
+    #expect(permissions.primaryLabel == "Allow for this turn")
+    #expect(permissions.overflow.map(\.decision) == [.acceptForSession])
+    #expect(permissions.withoutAccept.primary == nil)
+    #expect(permissions.withoutAccept.overflow.isEmpty)
+
+    let change = CompanionRequestActions(request: .init(kind: .fileChange, grantRoot: "/tmp"))
+    #expect(change.primary == nil && change.deny == nil && change.overflow.isEmpty)
+}
+
 @MainActor
 @Test func companionRequestButtons() {
     let requests: [CanvasAgentRequest] = [

@@ -166,6 +166,17 @@ final class UsageMenuBarItem: NSObject {
         showCard()
     }
 
+    /// The status item's window frame in screen coordinates: the approval
+    /// peek hangs below it. `nil` when macOS hid the item (no window, or a
+    /// window off every screen).
+    var anchorFrame: CGRect? {
+        guard let window = statusItem?.button?.window, window.isVisible,
+            let screen = window.screen
+        else { return nil }
+        let frame = window.frame
+        return screen.frame.intersects(frame) ? frame : nil
+    }
+
     /// Opens the card if it is closed (a `rafu://usage` widget link). An
     /// open card stays open.
     func revealCard() {

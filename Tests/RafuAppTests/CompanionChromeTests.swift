@@ -1,8 +1,38 @@
 import CoreGraphics
 import Foundation
+import SwiftUI
 import Testing
 
 @testable import RafuApp
+
+@MainActor
+@Test("CompanionGlowGradient: the tones pick one hue; standard keeps today's colours")
+func companionGlowTones() {
+    let palette = RafuThemeCatalog.indigo.palette
+    #expect(
+        CompanionGlowGradient.colors(for: .gradient, palette: palette) == [
+            palette.warning.opacity(0.15), palette.warning, palette.accent.opacity(0.65),
+            palette.warning.opacity(0.15),
+        ])
+    #expect(
+        CompanionGlowGradient.colors(for: .opaqueGradient, palette: palette)
+            == [palette.warning, palette.accent, palette.warning])
+    let hues: [(CompanionGlowTone, Color)] = [
+        (.waiting, palette.warning), (.allowed, palette.success), (.denied, palette.error),
+    ]
+    for (tone, hue) in hues {
+        #expect(
+            CompanionGlowGradient.colors(for: .gradient, palette: palette, tone: tone)
+                == [hue.opacity(0.15), hue, hue.opacity(0.65), hue.opacity(0.15)])
+        #expect(
+            CompanionGlowGradient.colors(for: .opaqueGradient, palette: palette, tone: tone)
+                == [hue, hue])
+        // Increase Contrast ignores the tone.
+        #expect(
+            CompanionGlowGradient.colors(for: .solid, palette: palette, tone: tone)
+                == [palette.borderStrong])
+    }
+}
 
 /// The companion's shared chrome (`CompanionChrome.swift`): the gradient
 /// border decision, the hanging outline, the tab tokens, and the agent card

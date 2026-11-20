@@ -197,6 +197,7 @@ nonisolated struct NotchDisplayPreferenceStore: Sendable {
     static let systemNowPlayingKey = "notchNowPlayingSystemMedia"
     static let usageGlancePositionKey = "notchUsageGlancePosition"
     static let menuBarSelectedSectionKey = "menuBarCompanionSection"
+    static let approvalPeekKey = "notchApprovalPeekEnabled"
 
     private let suiteName: String?
 
@@ -241,6 +242,13 @@ nonisolated struct NotchDisplayPreferenceStore: Sendable {
     func showsPillOnPlainDisplays() -> Bool { flag(Self.plainDisplayPillKey, default: false) }
     func setShowsPillOnPlainDisplays(_ value: Bool) {
         defaults.set(value, forKey: Self.plainDisplayPillKey)
+    }
+
+    /// A small card shows below the companion when an agent asks for
+    /// approval (`ApprovalPeekController`). On by default.
+    func isApprovalPeekEnabled() -> Bool { flag(Self.approvalPeekKey, default: true) }
+    func setApprovalPeekEnabled(_ value: Bool) {
+        defaults.set(value, forKey: Self.approvalPeekKey)
     }
 
     /// Where a Dynamic Island Mac shows the usage glance.

@@ -10,6 +10,28 @@ private func row(_ phase: NotchAgentPhase, id: UUID = UUID(), board: UUID? = nil
     NotchAgentRow(id: id, title: "agent", cli: .claudeCode, phase: phase, boardID: board)
 }
 
+@Test("CompanionUpNextContent.needsYouHint: where to answer a Needs you row with no request")
+func needsYouHint() {
+    #expect(
+        CompanionUpNextContent.needsYouHint(
+            phase: .needsYou, cli: .codex, hasWindow: true, claudeAnswersEnabled: false)
+            == "Answer in the terminal")
+    #expect(
+        CompanionUpNextContent.needsYouHint(
+            phase: .needsYou, cli: .claudeCode, hasWindow: true, claudeAnswersEnabled: true)
+            == "Answer in the terminal")
+    #expect(
+        CompanionUpNextContent.needsYouHint(
+            phase: .needsYou, cli: .claudeCode, hasWindow: true, claudeAnswersEnabled: false)
+            == "Turn on Answers from Up next in Settings to answer here")
+    #expect(
+        CompanionUpNextContent.needsYouHint(
+            phase: .replyReady, cli: .codex, hasWindow: true, claudeAnswersEnabled: false) == nil)
+    #expect(
+        CompanionUpNextContent.needsYouHint(
+            phase: .needsYou, cli: .codex, hasWindow: false, claudeAnswersEnabled: false) == nil)
+}
+
 // MARK: - Phase
 
 @Test("NotchAgentPhase.resolve: status, output, and attention cause map to the five phases")

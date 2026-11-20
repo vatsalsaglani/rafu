@@ -147,6 +147,38 @@ a Claude Code release in which a "No" in the terminal no longer stops the hook o
 the full change of a file change request in the row (then decision 10 can be reconsidered), or a Claude Code version in which the `AskUserQuestion`
 question shows in the terminal while a blocking hook waits (then Claude Code questions can be reconsidered).
 
+## Amendment: the approval peek, the fit rule and the swipe (2026-11-20)
+
+On the user's direction (an approved visual mock), a request now also shows in a small "approval peek" card, so
+the person can answer without opening the panel. This also gives the island Mac a request surface that does not
+need a click on the pill first. Details and constants:
+[`notch-companion.md`](../references/notch-companion.md), rule 20.
+
+1. **The peek.** A 360 pt black card hangs below the notch, Rafu's island pill, the plain-display pill or the menu
+   bar item. Rafu does not activate, the full panel does not open, and the card is not key when it appears. It
+   shows the oldest request of each terminal (decision 4 is unchanged), as a stack with "1 of N". There is no
+   auto-dismiss timer: a request blocks the agent. The close button hides the stack until a new request arrives.
+   Settings: "Show approval peek", on by default. The full Up next row stays the place that shows everything.
+2. **The fit rule.** The peek shows Allow only when the full command, the folder and the permission lines fit the
+   card (4 wrapped lines of 44 columns, 88 folder columns, 4 permission lines) and the measured card is at most
+   260 pt tall. Otherwise the card is a Review card: it cuts the command to 2 lines and has no accept answer at all
+   (no Allow, no "Allow for this session", no right swipe). So the rule of decision 1 holds in the peek too: no
+   part of a command is out of view while an accept control is active.
+3. **The swipe.** On the top card, a drag (or a two-finger trackpad swipe) to the right sends the primary answer
+   and to the left sends Deny. Only the distance at release decides (120 pt); velocity is not used, so a flick
+   cannot approve. A label ("Allow" or "Deny") shows before the commit, a short release springs back, and a swipe
+   that starts in the 0.5 s quiet interval after the card changed is ignored. Buttons give every answer a swipe
+   gives. Every answer path still ends in `AgentRequestStore.choose`.
+4. **The glow.** The card border is amber while it waits, then green on allow and red on deny, with the words
+   "Allowed" or "Denied", so the result never rests on colour alone.
+
+Alternatives considered: a fourth hover state of the companion panel (rejected: it has no panel in menu bar mode
+and changes the tested hover policy); a velocity-based swipe commit (rejected for safety); cutting a long command
+under an active Allow with a "Show all" control (rejected by decision 1).
+
+Still not checked in the GUI: the anchors on each surface, keyboard and VoiceOver use of the card, the menu in a
+non-key panel, and the two-finger swipe direction on a real trackpad.
+
 ## GUI checks pending
 
 Answer from the row and from the terminal (the row closes, no stuck prompt); a stale click (the message "This

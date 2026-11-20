@@ -194,6 +194,9 @@ struct CompanionLooseAgentsView: View {
 struct CompanionAgentRowView: View {
     let model: NotchCompanionModel
     let row: NotchAgentRow
+    /// A muted second line: where to answer a "Needs you" row
+    /// (`CompanionUpNextContent.needsYouHint`). Only Up next passes one.
+    var hint: String?
     @Environment(\.rafuTheme) private var theme
 
     private var ink: NotchInk { NotchInk(theme: theme) }
@@ -209,28 +212,40 @@ struct CompanionAgentRowView: View {
         Button {
             model.focusAgent(row)
         } label: {
-            HStack(spacing: RafuMetrics.space2) {
-                AgentIconView(cli: row.cli, size: 14)
-                    .accessibilityHidden(true)
-                Text(row.title)
-                    .font(.system(size: 11))
-                    .foregroundStyle(ink.primary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                Spacer(minLength: RafuMetrics.space2)
-                if row.fullAccess {
-                    CompanionFullAccessBadge()
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: RafuMetrics.space2) {
+                    AgentIconView(cli: row.cli, size: 14)
+                        .accessibilityHidden(true)
+                    Text(row.title)
+                        .font(.system(size: 11))
+                        .foregroundStyle(ink.primary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Spacer(minLength: RafuMetrics.space2)
+                    if row.fullAccess {
+                        CompanionFullAccessBadge()
+                    }
+                    Image(systemName: row.phase.symbol)
+                        .font(.system(size: 10))
+                        .accessibilityHidden(true)
+                    Text(row.phase.label)
+                        .font(
+                            .system(
+                                size: 10, weight: row.phase.needsAttention ? .semibold : .regular))
                 }
-                Image(systemName: row.phase.symbol)
-                    .font(.system(size: 10))
-                    .accessibilityHidden(true)
-                Text(row.phase.label)
-                    .font(
-                        .system(size: 10, weight: row.phase.needsAttention ? .semibold : .regular))
+                .foregroundStyle(row.phase.needsAttention ? ink.accent : ink.secondary)
+                if let hint {
+                    Text(hint)
+                        .font(.system(size: 10))
+                        .foregroundStyle(ink.muted)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.leading, 14 + RafuMetrics.space2)
+                }
             }
-            .foregroundStyle(row.phase.needsAttention ? ink.accent : ink.secondary)
             .padding(.horizontal, RafuMetrics.space2)
-            .frame(height: 26)
+            .padding(.vertical, hint == nil ? 0 : 4)
+            .frame(minHeight: 26)
             .background(
                 RoundedRectangle(cornerRadius: RafuMetrics.radiusControl, style: .continuous)
                     .fill(Color.white.opacity(row.phase.needsAttention ? 0.1 : 0.05))
@@ -239,7 +254,9 @@ struct CompanionAgentRowView: View {
         }
         .buttonStyle(.plain)
         .help("Show \(row.title) in its window")
-        .accessibilityLabel(row.accessibilityLabel)
+        .accessibilityLabel(
+            hint.map { row.accessibilityLabel + ". " + $0 } ?? row.accessibilityLabel
+        )
         .accessibilityHint("Activates to show this agent")
     }
 }
@@ -343,7 +360,12 @@ struct CompanionUpNextSectionView: View {
                                 if row.windowID == nil {
                                     TrackedAgentNotchRow(row: row, among: waiting)
                                 } else {
-                                    CompanionAgentRowView(model: model, row: row)
+                                    CompanionAgentRowView(
+                                        model: model, row: row,
+                                        hint: CompanionUpNextContent.needsYouHint(
+                                            phase: row.phase, cli: row.cli, hasWindow: true,
+                                            claudeAnswersEnabled: AgentActivityStore.shared
+                                                .claudeAnswersEnabled))
                                 }
                             }
                         }

@@ -510,6 +510,98 @@ and `noteApprovalInteraction()`. Tests:
   already answered." (an answer that is not valid gives "This answer is
   unavailable. Open the terminal to continue."). The message shows above the
   rows with a "Dismiss" button.
+- **Compact button row (2026-11-20, approval peek work).** The row now has a
+  header (agent icon and terminal title), the title in amber, the command in a
+  monospaced box (still whole, still selectable), the muted folder, reason and
+  permission lines, and one button row from `CompanionRequestActions`: Deny,
+  the primary answer (amber `CompanionAllowButtonStyle`; a command reads
+  "Allow", a permissions request keeps "Allow for this turn"), and a "More
+  actions" menu (`ellipsis`) with the other answers ("Allow for this session",
+  "Deny and stop") and "Open terminal". A terminal-only request shows one
+  "Open terminal" button. Questions keep their list, with "Answer" and "Open
+  terminal". Do not use `.borderedProminent` for the primary button:
+  `ThemedControlStyleScanTests` bans it (it paints the system accent).
+- **Hint line.** A "Needs you" row in the Up next waiting list that has a
+  window and no request shows a muted second line
+  (`CompanionUpNextContent.needsYouHint`): "Turn on Answers from Up next in
+  Settings to answer here" for Claude Code while that switch is off, else
+  "Answer in the terminal". The row height is now at least 26 pt, not fixed.
+
+**20. Approval peek (2026-11-20).** NOT checked in the GUI (launch only).
+Decision: the peek amendment of
+[`0042-answer-agent-requests-from-up-next.md`](../decisions/0042-answer-agent-requests-from-up-next.md).
+Code: `ApprovalPeekModels.swift` (pure), `ApprovalPeekController.swift`,
+`ApprovalPeekView.swift` in `Sources/RafuApp/Notch/`. Tests:
+`Tests/RafuAppTests/ApprovalPeekModelsTests.swift`.
+
+- **What.** When a request is pending, a 360 pt black card (radius 18) hangs
+  6 pt below the anchor: the notch rectangle, Rafu's island pill
+  (`NotchIslandGeometry.restingFrame`), the plain-display pill, or the status
+  item's window frame (a zero-height top-centre rectangle when macOS hid the
+  item). The full panel does not open and Rafu does not activate. Up to two
+  blank cards show behind it (6 pt lower each, scale 0.96 and 0.92, opacity
+  0.6 and 0.35), with "1 of N", previous and next.
+- **When.** Setting "Show approval peek" on (`notchApprovalPeekEnabled`,
+  default on), a companion surface exists, the companion panel is not open and
+  the menu bar card is not shown. The card stays until the request closes, the
+  person answers, or the person closes it (the close button and Escape hide
+  the full stack; a later request shows it again; the badge and Up next stay).
+  There is no auto-dismiss timer. While the peek shows, the bell drop-down
+  does not show (`WorkspaceSession.notifyIfNeeded(for:)`), and the drop-down
+  is dismissed when the peek appears.
+- **Window.** One `NotchHUDPanel` (no shadow; the card draws its own) of the
+  card plus 140 pt side gutters and 16 pt below, so a dragged card does not
+  clip. The gutters and the strip below pass clicks through
+  (`ApprovalPeekHostingView.hitTest`).
+- **Observation.** `withObservationTracking` reads the store, the panel and
+  popover state, the presence and the setting, and reads `allAgentRows` only
+  while a request is pending. The tracked closure only reads; the controller
+  applies the result after it, so a write cannot re-trigger the tracking.
+  Defaults that are not observed (the companion switch) are re-read on each
+  `activateIfEnabled()`.
+- **Fit rule.** `ApprovalPeekFit`: ASCII counts 1 column, a tab 8, any other
+  scalar 2; 44 columns per line. A command fits in 4 wrapped lines, a folder
+  in 88 columns, permission lines in 4 wrapped lines total. A request that
+  does not fit, or whose measured card is taller than 260 pt, is a Review card:
+  the command is cut to 2 lines, "Review" replaces Allow (it opens Up next, or
+  the terminal when no surface shows Up next), and the menu has no accept
+  answer. Only a Review card cuts text. One question with 4 or fewer choices,
+  at most 44 label columns and at most 120 characters of text shows choice
+  buttons; any other question shows "Answer in Up next".
+- **Safety.** Every answer (button, choice, swipe) goes through
+  `ApprovalPeekController.answer`, which returns at once during the 0.5 s
+  `ApprovalClickGuard` quiet interval after the shown card changed, then calls
+  `AgentRequestStore.choose`. A drag or two-finger swipe that starts in the
+  quiet interval is ignored. The panel shows with `orderFrontRegardless()` and
+  is not key; a click in the card, or pointer movement over it after the quiet
+  interval, makes it key (`ApprovalKeyEngagement`). Allow has no default-action
+  shortcut, and the first control is the terminal title.
+- **Swipe.** Drag right is the primary answer, left is Deny
+  (`ApprovalSwipePolicy`): minimum drag 12 pt, a first move more vertical than
+  horizontal is ignored, the label ("Allow" or "Deny", with a symbol) shows
+  from 24 pt and is bold at 120 pt, the tilt is `x / 15` clamped to 8 degrees,
+  the green or red tint grows to 0.35. Only the distance at release decides
+  (120 pt); velocity and the predicted end are not used. A Review card
+  rubber-bands to the right (at most 24 pt, no label). Terminal-only, choice
+  and "Answer in Up next" cards do not swipe. On a commit the card flies
+  ±440 pt in 0.22 s and the next card shows; under Reduce Motion it does not
+  tilt and fades in 0.15 s. Two-finger swipe: SwiftUI has no scroll-wheel
+  gesture, so `ApprovalPeekHostingView.scrollWheel(with:)` gives the events to
+  the controller (precise deltas only, no momentum phase, start at `.began`,
+  commit at `.ended`). The finger direction uses `+scrollingDeltaX` when
+  `isDirectionInvertedFromDevice` is true, else `-scrollingDeltaX`. NOT
+  checked on a device.
+- **Glow.** `companionGlowBorder(..., tone:)` with `CompanionGlowTone`:
+  `.waiting` (theme warning, amber) on the top card with the slow sweep and a
+  fast sweep for each new card; the leaving card uses `.allowed` (success) or
+  `.denied` (error) and shows the word "Allowed" or "Denied" for 0.35 s.
+  Increase Contrast keeps the solid `borderStrong` line for every tone.
+- **VoiceOver.** A new card that the person did not select posts
+  `NSAccessibility` `.announcementRequested` (high priority):
+  "Codex needs approval: npm test", "... needs approval: Grant permissions",
+  "... needs approval: Apply file changes. Open the terminal to answer.",
+  "... asks: <question>". The back cards are hidden from VoiceOver. Every
+  swipe answer also has a button.
 
 ## Why it matters
 

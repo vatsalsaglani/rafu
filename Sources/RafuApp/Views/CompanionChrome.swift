@@ -240,21 +240,43 @@ nonisolated enum CompanionGlowPolicy {
     }
 }
 
+/// The hue of the gradient border. The companion surfaces use `.standard`;
+/// the approval peek is amber while it waits, then green on allow and red on
+/// deny. The peek also shows a word for each result, so the state never
+/// rests on colour alone.
+nonisolated enum CompanionGlowTone: Equatable, Sendable {
+    case standard
+    case waiting
+    case allowed
+    case denied
+}
+
 /// The gradient's colours from theme tokens: Cider's orange becomes the
 /// theme's warning hue and its pink becomes the accent.
 struct CompanionGlowGradient {
-    static func colors(for fill: CompanionGlowState.Fill, palette: RafuThemePalette) -> [Color] {
-        switch fill {
-        case .gradient:
-            [
-                palette.warning.opacity(0.15), palette.warning, palette.accent.opacity(0.65),
-                palette.warning.opacity(0.15),
-            ]
-        case .opaqueGradient:
-            [palette.warning, palette.accent, palette.warning]
-        case .solid:
-            [palette.borderStrong]
+    static func colors(
+        for fill: CompanionGlowState.Fill, palette: RafuThemePalette,
+        tone: CompanionGlowTone = .standard
+    ) -> [Color] {
+        // Increase Contrast: one solid strong line, whatever the tone.
+        if fill == .solid { return [palette.borderStrong] }
+        let single: Color
+        switch tone {
+        case .standard:
+            return fill == .gradient
+                ? [
+                    palette.warning.opacity(0.15), palette.warning, palette.accent.opacity(0.65),
+                    palette.warning.opacity(0.15),
+                ]
+                : [palette.warning, palette.accent, palette.warning]
+        case .waiting: single = palette.warning
+        case .allowed: single = palette.success
+        case .denied: single = palette.error
         }
+        // One hue with faded ends; Reduce Transparency drops the faded stops.
+        return fill == .gradient
+            ? [single.opacity(0.15), single, single.opacity(0.65), single.opacity(0.15)]
+            : [single, single]
     }
 }
 
@@ -262,15 +284,16 @@ extension View {
     /// Draws the companion's gradient border along `stroke`, inside `clip`.
     /// `attention` is a count that goes up on each new attention event;
     /// `sweepKey` starts a sweep whenever it changes to a new non-nil value
-    /// (the drop-down's event). Apply under `rafuMotionScope()`.
+    /// (the drop-down's event). `tone` picks the hue (`CompanionGlowTone`).
+    /// Apply under `rafuMotionScope()`.
     func companionGlowBorder<Stroke: Shape, Clip: Shape>(
         stroke: Stroke, clip: Clip, visible: Bool, anyWorking: Bool, attention: Int = 0,
-        sweepKey: UUID? = nil
+        sweepKey: UUID? = nil, tone: CompanionGlowTone = .standard
     ) -> some View {
         modifier(
             CompanionGlowBorder(
                 stroke: stroke, clip: clip, visible: visible, anyWorking: anyWorking,
-                attention: attention, sweepKey: sweepKey))
+                attention: attention, sweepKey: sweepKey, tone: tone))
     }
 }
 
@@ -281,6 +304,7 @@ private struct CompanionGlowBorder<Stroke: Shape, Clip: Shape>: ViewModifier {
     let anyWorking: Bool
     let attention: Int
     let sweepKey: UUID?
+    let tone: CompanionGlowTone
     @State private var sweepUntil: Date?
     @Environment(\.rafuTheme) private var theme
     @Environment(\.rafuMotionAllowed) private var motionAllowed
@@ -326,7 +350,8 @@ private struct CompanionGlowBorder<Stroke: Shape, Clip: Shape>: ViewModifier {
     }
 
     private func border(_ state: CompanionGlowState) -> some View {
-        let colors = CompanionGlowGradient.colors(for: state.fill, palette: theme.palette)
+        let colors = CompanionGlowGradient.colors(
+            for: state.fill, palette: theme.palette, tone: tone)
         // Paused while still: no frames at rest, while hidden, or under
         // Reduce Motion (`state.period` is nil then).
         return TimelineView(

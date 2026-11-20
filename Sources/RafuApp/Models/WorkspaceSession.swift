@@ -1133,7 +1133,9 @@ final class WorkspaceSession {
                         color: controller.sessionColor
                     )
                 )
-            } else if arbitration.showDropDown {
+            } else if arbitration.showDropDown, !ApprovalPeekController.shared.isShowing {
+                // The approval peek uses the drop-down's place. The bell
+                // stays in Up next and in the notification.
                 resolvedAttentionHUD().show(
                     NotchHUDEvent(
                         sessionID: controller.id,
