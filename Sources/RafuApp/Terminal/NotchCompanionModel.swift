@@ -468,8 +468,10 @@ final class NotchCompanionModel: NSObject {
             cardID: cardID,
             cardTitle: cardTitle,
             windowID: windowID,
-            trackedPhase: AgentTrackedPhase.terminalPhase(
-                session: session, status: controller.status, now: store.now),
+            trackedPhase: AgentRequestStore.shared.current(for: controller.id) != nil
+                ? .needsYou
+                : AgentTrackedPhase.terminalPhase(
+                    session: session, status: controller.status, now: store.now),
             subagents: AgentTrackedPhase.subagentEntries(session),
             fullAccess: fullAccess)
     }
@@ -937,7 +939,7 @@ final class NotchCompanionModel: NSObject {
     /// never activates the app — on an already-key panel.
     private func updateKeyStatus() {
         guard let panel else { return }
-        let wantsKey = isReplyEngaged || isSearchEngaged
+        let wantsKey = isReplyEngaged || isSearchEngaged || approvalControlsEngaged
         let wasKey = panel.allowsKeyStatus
         panel.allowsKeyStatus = wantsKey
         if wantsKey && !wasKey {
@@ -951,9 +953,19 @@ final class NotchCompanionModel: NSObject {
     /// `allowsKeyStatus` false unconditionally (not re-derived through
     /// `updateKeyStatus()`, which would leave `allowsKeyStatus` true if the
     /// OTHER field's flag happened to still read true at that instant).
+    /// True while an Up next approval row is on a pinned panel, so its
+    /// buttons can take keyboard focus.
+    private var approvalControlsEngaged = false
+
+    func setApprovalControlsEngaged(_ engaged: Bool) {
+        approvalControlsEngaged = engaged
+        updateKeyStatus()
+    }
+
     private func clearKeyEngagement() {
         isReplyEngaged = false
         isSearchEngaged = false
+        approvalControlsEngaged = false
         panel?.allowsKeyStatus = false
     }
 
@@ -1501,6 +1513,11 @@ final class NotchCompanionModel: NSObject {
             surface == .island
             ? CompanionHoverPolicy.onIslandTap(hoverState)
             : CompanionHoverPolicy.onClick(hoverState)
+        if hoverState == .pinned, surface != .island, visibleSections.contains(.upNext),
+            !AgentRequestStore.shared.pending.isEmpty
+        {
+            select(.upNext)
+        }
         refreshTheme()
         refreshEditorRows(animated: true)
         if hoverState == .pinned { refreshUsage() }

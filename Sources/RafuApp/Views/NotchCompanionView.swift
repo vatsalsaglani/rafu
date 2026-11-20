@@ -256,6 +256,7 @@ struct CompanionWingsView: View {
     private var summaryLabel: String {
         let editors = model.editorRows.count
         var parts = [model.agentSummary.spokenSummary]
+        if !AgentRequestStore.shared.pending.isEmpty { parts.append("Needs approval") }
         parts.append("\(editors) editor\(editors == 1 ? "" : "s") open")
         let attention = model.attentionCount
         if attention > 0 {
@@ -281,7 +282,11 @@ struct CompanionRestingStatus: View {
     var body: some View {
         let summary = model.agentSummary
         HStack(spacing: RafuMetrics.space2 - 2) {
-            if model.attentionCount > 0 {
+            if !AgentRequestStore.shared.pending.isEmpty {
+                Label("Needs approval", systemImage: "exclamationmark.bubble")
+                    .labelStyle(.iconOnly)
+                    .help("Needs approval")
+            } else if model.attentionCount > 0 {
                 HStack(spacing: 3) {
                     Circle()
                         .fill(ink.accent)
@@ -365,17 +370,29 @@ struct CompanionIslandWingsView: View {
             CompanionLeadingMarkView(model: model)
                 .padding(.leading, padding)
             Spacer(minLength: 0)
-            usageLobe(glance)
-                .padding(.trailing, padding)
+            Group {
+                if AgentRequestStore.shared.pending.isEmpty {
+                    usageLobe(glance)
+                } else {
+                    Label("Needs approval", systemImage: "exclamationmark.bubble")
+                        .labelStyle(.iconOnly)
+                        .help("Needs approval")
+                }
+            }
+            .padding(.trailing, padding)
         }
         .frame(height: max(model.stripHeight, 1))
         .contentShape(Rectangle())
         .onTapGesture { model.clicked() }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Rafu, " + (glance?.spokenLabel ?? "no usage data"))
+        .accessibilityLabel(
+            "Rafu, "
+                + (AgentRequestStore.shared.pending.isEmpty
+                    ? glance?.spokenLabel ?? "no usage data" : "Needs approval")
+        )
         .accessibilityHint(
             model.isPanelOpen
-                ? "Activates to close the usage panel" : "Activates to open the usage panel"
+                ? "Activates to close the panel" : "Activates to open the panel"
         )
         .accessibilityAddTraits(.isButton)
         .accessibilityAction { model.clicked() }
@@ -440,11 +457,18 @@ struct CompanionSectionHost: View {
                 CompanionTabBar(model: model, host: host, close: close)
             }
             Group {
-                switch model.selection(for: host) {
-                case .ensembles: CompanionEnsemblesSectionView(model: model, host: host)
-                case .upNext: CompanionUpNextSectionView(model: model, host: host)
-                case .nowPlaying: CompanionNowPlayingSectionView(model: model)
-                case .usage: CompanionUsageSectionView(model: model, host: host)
+                if host == .islandCard && !AgentRequestStore.shared.pending.isEmpty {
+                    VStack(alignment: .leading) {
+                        Button("Close") { model.escapePressed() }
+                        CompanionUpNextSectionView(model: model, host: host)
+                    }
+                } else {
+                    switch model.selection(for: host) {
+                    case .ensembles: CompanionEnsemblesSectionView(model: model, host: host)
+                    case .upNext: CompanionUpNextSectionView(model: model, host: host)
+                    case .nowPlaying: CompanionNowPlayingSectionView(model: model)
+                    case .usage: CompanionUsageSectionView(model: model, host: host)
+                    }
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -774,10 +798,13 @@ struct CompanionEditorRowView: View {
 struct CompanionAttentionFeedView: View {
     let model: NotchCompanionModel
 
+    var excluding: Set<UUID> = []
+
     var body: some View {
-        if !model.feedItems.isEmpty {
+        let items = model.feedItems.filter { !excluding.contains($0.sessionID) }
+        if !items.isEmpty {
             VStack(spacing: CompanionChromeMetrics.sectionSpacing) {
-                ForEach(model.feedItems) { item in
+                ForEach(items) { item in
                     CompanionFeedCardView(model: model, item: item)
                 }
             }

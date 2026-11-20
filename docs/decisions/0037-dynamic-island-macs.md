@@ -411,3 +411,10 @@ items 9 and 15 and [`notch-companion.md`](../references/notch-companion.md) rule
 - `Sources/RafuApp/Notch/NotchSettingsSection.swift`
 - `Sources/RafuApp/Views/NotchCompanionView.swift` (`CompanionSectionHost`)
 - `Tests/RafuAppTests/NotchIslandGeometryTests.swift`
+
+## Amendment — Answer a pending agent request
+
+When a Rafu terminal has a pending request, the island pill shows an attention
+badge. Opening the pill shows the request and its controls. After the last
+request closes, the card shows Usage again. This temporary view does not change
+the user's saved section selection.
