@@ -14,7 +14,8 @@ public enum AgentHookInstaller {
         provider: AgentHookProvider,
         destination: URL,
         paths: AgentTrackingPaths,
-        removing: Bool
+        removing: Bool,
+        scope: AgentHookScope = .activity
     ) throws -> AgentHookChange {
         try AgentHookConfiguration.plan(
             provider: provider,
@@ -22,10 +23,12 @@ public enum AgentHookInstaller {
             existing: try readConfiguration(at: destination),
             helper: paths.helper,
             spool: paths.spool,
-            removing: removing)
+            removing: removing,
+            scope: scope)
     }
 
-    /// Whether the provider file has Rafu's entries. `false` when unreadable.
+    /// Whether the provider file has Rafu's activity entries. `false` when
+    /// unreadable.
     public static func isConnected(
         provider: AgentHookProvider, destination: URL, paths: AgentTrackingPaths
     ) -> Bool {
@@ -33,6 +36,13 @@ public enum AgentHookInstaller {
             provider: provider,
             existing: try? readConfiguration(at: destination),
             helper: paths.helper)
+    }
+
+    /// Whether the Claude Code file at `destination` has the answer entry.
+    /// `false` when unreadable.
+    public static func isAnswerConnected(destination: URL, paths: AgentTrackingPaths) -> Bool {
+        AgentHookConfiguration.isAnswerConnected(
+            existing: try? readConfiguration(at: destination), helper: paths.helper)
     }
 
     /// Applies a reviewed change. Returns the backup URL, if one was made.

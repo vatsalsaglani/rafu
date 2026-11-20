@@ -168,6 +168,9 @@ final class RafuAppDelegate: NSObject, NSApplicationDelegate {
         // Synchronous backstop: drops a voice socket that is still open.
         VoiceSession.shared.terminateNow()
         LauncherIPCServer.shared.stop()
+        // Frees the answer watch lock, so a waiting Claude Code helper leaves
+        // the terminal dialog in charge. The kernel would drop it at exit too.
+        AgentActivityStore.shared.stopAnswering()
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {

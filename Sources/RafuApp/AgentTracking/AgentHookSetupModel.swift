@@ -22,6 +22,9 @@ final class AgentHookSetupModel {
     static let providers: [AgentHookProvider] = [.claude, .codex, .cursor]
 
     private(set) var statuses: [AgentHookProvider: Status] = [:]
+    /// Claude Code's opt-in answer entry: `.unknown`, `.notConnected` or
+    /// `.connected`.
+    private(set) var answerStatus: Status = .unknown
     /// The change waiting for review; drives the sheet.
     var pendingChange: AgentHookChange?
     private(set) var isBusy = false
@@ -63,6 +66,21 @@ final class AgentHookSetupModel {
         return live ? .receiving : .connected
     }
 
+    /// The Settings switch "Answer Claude Code permission requests from Up
+    /// next". Turning it on installs nothing: the answer entry needs its own
+    /// reviewed Connect.
+    var claudeAnswersEnabled: Bool {
+        get { store.claudeAnswersEnabled }
+        set { store.setClaudeAnswersEnabled(newValue) }
+    }
+
+    /// Whether the answer entry can be connected now: it needs Claude Code's
+    /// activity hooks, which drain the spool.
+    var canConnectAnswers: Bool {
+        let claude = status(for: .claude)
+        return claude == .connected || claude == .receiving
+    }
+
     /// Reads each provider file off the main actor.
     func refresh() async {
         let paths = store.paths
@@ -74,10 +92,21 @@ final class AgentHookSetupModel {
                 store.setConnected(provider, connected)
             }
         }
+        let answers = await AgentHookSetupIO.answerConnectionState(
+            destination(for: .claude), paths: paths)
+        answerStatus = answers ? .connected : .notConnected
+        if store.claudeAnswersConnected != answers { store.setClaudeAnswersConnected(answers) }
+    }
+
+    /// Builds the reviewed change for Claude Code's answer entry.
+    func prepareAnswers(removing: Bool) {
+        prepare(.claude, removing: removing, scope: .answers)
     }
 
     /// Builds the reviewed change. Writes nothing.
-    func prepare(_ provider: AgentHookProvider, removing: Bool) {
+    func prepare(
+        _ provider: AgentHookProvider, removing: Bool, scope: AgentHookScope = .activity
+    ) {
         guard !isBusy else { return }
         isBusy = true
         message = nil
@@ -86,7 +115,8 @@ final class AgentHookSetupModel {
         Task {
             defer { isBusy = false }
             let result = await AgentHookSetupIO.prepare(
-                provider: provider, destination: destination, paths: paths, removing: removing)
+                provider: provider, destination: destination, paths: paths, removing: removing,
+                scope: scope)
             switch result {
             case .success(let change): pendingChange = change
             case .failure(let error): message = Self.explanation(error, provider: provider)
@@ -106,12 +136,7 @@ final class AgentHookSetupModel {
             pendingChange = nil
             switch result {
             case .success:
-                statuses[change.provider] = change.removing ? .notConnected : .connected
-                store.setConnected(change.provider, !change.removing)
-                message =
-                    change.removing
-                    ? "\(change.provider.displayName) no longer reports activity to Rafu."
-                    : "Connected. Start a new \(change.provider.displayName) session to see activity."
+                record(change)
             case .failure(let error):
                 message = Self.explanation(error, provider: change.provider)
             }
@@ -120,6 +145,32 @@ final class AgentHookSetupModel {
 
     func cancelReview() {
         pendingChange = nil
+    }
+
+    /// Updates the row states after a written change. Internal for tests.
+    func record(_ change: AgentHookChange) {
+        let name = change.provider.displayName
+        switch change.scope {
+        case .answers:
+            answerStatus = change.removing ? .notConnected : .connected
+            store.setClaudeAnswersConnected(!change.removing)
+            message =
+                change.removing
+                ? "Rafu no longer answers \(name) permission requests."
+                : "Connected. Start a new \(name) session to answer its requests from Up next."
+        case .activity:
+            statuses[change.provider] = change.removing ? .notConnected : .connected
+            store.setConnected(change.provider, !change.removing)
+            // The activity Disconnect also removes the answer entry.
+            if change.removing, change.provider == .claude {
+                answerStatus = .notConnected
+                store.setClaudeAnswersConnected(false)
+            }
+            message =
+                change.removing
+                ? "\(name) no longer reports activity to Rafu."
+                : "Connected. Start a new \(name) session to see activity."
+        }
     }
 
     /// Words for a failure. Never includes file content.
@@ -161,15 +212,22 @@ nonisolated enum AgentHookSetupIO {
     }
 
     @concurrent
+    static func answerConnectionState(_ destination: URL, paths: AgentTrackingPaths) async
+        -> Bool
+    {
+        AgentHookInstaller.isAnswerConnected(destination: destination, paths: paths)
+    }
+
+    @concurrent
     static func prepare(
         provider: AgentHookProvider, destination: URL, paths: AgentTrackingPaths,
-        removing: Bool
+        removing: Bool, scope: AgentHookScope
     ) async -> Result<AgentHookChange, AgentHookConfigurationError> {
         do {
             return .success(
                 try AgentHookInstaller.prepare(
                     provider: provider, destination: destination, paths: paths,
-                    removing: removing))
+                    removing: removing, scope: scope))
         } catch let error as AgentHookConfigurationError {
             return .failure(error)
         } catch {

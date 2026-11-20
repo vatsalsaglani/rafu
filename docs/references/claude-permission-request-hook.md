@@ -5,15 +5,20 @@ Applies to: `Sources/RafuAgentEventHelper/AgentEventHelper.swift` and `main.swif
 the decision JSON), `AgentPermissionRequestSummary.swift` (the bounded `tool_input` summary), `AgentHookEvent.swift`
 (`requestSummary`), `Sources/RafuCore/CanvasBridge/CanvasAgentRequest.swift` (`offersSessionAllow`), and
 `Sources/RafuApp/AgentTracking/ClaudePermissionAnswerBridge.swift` (event to request, decision to answer, write and
-dismiss). Tests: `Tests/RafuCoreTests/AgentAnswerChannelTests.swift`, `AgentPermissionRequestSummaryTests.swift`,
-`Tests/RafuAppTests/ClaudePermissionAnswerBridgeTests.swift`.
+dismiss), `Sources/RafuCore/AgentTracking/AgentHookConfiguration.swift` and `AgentHookInstaller.swift` (the answer
+entry, `scope: .answers`), `Sources/RafuApp/AgentTracking/ClaudePermissionAnswerCoordinator.swift` (request lifetime and
+the watch lock), `AgentActivityStore.swift`, `AgentHookSetupModel.swift` and `AgentTrackingSettingsSection.swift` (the
+switch and the Connect step). Tests: `Tests/RafuCoreTests/AgentAnswerChannelTests.swift`,
+`AgentPermissionRequestSummaryTests.swift`, `AgentHookConfigurationTests.swift` (suite "Agent hook answer entry"),
+`Tests/RafuAppTests/ClaudePermissionAnswerBridgeTests.swift`, `ClaudePermissionAnswerCoordinatorTests.swift`.
 
 Last verified: Swift 6.4.2, macOS 27.2.1, 2026-11-20, Claude Code 2.1.328 (live probes below, with the real `claude`
-in a pseudo-terminal, model `haiku`, a temporary settings file, and the real helper binary).
+in a pseudo-terminal, model `haiku`, a temporary settings file, and the real helper binary). The install step was
+verified with unit tests only (temporary folders, a fixed clock); no live probe of the full app path yet.
 
-Status: the helper mode, the answer channel and the app mapping exist and are tested. The hook entry is not installed
-by Rafu yet, there is no Settings switch, and nothing in the app drains the answer request into the Up next row yet.
-Those belong to the next step (see "What the install step needs").
+Status: the helper mode, the answer channel, the app mapping, the hook entry, the Settings switch, the Connect step
+and the request lifetime exist and are tested. The Up next row that shows and answers a request is built separately;
+until it exists, a request opens in `AgentRequestStore` and ends by the rules in "The install step (built)".
 
 ## Observations (Claude Code 2.1.328)
 
@@ -102,6 +107,54 @@ Those belong to the next step (see "What the install step needs").
    event of the session shows the tool ran or was answered, and `dismiss(eventID:)` so the helper stops.
 6. Clear requests and release the lock on the same events as the Codex requests (release, suspend, terminal exit).
 
+## The install step (built)
+
+- **Two scopes in one file.** `AgentHookScope.activity` is the normal entry per event; `.answers` is the one Claude
+  `PermissionRequest` entry (`AgentHookConfiguration.answerCommand`, `timeout` 300). A command is an answer command
+  when it is a Rafu command that ends in ` --answer` (`isAnswerCommand`). The helper uses the same constant
+  (`AgentHookConfiguration.answerFlag`).
+  - The activity Connect, its stale-entry cleanup and `isConnected` ignore the answer entry. Before this change the
+    activity Connect would have dropped the answer entry as a "stale" Rafu command, because its command differs.
+  - The activity Disconnect removes every Rafu command, so it removes the answer entry too (without activity
+    tracking nothing drains the spool). Its review preview lists the answer entry, and the sheet says so.
+  - The answer Connect adds only the answer entry and replaces an older answer entry. The answer Disconnect removes
+    only it. `isAnswerConnected` checks only it.
+  - The review preview now shows the entries that are really removed (with their own timeouts), not a copy of the
+    current command.
+- **Settings.** Settings > Agents > "Answers from Up next": the switch "Answer Claude Code permission requests from
+  Up next" (off by default, `agentTrackingClaudeAnswersEnabled`) and an "Answer hook" row with its own reviewed
+  Connect and Disconnect. Connect is disabled until Claude Code activity tracking is connected. The switch alone
+  installs nothing. The last seen state of the entry is kept in `agentTrackingClaudeAnswersConnected`, like the
+  activity providers, so the lock can be taken at launch without reading the settings file.
+- **The lock.** `AgentActivityStore` takes the `AgentAnswerWatchLock` only when `wantsAnswerWatch` is true: the spool
+  watcher runs, the switch is on, the answer entry is connected and Claude Code activity tracking is connected. Any
+  change of these (switch, Connect, Disconnect, `stop()`) re-evaluates it. App quit (`applicationWillTerminate`)
+  calls `stopAnswering()`. Taking the lock is a few system calls on the main actor (folder, `open`, `flock` without
+  waiting), done only on these changes.
+- **Request lifetime** (`ClaudePermissionAnswerCoordinator`, rules in `ClaudeAnswerRequestBook`), after each spool
+  fold and each 30 s clock tick:
+  - Open: an answerable event, while the lock is held, younger than `waitSeconds`. The terminal is the one live Rafu
+    terminal that `AgentTerminalMatcher` gives for the event's own process chain (folder rule only without a chain).
+    No match, two matches, or a store refusal (`conflict`, `full`) writes `dismiss`.
+  - Answer: when `AgentRequestStore.decision(for:key:)` has a decision, write it (`submit`) and close the request
+    at once. The store is observed (`withObservationTracking`) while requests are open, so the answer goes out
+    without a poll.
+  - Done in the terminal: a later event of the same session and the same sub-agent closes the request and writes
+    `dismiss`: `PostToolUse` or `PostToolUseFailure` of the same tool, `UserPromptSubmit`, `Stop`, `StopFailure`,
+    `SubagentStop`, `SessionEnd`, or a new answerable `PermissionRequest`. A main-session `SessionEnd` ends a
+    sub-agent's request too. The normal entry's `PermissionRequest` (no summary), `Notification` and `PreToolUse`
+    do not end it. A finished tool of another kind does not either, because parallel tools exist.
+  - Expiry: at `receivedAt + waitSeconds`, close and `dismiss`.
+  - Cleared elsewhere: when the request is no longer in the store (terminal exit calls `CanvasLiveBridge.remove`,
+    which clears the terminal's requests; a new route also clears them), only `dismiss`. A terminal that is no
+    longer live closes and dismisses.
+  - Switch off or entry gone: release the lock, close every request, `dismiss` each. Quit: release the lock and close
+    requests without writing (the free lock stops each helper).
+- **File work off the main actor.** Answer and dismiss files are written by `ClaudeAnswerIO.perform` (`@concurrent`).
+  Each event id gets at most one write from the coordinator, because the request leaves the book before the write.
+- **Not verified live.** Whether Claude Code sends any hook event when the person answers "No" in the terminal was not
+  probed. If it sends none, the request stays until the next prompt (`UserPromptSubmit`) or the expiry.
+
 ## Reproduce
 
 A stand-in hook script logged its stdin, slept, and printed one decision. The run used a pseudo-terminal (Python
@@ -115,8 +168,12 @@ spool and wrote the answer file) for allow, deny with stop, dismiss, and no Rafu
 ## Verification
 
 ```bash
-swift test --filter "Agent answer|Agent permission|Claude permission|Agent hook"
+swift test --filter "AgentAnswer|AgentPermission|ClaudePermission|AgentHook|AgentActivity"
 ```
+
+`--filter` matches the test type and function names (`ClaudePermissionAnswerCoordinatorTests/opensMatched()`), not
+the Swift Testing display names: a filter like `"Claude permission"` runs no test and only prints "No matching test
+cases were run" (seen with Swift 6.4.2).
 
 ## Related
 

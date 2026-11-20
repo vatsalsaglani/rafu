@@ -19,6 +19,11 @@ final class AgentActivityStore {
     static let shared = AgentActivityStore()
 
     static let connectedProvidersKey = "agentTrackingConnectedProviders"
+    /// The person's setting "Answer Claude Code permission requests from Up
+    /// next". Off by default.
+    static let claudeAnswersEnabledKey = "agentTrackingClaudeAnswersEnabled"
+    /// Whether Claude Code's answer hook entry is installed, as last seen.
+    static let claudeAnswersConnectedKey = "agentTrackingClaudeAnswersConnected"
     /// The clock ticks this often while sessions exist, to age states.
     static let clockInterval: Duration = .seconds(30)
     /// Bounds one drain call; the next spool change or tick continues.
@@ -32,6 +37,10 @@ final class AgentActivityStore {
     /// reply, stale work) recompute.
     private(set) var now = Date()
     private(set) var connectedProviders: Set<AgentHookProvider>
+    /// The Settings switch. Off by default; on its own it installs nothing.
+    private(set) var claudeAnswersEnabled: Bool
+    /// The answer entry is in Claude Code's settings (a separate Connect).
+    private(set) var claudeAnswersConnected: Bool
     /// Bumped only when `markReplyRead` actually acknowledges a reply, so an
     /// Ensemble card's `.onChange` has something to key off without ticking
     /// on every no-op call (every tab-selection sync calls `markReplyRead`).
@@ -59,15 +68,37 @@ final class AgentActivityStore {
     @ObservationIgnored private var isStarted = false
     @ObservationIgnored private var isOpeningWatcher = false
     @ObservationIgnored private let appProcessID = ProcessInfo.processInfo.processIdentifier
+    /// Answers Claude Code permission requests from Up next. Holds the watch
+    /// lock only while `wantsAnswerWatch` is true.
+    @ObservationIgnored let claudeAnswers: ClaudePermissionAnswerCoordinator
 
+    /// `terminals` is a test seam: the live Rafu terminals an answerable
+    /// event can belong to. The default reads every open workspace window.
     init(
         paths: AgentTrackingPaths = AgentTrackingPaths(identity: .current),
-        defaults: UserDefaults = .standard
+        defaults: UserDefaults = .standard,
+        agentRequests: AgentRequestStore = .shared,
+        terminals: (@MainActor () -> [AgentTerminalCandidate])? = nil
     ) {
         self.paths = paths
         self.defaults = defaults
         let raw = defaults.stringArray(forKey: Self.connectedProvidersKey) ?? []
         connectedProviders = Set(raw.compactMap(AgentHookProvider.init(rawValue:)))
+        claudeAnswersEnabled = defaults.bool(forKey: Self.claudeAnswersEnabledKey)
+        claudeAnswersConnected = defaults.bool(forKey: Self.claudeAnswersConnectedKey)
+        claudeAnswers = ClaudePermissionAnswerCoordinator(
+            channel: AgentAnswerChannel(spool: paths.spool),
+            requests: agentRequests,
+            terminals: terminals ?? Self.liveTerminalCandidates)
+    }
+
+    /// Every live terminal in every open workspace window.
+    static func liveTerminalCandidates() -> [AgentTerminalCandidate] {
+        WorkspaceWindowRegistry.shared.entries.values
+            .compactMap(\.session)
+            .flatMap { $0.terminal.sessions }
+            .filter(\.hasLiveProcess)
+            .map(candidate)
     }
 
     // MARK: - Lifecycle
@@ -91,6 +122,7 @@ final class AgentActivityStore {
             }
             watcher = source
             source.resume()
+            updateAnswerWatch()
             await drain()
         }
     }
@@ -101,6 +133,48 @@ final class AgentActivityStore {
         watcher = nil
         clock?.cancel()
         clock = nil
+        updateAnswerWatch()
+    }
+
+    /// App quit: releases the answer watch lock and drops the open Claude
+    /// requests. The helpers see the free lock and leave Claude's dialog.
+    func stopAnswering() {
+        claudeAnswers.stop()
+    }
+
+    // MARK: - Answering Claude Code requests
+
+    /// Whether Rafu may hold the answer watch lock: the person turned the
+    /// setting on, both Claude Code entries are connected, and the spool is
+    /// watched (so an answerable event is drained at once). In every other
+    /// case a held lock would only make each helper wait for nothing.
+    static func wantsAnswerWatch(
+        watching: Bool, enabled: Bool, answerEntryConnected: Bool, claudeConnected: Bool
+    ) -> Bool {
+        watching && enabled && answerEntryConnected && claudeConnected
+    }
+
+    /// The Settings switch.
+    func setClaudeAnswersEnabled(_ enabled: Bool) {
+        claudeAnswersEnabled = enabled
+        defaults.set(enabled, forKey: Self.claudeAnswersEnabledKey)
+        updateAnswerWatch()
+    }
+
+    /// Records a Connect or Disconnect of the answer entry.
+    func setClaudeAnswersConnected(_ connected: Bool) {
+        claudeAnswersConnected = connected
+        defaults.set(connected, forKey: Self.claudeAnswersConnectedKey)
+        updateAnswerWatch()
+    }
+
+    private func updateAnswerWatch() {
+        claudeAnswers.setWatching(
+            Self.wantsAnswerWatch(
+                watching: isStarted && watcher != nil,
+                enabled: claudeAnswersEnabled,
+                answerEntryConnected: claudeAnswersConnected,
+                claudeConnected: connectedProviders.contains(.claude)))
     }
 
     /// Records a Connect or Disconnect from Settings, then starts or stops
@@ -119,6 +193,7 @@ final class AgentActivityStore {
         } else if isStarted {
             start()
         }
+        updateAnswerWatch()
     }
 
     // MARK: - Draining
@@ -160,6 +235,9 @@ final class AgentActivityStore {
         if ledger.expire(now: date) { changed = true }
         now = date
         if changed { sessions = ledger.sessions }
+        // After the fold, so a resolving event and a new request are seen in
+        // spool order. Also runs on each clock tick, to expire requests.
+        claudeAnswers.handle(events)
         updateClock()
         if !endedTurns.isEmpty { onTurnEnded?(endedTurns) }
     }
