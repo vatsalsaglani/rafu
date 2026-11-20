@@ -276,12 +276,20 @@ struct CompanionUpNextSectionView: View {
     var host: CompanionHost = .notchPanel
     @Environment(\.rafuTheme) private var theme
 
+    @State private var feedback: String?
+
     private var ink: NotchInk { NotchInk(theme: theme) }
 
     var body: some View {
+        let rows = model.upNextRows(for: host)
+        let approvals = rows.filter {
+            $0.windowID != nil && AgentRequestStore.shared.current(for: $0.id) != nil
+        }
+        let ids = Set(approvals.map(\.id))
         let waiting = CompanionUpNextContent.waitingRows(
-            model.upNextRows(for: host), feedSessionIDs: Set(model.feedItems.map(\.sessionID)))
-        if model.feedItems.isEmpty && waiting.isEmpty {
+            rows.filter { !ids.contains($0.id) },
+            feedSessionIDs: Set(model.feedItems.map(\.sessionID)))
+        if model.feedItems.isEmpty && waiting.isEmpty && approvals.isEmpty && feedback == nil {
             VStack(spacing: RafuMetrics.space2) {
                 RafuMascotView(
                     state: RafuMascotState.resolve(agents: []), engaged: true, size: 44,
@@ -299,8 +307,24 @@ struct CompanionUpNextSectionView: View {
         } else {
             ScrollView(.vertical) {
                 VStack(alignment: .leading, spacing: CompanionChromeMetrics.sectionSpacing) {
-                    CompanionAttentionFeedView(model: model)
-                    if !waiting.isEmpty {
+                    if let feedback {
+                        Text(feedback)
+                        Button("Dismiss") { self.feedback = nil }
+                    }
+                    ForEach(approvals) { row in
+                        if let request = AgentRequestStore.shared.current(for: row.id) {
+                            CompanionRequestView(
+                                row: row, request: request, openTerminal: { model.focusAgent(row) },
+                                report: { feedback = $0 }
+                            )
+                            .id(request.key)
+                            .padding(.horizontal, CompanionChromeMetrics.contentHorizontalPadding)
+                        }
+                    }
+                    if host != .islandCard {
+                        CompanionAttentionFeedView(model: model, excluding: ids)
+                    }
+                    if host != .islandCard && !waiting.isEmpty {
                         VStack(alignment: .leading, spacing: RafuMetrics.space1) {
                             ForEach(waiting) { row in
                                 if row.windowID == nil {
@@ -317,6 +341,13 @@ struct CompanionUpNextSectionView: View {
                 .frame(maxWidth: .infinity, alignment: .top)
             }
             .scrollIndicators(.automatic)
+            .onChange(of: model.hoverState == .pinned && !approvals.isEmpty, initial: true) {
+                _, engaged in
+                if host != .menuBar { model.setApprovalControlsEngaged(engaged) }
+            }
+            .onDisappear {
+                if host != .menuBar { model.setApprovalControlsEngaged(false) }
+            }
         }
     }
 }
