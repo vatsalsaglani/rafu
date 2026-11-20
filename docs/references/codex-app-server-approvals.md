@@ -48,6 +48,11 @@ Each shape below was sent by the real proxy and supervisor code to the real `cod
 
 Not run live: a permissions reply with scope `session`, and the file change request. They follow the same schema.
 
+Rafu does not answer a file change request from Up next: it is always terminal-only, because its params carry no
+diff and the row cannot show the change. A command request that carries `networkApprovalContext` is terminal-only
+too (the row does not show the host). See the decision record "Answer agent requests from the Up next row"
+([`0042-answer-agent-requests-from-up-next.md`](../decisions/0042-answer-agent-requests-from-up-next.md)).
+
 ## Codex marks every model question `isOther`
 
 `item/tool/requestUserInput` arrives with `isOther: true` for the question the model asks. The TUI shows it as a

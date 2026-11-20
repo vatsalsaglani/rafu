@@ -128,6 +128,12 @@ public nonisolated struct CanvasAgentRequest: Codable, Hashable, Sendable {
         public static let detailBytes = 256
         public static let permissionLines = 8
         public static let permissionLineBytes = 256
+        /// More blank lines in a row than this in a command makes it
+        /// terminal-only: the text after them could sit out of view.
+        public static let blankLinesInRow = 2
+        /// A longer run of spaces and tabs in a command makes it terminal-only,
+        /// for the same reason.
+        public static let whitespaceRun = 64
     }
 
     /// The opaque identity the app and the supervisor share. Never the JSON-RPC id.
@@ -144,8 +150,10 @@ public nonisolated struct CanvasAgentRequest: Codable, Hashable, Sendable {
     public let permissions: [String]
     public let questions: [Question]
     /// Only the terminal can answer: the request did not fit the bounds
-    /// exactly, the command text was changed by sanitizing, or a question needs
-    /// free text or a secret. The row then offers only "Open terminal".
+    /// exactly, the command text was changed by sanitizing or could hide text
+    /// behind blank space, a question needs free text or a secret, or the
+    /// request is a file change (the row cannot show the change itself). The
+    /// row then offers only "Open terminal".
     public let terminalOnly: Bool
     /// The agent can grant "allow for this session". False for a Claude Code
     /// request answered through its hook, which has no such answer.
@@ -153,21 +161,27 @@ public nonisolated struct CanvasAgentRequest: Codable, Hashable, Sendable {
     public let receivedAt: Date
 
     /// Builds a sanitized approval. Text over a bound is cut; control
-    /// characters (other than line breaks and tabs in long text) and
-    /// bidirectional overrides are removed.
+    /// characters (other than line breaks and tabs in long text) and format
+    /// characters (bidirectional controls, zero-width characters, soft
+    /// hyphens) are removed.
     public init(
         key: UUID = UUID(), kind: Kind, isHumanCheckpoint: Bool = false,
         command: String? = nil, cwd: String? = nil, reason: String? = nil,
         grantRoot: String? = nil, permissions: [String] = [], questions: [Question] = [],
         terminalOnly: Bool = false, offersSessionAllow: Bool = true, receivedAt: Date = Date()
     ) {
-        var restricted = terminalOnly
+        // A file change never shows the change itself, so what the row shows
+        // is not all that would happen: only the terminal can answer it.
+        var restricted = terminalOnly || kind == .fileChange
         // Only a command request carries a command.
         let cleanCommand = (kind == .command ? command : nil).map {
             Self.clean($0, limit: Limits.commandBytes, keepsLineBreaks: true)
         }
         // What the user reads must be exactly what runs.
-        if let cleanCommand, cleanCommand.altered || cleanCommand.text.isEmpty {
+        if let cleanCommand,
+            cleanCommand.altered || cleanCommand.text.isEmpty
+                || Self.hidesText(cleanCommand.text)
+        {
             restricted = true
         }
         if kind == .command, cleanCommand == nil { restricted = true }
@@ -226,12 +240,8 @@ public nonisolated struct CanvasAgentRequest: Codable, Hashable, Sendable {
                 Option(decision: .cancel, label: "Deny and stop"),
             ])
         case .fileChange:
-            return withSessionOption([
-                Option(decision: .accept, label: "Apply"),
-                Option(decision: .acceptForSession, label: "Allow for this session"),
-                Option(decision: .decline, label: "Deny"),
-                Option(decision: .cancel, label: "Deny and stop"),
-            ])
+            // Always terminal-only; see `terminalOnly`.
+            return []
         case .permissions:
             return [
                 Option(decision: .accept, label: "Allow for this turn"),
@@ -328,7 +338,32 @@ public nonisolated struct CanvasAgentRequest: Codable, Hashable, Sendable {
 
     // MARK: Sanitizing
 
-    /// Removes control characters and bidirectional overrides, then cuts the
+    /// True when `command` has more than `Limits.blankLinesInRow` blank lines
+    /// in a row or a run of more than `Limits.whitespaceRun` spaces and tabs.
+    /// Such blank space can push the end of a command out of view, so a
+    /// command with it is terminal-only.
+    static func hidesText(_ command: String) -> Bool {
+        var blankLines = 0
+        var lineHasText = false
+        var run = 0
+        for scalar in command.unicodeScalars {
+            if scalar == "\n" {
+                blankLines = lineHasText ? 0 : blankLines + 1
+                if blankLines > Limits.blankLinesInRow { return true }
+                lineHasText = false
+                run = 0
+            } else if scalar.properties.isWhitespace {
+                run += 1
+                if run > Limits.whitespaceRun { return true }
+            } else {
+                lineHasText = true
+                run = 0
+            }
+        }
+        return false
+    }
+
+    /// Removes control characters and format characters, then cuts the
     /// text to `limit` UTF-8 bytes at a character boundary. `altered` is true
     /// when anything was removed or cut.
     static func clean(_ text: String, limit: Int, keepsLineBreaks: Bool) -> (
@@ -359,12 +394,14 @@ public nonisolated struct CanvasAgentRequest: Codable, Hashable, Sendable {
     }
 
     private static func isUnsafe(_ scalar: Unicode.Scalar) -> Bool {
-        if scalar.properties.generalCategory == .control { return true }
-        switch scalar.value {
-        // Marks, embeddings, overrides and isolates that reorder displayed text.
-        case 0x200E, 0x200F, 0x202A...0x202E, 0x2066...0x2069: return true
+        switch scalar.properties.generalCategory {
+        // Format characters (Cf) are invisible or change how text displays:
+        // bidirectional marks, embeddings, overrides and isolates, zero-width
+        // spaces and joiners (U+200B to U+200D, U+2060, U+FEFF), the soft
+        // hyphen (U+00AD) and the Arabic letter mark (U+061C).
+        case .control, .format: return true
         // Line and paragraph separators break a single-line layout.
-        case 0x2028, 0x2029: return true
+        case .lineSeparator, .paragraphSeparator: return true
         default: return false
         }
     }
@@ -450,15 +487,20 @@ extension CanvasAgentRequest {
         case "item/commandExecution/requestApproval":
             let commandKind = params["kind"] as? String ?? "command"
             let knownKind = ["command", "writeStdin", "humanCommand"].contains(commandKind)
+            // A network approval asks for more than the command shows (the
+            // host and the protocol), so only the terminal can answer it.
+            let asksNetwork = params["networkApprovalContext"].map { !($0 is NSNull) } ?? false
             return CanvasAgentRequest(
                 key: key, kind: .command, isHumanCheckpoint: commandKind == "humanCommand",
                 command: params["command"] as? String, cwd: params["cwd"] as? String,
-                reason: params["reason"] as? String, terminalOnly: !knownKind,
+                reason: params["reason"] as? String, terminalOnly: !knownKind || asksNetwork,
                 receivedAt: receivedAt)
         case "item/fileChange/requestApproval":
+            // The params carry no diff, so the row cannot show the change.
             return CanvasAgentRequest(
                 key: key, kind: .fileChange, reason: params["reason"] as? String,
-                grantRoot: params["grantRoot"] as? String, receivedAt: receivedAt)
+                grantRoot: params["grantRoot"] as? String, terminalOnly: true,
+                receivedAt: receivedAt)
         case "item/permissions/requestApproval":
             let summary = permissionSummary(params["permissions"])
             return CanvasAgentRequest(

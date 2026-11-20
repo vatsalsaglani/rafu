@@ -455,7 +455,10 @@ stated in the handoff. NOT checked in the GUI. Decision:
 [`0042-answer-agent-requests-from-up-next.md`](../decisions/0042-answer-agent-requests-from-up-next.md).
 Code: `CompanionRequestView.swift`, `CompanionRequestPresentation.swift`,
 `CompanionUpNextSectionView` in `NotchSectionViews.swift`,
-`NotchCompanionModel.setApprovalControlsEngaged(_:)`. The request source is
+`ApprovalClickGuard` and `ApprovalKeyEngagement` in
+`CompanionApprovalGuards.swift`, `NotchCompanionModel.setApprovalRowsVisible(_:)`
+and `noteApprovalInteraction()`. Tests:
+`Tests/RafuAppTests/CompanionApprovalGuardsTests.swift`. The request source is
 `AgentRequestStore.shared` (see
 [`codex-app-server-approvals.md`](codex-app-server-approvals.md) and
 [`claude-permission-request-hook.md`](claude-permission-request-hook.md)).
@@ -468,10 +471,14 @@ Code: `CompanionRequestView.swift`, `CompanionRequestPresentation.swift`,
 - **Row.** Up next lists one request row per terminal row that has a window and
   a current request (the oldest request of that terminal). A row has the
   terminal title (opens the agent in its window), the title ("Run command",
-  "Apply file changes", "Grant permissions", "Answer questions"), the command
-  (3 lines, "Show all" expands), the folder, the reason, the buttons the request
-  permits, and always "Open terminal". A `terminalOnly` request shows only
-  "Open terminal". While an answer waits for the supervisor the row shows
+  "Apply file changes", "Grant permissions", "Answer questions"), the command,
+  the folder, the reason, the buttons the request permits, and always "Open
+  terminal". The command always shows whole (no line limit, no "Show all"): a
+  hidden tail must never run behind an active Run button. The command is at
+  most 2 KiB, and a command with more than 2 blank lines or more than 64 spaces
+  in a row is terminal-only, so the whole text fits the scrolling section. A
+  `terminalOnly` request shows only "Open terminal". Every file change is
+  terminal-only (the row cannot show the change). While an answer waits for the supervisor the row shows
   "Sending answer…". Rows with a request leave the normal feed and waiting
   lists.
 - **Island card.** While a request is pending, the island card shows a "Close"
@@ -480,14 +487,24 @@ Code: `CompanionRequestView.swift`, `CompanionRequestPresentation.swift`,
   shows the saved section again; the saved selection never changed. On the
   notch panel, a click that pins the panel selects Up next when a request is
   pending and Up next is offered.
-- **Key status only while pinned.** `approvalControlsEngaged` is true only when
-  the panel is `.pinned`, a request row is shown, and the host is not the menu
-  bar card (that card is its own key panel). `updateKeyStatus()` combines it
-  with the reply and search flags, so the non-activating panel takes key status
-  for the buttons only while pinned. An approval row never makes a resting or
-  peek panel key.
-  `clearKeyEngagement()` (lost key, teardown) and the section's `onDisappear`
-  reset it.
+- **Key status only after an interaction.** A request that arrives must not
+  take typing away from a terminal, even on a pinned panel.
+  `ApprovalKeyEngagement.wantsKey` is true only when request rows are visible
+  on a `.pinned` panel (`setApprovalRowsVisible(_:)`, not on the menu bar card,
+  which is its own key panel) AND the person interacted with a request row: a
+  click in it (a simultaneous tap gesture) or pointer movement over it
+  (`onContinuousHover`), through `noteApprovalInteraction()`. The keyboard paths
+  that already make the panel key (the reply and search fields) are unchanged. `updateKeyStatus()` combines the flag with the reply and
+  search flags. An approval row never makes a resting or peek panel key.
+  `clearKeyEngagement()` (lost key, teardown) ends the interaction; rows that
+  leave the panel (or an unpinned panel) end it too, so the next request again
+  needs an interaction.
+- **Click guard.** After the list of request rows changes (a request closes, a
+  new one appears or moves into place), `ApprovalClickGuard` ignores clicks on
+  the answer buttons (Run, Deny, Answer and the others) for 0.5 s, so the second
+  click of a double-click cannot answer the next request. The guard compares the
+  request keys in display order and takes an injected clock. Choosing a question
+  choice is not guarded (it sends nothing).
 - **Stale click.** The buttons call `AgentRequestStore.choose`. A request that
   was answered or closed in the meantime gives the message "This request was
   already answered." (an answer that is not valid gives "This answer is

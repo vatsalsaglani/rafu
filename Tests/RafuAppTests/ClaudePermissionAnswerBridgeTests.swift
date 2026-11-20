@@ -52,7 +52,7 @@ struct ClaudePermissionAnswerBridgeTests {
         #expect(request.permits(.cancel))
     }
 
-    @Test("An Edit or Write request becomes a file change with the path")
+    @Test("An Edit or Write request becomes a terminal-only file change with the path")
     func fileChange() throws {
         for tool in ["Edit", "Write", "MultiEdit"] {
             let request = try #require(
@@ -63,7 +63,10 @@ struct ClaudePermissionAnswerBridgeTests {
             #expect(request.kind == .fileChange)
             #expect(request.command == nil)
             #expect(request.reason == "Change file: /Users/me/repo/a.swift")
-            #expect(request.options.map(\.label) == ["Apply", "Deny", "Deny and stop"])
+            // The row shows the path, not the change: only the terminal answers.
+            #expect(request.terminalOnly)
+            #expect(request.options.isEmpty)
+            #expect(!request.permits(.accept))
         }
     }
 
@@ -80,6 +83,17 @@ struct ClaudePermissionAnswerBridgeTests {
                 for: try event(tool: "Write", input: ["file_path": "/tmp/a\u{7}b"])))
         #expect(path.terminalOnly)
         #expect(path.options.isEmpty)
+    }
+
+    @Test("A Bash request that leaves the sandbox needs the terminal")
+    func unsandboxed() throws {
+        let request = try #require(
+            ClaudePermissionAnswerBridge.request(
+                for: try event(
+                    tool: "Bash", input: ["command": "ls", "dangerouslyDisableSandbox": true])))
+        #expect(request.command == "ls")
+        #expect(request.terminalOnly)
+        #expect(request.options.isEmpty)
     }
 
     @Test("Only a Claude PermissionRequest with a summary is answerable")

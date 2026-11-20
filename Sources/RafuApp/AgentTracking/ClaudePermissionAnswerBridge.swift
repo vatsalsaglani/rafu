@@ -42,7 +42,8 @@ nonisolated struct ClaudePermissionAnswerBridge: Equatable, Sendable {
     }
 
     /// The request for `event`, or nil when the event is not answerable. A
-    /// command or path that was cut or changed becomes terminal-only.
+    /// command that was cut or changed becomes terminal-only. A file change is
+    /// always terminal-only: the row shows the path, not the change.
     static func request(for event: AgentHookEvent) -> CanvasAgentRequest? {
         guard isAnswerable(event), let summary = event.requestSummary else { return nil }
         let cwd = event.cwd.isEmpty ? nil : event.cwd
@@ -55,7 +56,7 @@ nonisolated struct ClaudePermissionAnswerBridge: Equatable, Sendable {
         if let path = summary.filePath {
             return CanvasAgentRequest(
                 key: event.id, kind: .fileChange, cwd: cwd,
-                reason: fileChangeReasonPrefix + path, terminalOnly: !summary.isComplete,
+                reason: fileChangeReasonPrefix + path, terminalOnly: true,
                 offersSessionAllow: false, receivedAt: event.time)
         }
         return nil

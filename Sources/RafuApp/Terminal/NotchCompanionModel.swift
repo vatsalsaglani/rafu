@@ -939,7 +939,7 @@ final class NotchCompanionModel: NSObject {
     /// never activates the app — on an already-key panel.
     private func updateKeyStatus() {
         guard let panel else { return }
-        let wantsKey = isReplyEngaged || isSearchEngaged || approvalControlsEngaged
+        let wantsKey = isReplyEngaged || isSearchEngaged || approvalEngagement.wantsKey
         let wasKey = panel.allowsKeyStatus
         panel.allowsKeyStatus = wantsKey
         if wantsKey && !wasKey {
@@ -953,19 +953,30 @@ final class NotchCompanionModel: NSObject {
     /// `allowsKeyStatus` false unconditionally (not re-derived through
     /// `updateKeyStatus()`, which would leave `allowsKeyStatus` true if the
     /// OTHER field's flag happened to still read true at that instant).
-    /// True while an Up next approval row is on a pinned panel, so its
-    /// buttons can take keyboard focus.
-    private var approvalControlsEngaged = false
+    /// Whether Up next approval rows hold key status, so their buttons can
+    /// take keyboard focus. Rows on a pinned panel are not enough: the panel
+    /// becomes key only after the person interacts with them, so a request
+    /// that arrives never takes typing away from a terminal
+    /// (notch-companion.md, "Approval rows").
+    private(set) var approvalEngagement = ApprovalKeyEngagement()
 
-    func setApprovalControlsEngaged(_ engaged: Bool) {
-        approvalControlsEngaged = engaged
+    /// Approval rows are visible on a pinned panel, or not.
+    func setApprovalRowsVisible(_ visible: Bool) {
+        approvalEngagement.setRowsVisible(visible)
+        updateKeyStatus()
+    }
+
+    /// The person clicked in, or moved the pointer into, the approval rows.
+    func noteApprovalInteraction() {
+        guard !approvalEngagement.wantsKey else { return }
+        approvalEngagement.noteInteraction()
         updateKeyStatus()
     }
 
     private func clearKeyEngagement() {
         isReplyEngaged = false
         isSearchEngaged = false
-        approvalControlsEngaged = false
+        approvalEngagement.endInteraction()
         panel?.allowsKeyStatus = false
     }
 

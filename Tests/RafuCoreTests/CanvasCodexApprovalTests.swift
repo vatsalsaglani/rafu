@@ -610,7 +610,10 @@ struct CanvasCodexApprovalTests {
             harness.proxy.inject(key: question.key, decision: .answers(["color": "Blue"])) == .sent)
         // A question needs an answer, not a verdict.
         #expect(harness.proxy.inject(key: change.key, decision: .answers(["x": "y"])) == .refused)
-        #expect(harness.proxy.inject(key: change.key, decision: .cancel) == .sent)
+        // A file change is terminal-only: no verdict is sent from Rafu.
+        #expect(change.kind == .fileChange)
+        #expect(change.terminalOnly)
+        #expect(harness.proxy.inject(key: change.key, decision: .cancel) == .refused)
         let answers = harness.serverMessages(upToEcho: tui).filter(Self.isAnswer)
         let byID = Dictionary(
             uniqueKeysWithValues: answers.map {
@@ -620,7 +623,7 @@ struct CanvasCodexApprovalTests {
             byID["21"] == #"{"permissions":{"network":{"enabled":true}},"scope":"session"}"#)
         #expect(byID["22"] == #"{"permissions":{},"scope":"turn"}"#)
         #expect(byID["23"] == #"{"answers":{"color":{"answers":["Blue"]}}}"#)
-        #expect(byID["24"] == #"{"decision":"cancel"}"#)
+        #expect(byID["24"] == nil)
     }
 
     @Test func aFragmentedOutgoingMessageDelaysTheAnswerUntilItEnds() throws {
