@@ -73,6 +73,18 @@ and explicit AI-assisted commit drafting.
     park/MRU/create behavior are available through visible, menu, keyboard, and
     accessibility paths. The 10-pane group, 200-retained-pane window, and
     200-live-session window limits are separate. The window allows 20 groups.
+24. `Command-1` to `Command-6` switch the navigator to Files, Search, Source Control,
+    Terminals, Ensembles and History (View menu items too; never a toggle). Holding
+    Command alone for half a second shows the key on each rail icon.
+25. One command (`Option-Command-B`, View menu, command palette) moves the rail and
+    sidebar to the right edge, where the sidebar opens toward the left. The choice is
+    per user, applies to every window at once, and is not restored with a workspace.
+26. Zen mode (`Control-Command-Z`, View menu, command palette) hides the rail and
+    sidebar in the current window; the title bar and status bar stay. It ends with the
+    same command, `Command-B`, a number key, a rail click, or Escape when no text
+    field, editor, terminal, sheet or Ensemble board wants the key. It is never saved.
+    See the decision record about navigator number keys, the sidebar edge and Zen mode
+    (ADR 0043).
 
 ## Architecture locks
 

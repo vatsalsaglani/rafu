@@ -85,7 +85,7 @@ struct NavigatorPanelHeaderPlacementTests {
         let navigator = try Self.source("Sources/RafuApp/Views/WorkspaceNavigatorView.swift")
         let host = try Self.section(
             of: navigator, from: "private var panelContent: some View",
-            to: "/// The one always-visible left icon rail")
+            to: "/// The rail and the sidebar pane as one unit")
         for mode in WorkspaceNavigatorMode.allCases {
             #expect(host.contains("\(Self.panelTypeName(for: mode))(session: session)"))
         }

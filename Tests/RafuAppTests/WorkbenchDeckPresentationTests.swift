@@ -26,9 +26,12 @@ struct WorkbenchDeckPresentationTests {
         // a plain HStack. The deck itself still owns no inner split: there
         // is no right panel for it to host.
         #expect(!windowContent.contains("HSplitView {"))
+        let flatContent = windowContent.split(whereSeparator: \.isWhitespace).joined(
+            separator: " ")
         #expect(
-            windowContent.contains(
-                "WorkbenchSplitHandle(session: session, hitAreaWidth: hitArea.width)"))
+            flatContent.contains(
+                "WorkbenchSplitHandle(session: session, hitAreaWidth: hitArea.width, edge: sidebarEdge)"
+            ))
         #expect(deckLane.contains("editorCanvas"))
         #expect(!deckLane.contains("WorkspaceUtilityPanelView"))
     }
@@ -41,19 +44,29 @@ struct WorkbenchDeckPresentationTests {
             from: "private var windowContent: some View",
             through: "private var editorCanvas: some View"
         )
-        let rail = try #require(
-            windowContent.range(of: "WorkspaceActivityRail(session: session)")
+        // The rail and sidebar travel as one `navigatorColumn`, placed before
+        // the deck on the leading edge and after it on the trailing edge. The
+        // column itself holds the rail and the sidebar pane.
+        let leadingColumn = try #require(
+            windowContent.range(of: "if sidebarEdge == .leading {\n")
+        )
+        let trailingColumn = try #require(
+            windowContent.range(of: "if sidebarEdge == .trailing {\n")
         )
         let deck = try #require(windowContent.range(of: "WorkbenchDeckSurface {"))
-        let sidebar = try #require(
-            windowContent.range(of: "WorkspaceSidebarPanelView(session: session)")
-        )
         let status = try #require(
             windowContent.range(of: "WorkspaceStatusBar(session: session)")
         )
+        let navigator = try Self.source("Sources/RafuApp/Views/WorkspaceNavigatorView.swift")
+        let column = try Self.section(
+            in: navigator, from: "struct WorkbenchNavigatorColumn: View",
+            through: "struct WorkspaceActivityRail: View")
+        #expect(column.contains("WorkspaceActivityRail("))
+        #expect(column.contains("WorkspaceSidebarPanelView(session: session)"))
+        #expect(!windowContent.contains("WorkspaceActivityRail("))
 
-        #expect(rail.lowerBound < deck.lowerBound)
-        #expect(sidebar.lowerBound < deck.lowerBound)
+        #expect(leadingColumn.lowerBound < deck.lowerBound)
+        #expect(trailingColumn.lowerBound > deck.lowerBound)
         #expect(status.lowerBound > deck.lowerBound)
         #expect(RafuMetrics.statusBarHeight == 24)
     }
@@ -100,11 +113,14 @@ struct WorkbenchDeckPresentationTests {
             in: workbench, from: "HStack(spacing: 0) {", through: "WorkbenchDeckSurface {")
         #expect(!row.contains("WorkbenchSplitHandle("))
         // One `.app` frame fill under the whole row, then the handle overlay.
-        #expect(flat.contains(".overlay(alignment: .topLeading) { sidebarSplitHandle }"))
+        #expect(
+            flat.contains(
+                ".overlay(alignment: sidebarEdge.seamOverlayAlignment) { sidebarSplitHandle }"))
         let fill = try #require(workbench.range(of: ".rafuFrameSurface(.app)"))
         let overlay = try #require(workbench.range(of: "{ sidebarSplitHandle }"))
         #expect(fill.lowerBound < overlay.lowerBound)
-        #expect(flat.contains(".offset(x: paneEdge + hitArea.x)"))
+        #expect(
+            flat.contains(".offset(x: sidebarEdge.seamOffset(distance: paneEdge + hitArea.x))"))
     }
 
     @Test("Seam gaps: 5 pt beside a collapsed sidebar's rail, 8 pt beside an open one")
@@ -166,11 +182,8 @@ struct WorkbenchDeckPresentationTests {
         // split view's own min/ideal/max frame triplet.
         // (Alignment and clipping of that frame: see
         // `sidebarContentStaysInsideItsPane`.)
-        #expect(
-            windowContent.contains(
-                "width: WorkbenchSidebarResize.clamp(session.sidebarWidth)"
-            )
-        )
+        let navigator = try Self.source("Sources/RafuApp/Views/WorkspaceNavigatorView.swift")
+        #expect(navigator.contains("width: WorkbenchSidebarResize.clamp(session.sidebarWidth)"))
         #expect(WorkbenchSidebarResize.minimumWidth == 220)
         #expect(WorkbenchSidebarResize.idealWidth == 300)
         #expect(WorkbenchSidebarResize.maximumWidth == 560)
@@ -210,11 +223,16 @@ struct WorkbenchDeckPresentationTests {
         )
         let rail = try Self.source("Sources/RafuApp/Views/WorkspaceNavigatorView.swift")
 
-        #expect(windowContent.contains("WorkspaceActivityRail(session: session)"))
-        // The rail is a sibling of the sidebar pane and `WorkbenchSplitHandle`
-        // in the explicit HStack, and is never gated on `isSidebarCollapsed`
-        // — only the sidebar pane is.
-        #expect(Self.occurrences(of: "if !session.isSidebarCollapsed", in: windowContent) == 1)
+        // The rail and the sidebar pane travel together as `navigatorColumn`.
+        // The rail is never gated on `isSidebarCollapsed` — only Zen mode
+        // hides it — while the sidebar pane also follows the collapse bit.
+        #expect(windowContent.contains("navigatorColumn"))
+        let column = try Self.section(
+            in: rail, from: "struct WorkbenchNavigatorColumn: View",
+            through: "struct WorkspaceActivityRail: View")
+        #expect(column.contains("if session.showsNavigatorRail"))
+        #expect(column.contains("if session.showsSidebarPane"))
+        #expect(!column.contains("session.isSidebarCollapsed"))
         let railBody = try Self.section(
             in: rail,
             from: "struct WorkspaceActivityRail: View",
@@ -239,12 +257,16 @@ struct WorkbenchDeckPresentationTests {
         // Collapse whitespace so the assertions survive formatter wrapping.
         let flat = workbench.split(whereSeparator: \.isWhitespace).joined(separator: " ")
         // A fixed width frame centres an over-wide child over the rail, so
-        // the pane aligns leading and clips to its own rect.
+        // the pane aligns toward the rail (leading on the leading edge,
+        // trailing on the trailing edge) and clips to its own rect.
+        let navigator = try Self.source("Sources/RafuApp/Views/WorkspaceNavigatorView.swift")
+        let flatNavigator = navigator.split(whereSeparator: \.isWhitespace).joined(
+            separator: " ")
         #expect(
-            flat.contains(
-                "WorkbenchSidebarResize.clamp(session.sidebarWidth), alignment: .leading )"
+            flatNavigator.contains(
+                "WorkbenchSidebarResize.clamp(session.sidebarWidth), alignment: edge.frameAlignment )"
                     + " .clipped()"))
-        #expect(flat.contains("alignment: .topLeading"))
+        #expect(flat.contains("alignment: sidebarEdge.seamOverlayAlignment"))
 
         // No navigator-hosted panel may demand more than the sidebar minimum.
         let git = try Self.source("Sources/RafuApp/Views/GitInspectorView.swift")
@@ -272,10 +294,14 @@ struct WorkbenchDeckPresentationTests {
             from: "private var workbenchContent: some View",
             through: "WorkbenchDeckSurface {"
         )
-        let flatWorkbench = workbench.split(whereSeparator: \.isWhitespace).joined(
-            separator: " ")
-        #expect(flatWorkbench.contains("WorkspaceActivityRail(session: session) .zIndex(1)"))
-        #expect(flatWorkbench.contains(".frame(maxHeight: .infinity) .zIndex(1)"))
+        // The rail and sidebar are one column, kept above the deck.
+        let navigator = try Self.source("Sources/RafuApp/Views/WorkspaceNavigatorView.swift")
+        let column = try Self.section(
+            in: navigator, from: "struct WorkbenchNavigatorColumn: View",
+            through: "struct WorkspaceActivityRail: View")
+        let flatColumn = column.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        #expect(flatColumn.contains(".frame(maxHeight: .infinity) .zIndex(1)"))
+        #expect(workbench.contains("navigatorColumn"))
     }
 
     private static func occurrences(of needle: String, in source: String) -> Int {

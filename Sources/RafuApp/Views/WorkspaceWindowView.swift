@@ -24,6 +24,16 @@ struct WorkspaceWindowView: View {
         true
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var colorSchemeContrast
+    /// The edge that holds the rail and sidebar, saved per user (not per
+    /// workspace). `@AppStorage` makes every open window follow a change.
+    @AppStorage(WorkbenchLayoutPreferences.sidebarEdgeKey) private var sidebarEdgeRaw =
+        WorkbenchSidebarEdge.standard.rawValue
+    /// This window's hold-⌘ badge timer and Escape tap.
+    @State private var shortcutHints = NavigatorShortcutHintMonitor()
+
+    private var sidebarEdge: WorkbenchSidebarEdge {
+        WorkbenchSidebarEdge.resolve(raw: sidebarEdgeRaw)
+    }
 
     /// Resolved per window. The welcome window is always Solid; Reduce
     /// Transparency and Increase Contrast force Solid live.
@@ -76,6 +86,22 @@ struct WorkspaceWindowView: View {
             .frame(width: 0, height: 0)
             .accessibilityHidden(true)
         )
+        .background(
+            NavigatorHintWindowReader { window in
+                if let window {
+                    installShortcutHints(in: window)
+                } else {
+                    shortcutHints.remove()
+                }
+            }
+            .frame(width: 0, height: 0)
+            .accessibilityHidden(true)
+        )
+        .onChange(of: session.isZenMode) { _, isOn in
+            AccessibilityNotification.Announcement(
+                WorkbenchLayoutShortcuts.zenAnnouncement(isOn: isOn)
+            ).post()
+        }
         .background(CanvasWindowCloseGuard(session: session).frame(width: 0, height: 0))
         .modifier(CanvasPresentations(session: session))
         // Raised from 720, then from 760 when the HSplitView divider
@@ -153,32 +179,16 @@ struct WorkspaceWindowView: View {
             // (flat-window-chrome-titlebar-merge.md rule 2), so this stays
             // pure SwiftUI. ⌘B, the titlebar toggle, and the handle's own
             // drag-to-collapse all drive `session.isSidebarCollapsed`.
-            // One left Activity Rail (user decision 2026-10-19, superseding
+            // One Activity Rail (user decision 2026-10-19, superseding
             // ADR 0003's right-rail placement): it hosts every navigator
             // mode and is never gated on `isSidebarCollapsed` — only the
-            // sidebar pane beside it is. There is no right rail and no right
-            // utility panel.
+            // sidebar pane beside it is. By default it sits on the leading
+            // edge; the user may move the rail and sidebar to the trailing
+            // edge (`WorkbenchSidebarEdge`), and Zen mode hides both in this
+            // window. There is no second rail and no right utility panel.
             HStack(spacing: 0) {
-                // The rail and sidebar sit above the deck: a later HStack
-                // child is on top for hit testing, so deck content that
-                // reaches past its edge (an Ensemble card) would otherwise
-                // take the sidebar's clicks.
-                WorkspaceActivityRail(session: session)
-                    .zIndex(1)
-                if !session.isSidebarCollapsed {
-                    // A fixed `.frame(width:)` centres an over-wide child, which
-                    // paints half of it over the Activity Rail. So sidebar
-                    // content must declare no minimum above
-                    // `WorkbenchSidebarResize.minimumWidth`; leading alignment
-                    // plus the clip keep the rail on screen regardless.
-                    WorkspaceSidebarPanelView(session: session)
-                        .frame(
-                            width: WorkbenchSidebarResize.clamp(session.sidebarWidth),
-                            alignment: .leading
-                        )
-                        .clipped()
-                        .frame(maxHeight: .infinity)
-                        .zIndex(1)
+                if sidebarEdge == .leading {
+                    navigatorColumn
                 }
                 // Issue #4: the terminal presents as an editor tab inside
                 // `editorCanvas` now, not a separate docked panel here.
@@ -204,12 +214,18 @@ struct WorkspaceWindowView: View {
                 // leading one.
                 .padding(
                     WorkbenchDeckLane.padding(
-                        isSidebarCollapsed: session.isSidebarCollapsed,
-                        railDeckSideInset: WorkspaceActivityRail.deckSideInset
+                        // Zen mode has no rail, so no collapsed-rail strip.
+                        isSidebarCollapsed: session.isSidebarCollapsed
+                            && session.showsNavigatorRail,
+                        railDeckSideInset: WorkspaceActivityRail.deckSideInset,
+                        edge: sidebarEdge
                     )
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .layoutPriority(1)
+                if sidebarEdge == .trailing {
+                    navigatorColumn
+                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
             // One `.app` frame fill under the rail and the deck lane both, so
@@ -221,7 +237,7 @@ struct WorkspaceWindowView: View {
             // `WorkbenchSplitHandle`). An overlay on the seam, above the
             // rail, sidebar, and deck for hit testing: it takes no layout
             // width, so only the gutter sets the gap.
-            .overlay(alignment: .topLeading) { sidebarSplitHandle }
+            .overlay(alignment: sidebarEdge.seamOverlayAlignment) { sidebarSplitHandle }
             // The voice companion: fixed in a corner of the workbench (it
             // does not pan or zoom with a board), above the editor and below
             // sheets, on every tab (voice-presence.md).
@@ -245,19 +261,54 @@ struct WorkspaceWindowView: View {
         }
     }
 
+    /// The rail and sidebar pane, placed before or after the deck by
+    /// `sidebarEdge`. In Zen mode it draws nothing.
+    private var navigatorColumn: some View {
+        WorkbenchNavigatorColumn(
+            session: session, edge: sidebarEdge, showsShortcutHints: shortcutHints.isVisible)
+    }
+
     /// The split handle, placed across the sidebar (or rail) to deck seam by
-    /// `WorkbenchDeckLane.handleHitArea`.
+    /// `WorkbenchDeckLane.handleHitArea`. Zen mode has no seam, so no handle.
+    @ViewBuilder
     private var sidebarSplitHandle: some View {
-        let isCollapsed = session.isSidebarCollapsed
-        let hitArea = WorkbenchDeckLane.handleHitArea(
-            isSidebarCollapsed: isCollapsed,
-            railDeckSideInset: WorkspaceActivityRail.deckSideInset
-        )
-        let paneEdge =
-            WorkspaceActivityRail.width
-            + (isCollapsed ? 0 : CGFloat(WorkbenchSidebarResize.clamp(session.sidebarWidth)))
-        return WorkbenchSplitHandle(session: session, hitAreaWidth: hitArea.width)
-            .offset(x: paneEdge + hitArea.x)
+        if session.showsNavigatorRail {
+            let isCollapsed = session.isSidebarCollapsed
+            let hitArea = WorkbenchDeckLane.handleHitArea(
+                isSidebarCollapsed: isCollapsed,
+                railDeckSideInset: WorkspaceActivityRail.deckSideInset,
+                edge: sidebarEdge
+            )
+            let paneEdge =
+                WorkspaceActivityRail.width
+                + (isCollapsed ? 0 : CGFloat(WorkbenchSidebarResize.clamp(session.sidebarWidth)))
+            WorkbenchSplitHandle(session: session, hitAreaWidth: hitArea.width, edge: sidebarEdge)
+                .offset(x: sidebarEdge.seamOffset(distance: paneEdge + hitArea.x))
+        }
+    }
+
+    private func installShortcutHints(in window: NSWindow) {
+        shortcutHints.escapeHandler = { [weak session = self.session] window in
+            guard let session else { return false }
+            return Self.leaveZenOnEscape(session: session, window: window)
+        }
+        shortcutHints.install(in: window)
+    }
+
+    /// Escape leaves Zen mode, but only when nothing else could want the key:
+    /// not a text field, the editor, a terminal, a sheet, the tab switcher or
+    /// an Ensemble board. See `ZenModeEscapePolicy`.
+    private static func leaveZenOnEscape(session: WorkspaceSession, window: NSWindow) -> Bool {
+        guard
+            ZenModeEscapePolicy.shouldExit(
+                isZenMode: session.isZenMode,
+                responder: ZenModeEscapePolicy.classify(window.firstResponder),
+                hasAttachedSheet: window.attachedSheet != nil,
+                isEditorTabSwitcherOpen: session.editorTabSwitcherState != nil,
+                isBoardSelected: session.selectedCanvas != nil)
+        else { return false }
+        session.exitZenMode()
+        return true
     }
 
     private var editorCanvas: some View {

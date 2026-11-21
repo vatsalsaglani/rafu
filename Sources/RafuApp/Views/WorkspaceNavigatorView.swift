@@ -37,7 +37,59 @@ struct WorkspaceSidebarPanelView: View {
     }
 }
 
-/// The one always-visible left icon rail (user decision 2026-10-19): every
+/// The rail and the sidebar pane as one unit, so the window can put the unit
+/// on either edge. On the leading edge the order is rail, sidebar; on the
+/// trailing edge it is sidebar, rail, which makes the sidebar open toward the
+/// leading side. The unit sits above the deck for hit testing: a later HStack
+/// child is on top, and deck content that reaches past its edge (an Ensemble
+/// card) would otherwise take the sidebar's clicks.
+struct WorkbenchNavigatorColumn: View {
+    @Bindable var session: WorkspaceSession
+    let edge: WorkbenchSidebarEdge
+    let showsShortcutHints: Bool
+
+    var body: some View {
+        HStack(spacing: 0) {
+            if edge == .leading {
+                rail
+                sidebar
+            } else {
+                sidebar
+                rail
+            }
+        }
+        .frame(maxHeight: .infinity)
+        .zIndex(1)
+    }
+
+    @ViewBuilder
+    private var rail: some View {
+        if session.showsNavigatorRail {
+            WorkspaceActivityRail(
+                session: session, edge: edge, showsShortcutHints: showsShortcutHints)
+        }
+    }
+
+    @ViewBuilder
+    private var sidebar: some View {
+        if session.showsSidebarPane {
+            // A fixed `.frame(width:)` centres an over-wide child, which
+            // paints half of it over the Activity Rail. So sidebar content
+            // must declare no minimum above
+            // `WorkbenchSidebarResize.minimumWidth`; alignment toward the
+            // rail plus the clip keep the rail on screen regardless.
+            WorkspaceSidebarPanelView(session: session)
+                .frame(
+                    width: WorkbenchSidebarResize.clamp(session.sidebarWidth),
+                    alignment: edge.frameAlignment
+                )
+                .clipped()
+                .frame(maxHeight: .infinity)
+        }
+    }
+}
+
+/// The one always-visible icon rail (user decision 2026-10-19): every
 /// navigator mode (Files, Search, Source Control, Terminals, Ensembles, History) lives
 /// here, selecting which section the left sidebar shows. This supersedes
 /// ADR 0003's right-rail mode placement — there is no right rail and no
@@ -45,6 +97,11 @@ struct WorkspaceSidebarPanelView: View {
 /// `isSidebarCollapsed`; only the sidebar content below it is.
 struct WorkspaceActivityRail: View {
     @Bindable var session: WorkspaceSession
+    /// The window edge the rail sits on. The 5 pt outer inset and the 3 pt
+    /// deck-side strip swap sides with it.
+    var edge: WorkbenchSidebarEdge = .leading
+    /// True while the hold-⌘ badges are on screen (`NavigatorShortcutHintMonitor`).
+    var showsShortcutHints = false
     @Environment(\.rafuTheme) private var theme
 
     /// The rail's full width: `leadingInset` + a 30 pt button +
@@ -74,8 +131,8 @@ struct WorkspaceActivityRail: View {
         // 30 pt buttons: 5 pt from the window edge, and only 3 pt on the
         // deck side (40 → 38). The split handle is an overlay, so with the
         // sidebar collapsed only 2 pt of gutter follows (5 pt in total).
-        .padding(.leading, Self.leadingInset)
-        .frame(width: Self.width, alignment: .leading)
+        .padding(edge == .leading ? .leading : .trailing, Self.leadingInset)
+        .frame(width: Self.width, alignment: edge.frameAlignment)
         .frame(maxHeight: .infinity)
         .fixedSize(horizontal: true, vertical: false)
         .background(WindowDragHandle())
@@ -87,11 +144,10 @@ struct WorkspaceActivityRail: View {
     }
 
     private func railButton(_ mode: WorkspaceNavigatorMode) -> some View {
-        let hasWorkspace = session.descriptor != nil
         // Files needs no open workspace — it shows "Open a folder to begin"
         // itself — so it alone stays enabled and can show as selected
-        // without one; the other four modes need a workspace for both.
-        let isEnabled = mode == .files || hasWorkspace
+        // without one; the other five modes need a workspace for both.
+        let isEnabled = session.isNavigatorModeAvailable(mode)
         let isActive = isEnabled && session.navigatorMode == mode && !session.isSidebarCollapsed
         // Only computed for `.terminals` — deriving it for every rail
         // button would needlessly walk `terminal.sessions` on every render.
@@ -108,11 +164,18 @@ struct WorkspaceActivityRail: View {
                     isSelected: isActive,
                     deckFacingEdge: .trailing,
                     tooltip: NavigatorRailPresentation.tooltip(
-                        title: mode.title, isEnabled: isEnabled, isActive: isActive),
+                        title: mode.title, isEnabled: isEnabled, isActive: isActive,
+                        shortcut: mode.shortcutLabel),
                     badge: mode == .terminals && attentionCount > 0 ? attentionCount : nil
                 )
             )
             .disabled(!isEnabled)
+            .accessibilityHint(mode.shortcutHint)
+            .overlay(alignment: .bottomTrailing) {
+                if showsShortcutHints && isEnabled {
+                    NavigatorShortcutBadge(label: mode.shortcutLabel)
+                }
+            }
         // The panel headers have no close button (ADR 0002: one sidebar
         // toggle), so the active rail icon says that a click hides the panel.
         let value = NavigatorRailPresentation.accessibilityValue(
@@ -131,9 +194,15 @@ struct WorkspaceActivityRail: View {
 /// active icon hides the sidebar (`selectNavigatorRailIcon`); with no close
 /// button in the panel headers, the rail must say so.
 nonisolated enum NavigatorRailPresentation {
-    static func tooltip(title: String, isEnabled: Bool, isActive: Bool) -> String {
+    /// `shortcut` is the ⌘-number label ("⌘1"); it is appended in brackets
+    /// when the icon is usable.
+    static func tooltip(
+        title: String, isEnabled: Bool, isActive: Bool, shortcut: String? = nil
+    ) -> String {
         guard isEnabled else { return "\(title) — open a folder first" }
-        return isActive ? "Hide \(title)" : title
+        let text = isActive ? "Hide \(title)" : title
+        guard let shortcut else { return text }
+        return "\(text) (\(shortcut))"
     }
 
     /// "Selected, sidebar shown" for the active icon, plus the Terminals
