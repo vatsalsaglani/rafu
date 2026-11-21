@@ -62,8 +62,8 @@ dialog must stay usable, and an answer must never be typed into a terminal as ke
    - a question that is secret, has no choice, has more than 6 choices, a changed label or a repeated id; more than
      4 questions;
    - a Claude request with a command over 2 KiB, a path over 480 bytes, or text that sanitizing changed. Claude
-     requests for any tool other than Bash, Edit, MultiEdit and Write get no row at all (the helper prints
-     nothing).
+     requests for any tool other than Bash, Edit, MultiEdit, Write and (amended 2026-11-21) a tool of an MCP server
+     get no row at all (the helper prints nothing).
 6. **Codex question choices.** Codex 0.170.0 marks every model question `isOther` (the terminal shows "None of the
    above"). That flag alone does not make a question terminal-only: the listed choices are answered from the row. A
    free-text answer still needs the terminal.
@@ -222,9 +222,54 @@ A Codex or Claude Code release that renames them, sends the patch after the requ
 several notifications makes the file-change rows terminal-only again (the safe result) until Rafu reads the new
 shape.
 
+## Amendment: Claude requests for MCP tools answer in the peek (2026-11-21)
+
+On the user's direction. A Claude permission prompt for a tool of another MCP server (for example the Atlassian
+connector) showed only "Needs you", because the helper summarized Bash, Edit, MultiEdit and Write and nothing else.
+
+1. **A new request kind, `toolCall`.** A Claude `PermissionRequest` for a tool named `mcp__<server>__<tool>` is
+   answerable from the peek and from Up next. The title is "Use MCP tool". The tool identity goes in the existing
+   `reason` field and the arguments in the existing `command` field, so the bounds, the sanitizer, "Show all" and
+   the answer path are the ones that already exist.
+2. **What the person sees.** `reason` has two lines: the friendly server and the tool, then the raw tool name.
+   The raw name is always shown, so the friendly form cannot hide the real target. The arguments show as sorted,
+   pretty JSON text. **Nothing is masked**: a hidden value would let the person approve what the row does not
+   show. The text stays in memory and in the private spool file and is never logged.
+3. **Name rule.** A name is accepted only if it starts with `mcp__`, is at most 200 bytes, has only
+   `A-Z a-z 0-9 _ - .`, and has a non-empty server and tool (split at the first `__` after the prefix). Any other
+   name gets no row (Claude's own dialog stays). A server that starts with `claude_ai_` shows without that
+   prefix, with spaces for underscores and "(claude.ai)". Rafu cannot prove where a server comes from, so this is
+   a label and the card never says "trusted" or "official".
+4. **Bounds and terminal-only.** Arguments at most 2 KiB (decision 5 bound for a command). A request is
+   `terminalOnly` (the row offers "Open terminal" only) when the arguments or the identity were cut or changed by
+   the sanitizer, or when blank space could hide the end. A `tool_input` that is present but is not a JSON object
+   gives no summary and no row (an absent `tool_input` counts as `{}`).
+5. **Answers.** Allow, Deny, Deny and stop. There is no "Allow for this session" (decision 7 holds). The hook
+   decision JSON is the same as for Bash: the answer channel has no tool name, so no change to the answer files,
+   the spool or the hook entry was needed. The Codex proxy never answers this kind.
+6. **Codex stays out.** A Codex approval for a tool of another MCP server (`mcpServer/elicitation/request`) is
+   still not followed by the proxy and still shows in the terminal only (the decision about pre-approving Rafu's
+   own tools for Codex, [`0044-pre-approve-rafu-tools-for-codex.md`](0044-pre-approve-rafu-tools-for-codex.md),
+   decision 5).
+
+Alternatives considered: a card for any unknown tool such as `WebFetch` (rejected: each built-in tool needs its own
+review of what must be shown); new fields on `CanvasAgentRequest` for server, tool and arguments (rejected: more
+coding, sanitizer and IPC surface for no gain); reuse of the `command` kind (rejected: the card would say "Run
+command" and VoiceOver "asks to run", which is false); masking argument values (rejected, see 2).
+
+Not verified live: that Claude Code sends `PermissionRequest` with `tool_name` in the `mcp__server__tool` form and
+`tool_input` as the arguments object. The hand check proves it. If Claude Code sends another form, the name rule
+gives no row and the terminal dialog stays (the safe result).
+
 ## GUI checks pending
 
-Answer from the row and from the terminal (the row closes, no stuck prompt); a stale click (the message "This
+For the MCP tool card: with "Answers from Up next" on, ask a Claude terminal for an MCP tool (for example "Atlassian
+MCP - Get Atlassian user info"). The peek must show "Atlassian MCP (claude.ai): atlassianUserInfo", the raw name and
+`{}`. Allow runs the tool and the terminal prompt goes away; Deny makes Claude report the denial; long arguments
+give "Show all", and arguments over 2 KiB give "Open terminal" only. Check VoiceOver, keyboard reach and a second
+window. Bash and file edit requests must still show their cards.
+
+Also: answer from the row and from the terminal (the row closes, no stuck prompt); a stale click (the message "This
 request was already answered."); keyboard use of the row buttons on a pinned panel; VoiceOver for the badge, the row
 and the island card; contrast of the badge and the row; a second window (the request of window B shows and answers
 from the row, "Show this agent in its window" opens B); island card expansion and the return to Usage; the Settings

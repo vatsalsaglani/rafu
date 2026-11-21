@@ -880,14 +880,49 @@ Reference: the section "2026-11-21" of [`canvas-live-sessions.md`](../../referen
 - **Delivered (source and unit tests only).** A received message starts with a Rafu line that names the sender
   (`@mention` and peer id) and says how to answer, for Claude and for Codex. Held messages say their real cause (four
   texts), wait 5 minutes (was 2), and `list_connections` shows `pending` and `lastDelivery` (`expired` or `failed`).
-  An accepted send to a Codex peer says that an idle Codex needs `terminal_send`. A Codex register without route
+  An accepted send to a Codex peer said that an idle Codex needs `terminal_send` (reworded the same day, see the next
+  status section). A Codex register without route
   keys keeps the bound route and thread. The Codex launcher adds `mcp_servers.rafu.default_tools_approval_mode="approve"`
   to the terminal's private app server only; the read-only Rafu tools carry `readOnlyHint`. The skill and the MCP
   instructions state the reply rule.
-- **Not built, decided.** Up next support for other MCP servers' Codex approvals.
+- **Not built, decided.** Up next support for other MCP servers' Codex approvals. (The Claude case is built, see the
+  next status section.)
 - **Open checks (manual, in Rafu Lightning):** a Codex agent calls `ensemble_describe` and `list_connections` with no
   "Allow the rafu MCP server to run tool" question (if it still asks: try `writes`, then the per-tool
   `approval_mode`); Agent control Ask still raises a Rafu approval for a changing tool and Off refuses it; a child
   Claude answers a coordinator over the channel; a send to a Codex peer right after it starts says "not connected
-  yet" or "cannot take messages yet"; an expired message shows `lastDelivery: expired` and a Failed link; a send to an
-  idle Codex names `terminal_send`.
+  yet" or "cannot take messages yet"; an expired message shows `lastDelivery: expired` and a Failed link; a send to a
+  Codex peer says it takes the message when its current turn ends (reworded, see the next status section).
+
+## Status (2026-11-21, Codex waits by ending its turn; MCP tool requests in the approval peek)
+
+Decision records: Codex gets Ensemble messages as queued turns and agents wait by ending their turn (ADR 0045:
+[`0045-codex-messages-are-queued-turns.md`](../../decisions/0045-codex-messages-are-queued-turns.md)); the amendment
+"Claude requests for MCP tools answer in the peek" of the decision about answering agent requests from Up next
+(ADR 0042: [`0042-answer-agent-requests-from-up-next.md`](../../decisions/0042-answer-agent-requests-from-up-next.md)).
+References: the section "2026-11-21: Codex has no inbox" of
+[`canvas-live-sessions.md`](../../references/canvas-live-sessions.md), the section "MCP tool requests" of
+[`claude-permission-request-hook.md`](../../references/claude-permission-request-hook.md), and the "MCP tool card"
+bullet of [`notch-companion.md`](../../references/notch-companion.md).
+
+- **Delivered, Codex wait (source and unit tests only).** Live failure (Codex 0.171.0): an agent told to wait looped
+  `receive_messages` and `clock.sleep` 9 times in 9.5 minutes. For Codex, `receive_messages` now returns a fixed note
+  ("end your turn now"); the MCP instructions, tool descriptions, `terminal_create` and `terminal_send` prompt
+  descriptions, the skill and the sender hint now say: wait by ending the turn, never sleep or poll. The sender hint
+  covers a busy and an idle Codex.
+- **Delivered, MCP tool requests (source and unit tests only).** A Claude `PermissionRequest` for `mcp__<server>__<tool>`
+  shows in the peek and in Up next as "Use MCP tool": identity in `reason`, sorted JSON arguments in `command`
+  (2 KiB, no masking, "Show all", terminal-only when cut or changed), Allow, Deny, Deny and stop, no session allow.
+  The hook decision JSON is unchanged.
+- **Deferred.** Steering a running Codex turn with `turn/steer` (stable in 0.171.0): needs inference to prove, an
+  app-to-proxy path and a hidden response frame. The Codex MCP approval (`mcpServer/elicitation/request`) stays
+  "Not built, decided".
+- **Not verified.** That a queued message starts a turn for a Codex that is idle at its prompt (test: neutral Codex
+  peer, wait for idle, `send_message`; if no turn starts, try `codex queue --resume`). That Claude Code sends the
+  `mcp__<server>__<tool>` name form and the arguments object in `PermissionRequest`. Test counts by mode for these two
+  merges were not supplied to the documentor.
+- **Open checks (manual, in Rafu Lightning):** repeat the failing Codex prompt and see the first turn end in seconds;
+  send "ping" and see "pong" in seconds; send during a long Codex task and see the message arrive as a new turn when
+  it ends. For Claude: ask for an Atlassian MCP tool and check the card ("Atlassian MCP (claude.ai):
+  atlassianUserInfo", raw name, `{}`), Allow, Deny, long arguments ("Show all", then "Open terminal" only above
+  2 KiB), VoiceOver, keyboard, a second window, and that Bash and file-edit cards are unchanged.

@@ -471,7 +471,7 @@ and `noteApprovalInteraction()`. Tests:
 - **Row.** Up next lists one request row per terminal row that has a window and
   a current request (the oldest request of that terminal). A row has the
   terminal title (opens the agent in its window), the title ("Run command",
-  "Apply file changes", "Grant permissions", "Answer questions"), the command,
+  "Apply file changes", "Grant permissions", "Answer questions", "Use MCP tool"), the command,
   the folder, the reason, the buttons the request permits, and always "Open
   terminal". The command always shows whole (no line limit, no "Show all"): a
   hidden tail must never run behind an active Run button. The command is at
@@ -570,6 +570,19 @@ Code: `ApprovalPeekModels.swift` (pure), `ApprovalPeekController.swift`,
   `defaultMaxCardHeight` (used before the screen is known). One question with
   4 or fewer choices, at most 44 label columns and at most 120 characters of
   text shows choice buttons; any other question shows "Answer in Up next".
+- **MCP tool card (2026-11-21, Claude only).** `CanvasAgentRequest.Kind.toolCall`, title "Use MCP tool"
+  (`ApprovalPeekView`, `CompanionRequestPresentation`). The arguments are in `request.command` (sorted, pretty
+  JSON; `{}` for none; the same 2 KiB bound and exact-or-terminal-only rule as a command, so `boxText`, `fits`
+  and "Show all" need no special case). The identity is in `request.reason`, two lines: `"<friendly server>:
+  <tool>"` then the raw name `mcp__<server>__<tool>` (`AgentPermissionRequestSummary.toolReason(name:)`; a server
+  that starts with `claude_ai_` shows without it, with spaces and "(claude.ai)"). The raw name is always shown and
+  the card never says "trusted" or "official". `ApprovalPeekFit` also requires the identity to fit
+  `maxToolIdentityLines` (6 wrapped lines) and reserves 190 pt (not 150) for the text; the box shows with
+  `CompanionToolCallHeader` in Up next. Options: Allow, Deny, Deny and stop; never a session answer; the Codex
+  proxy never answers this kind (`result(for:)` is nil). Text from the agent always shows verbatim. Values are
+  never masked. VoiceOver: announcement "<agent> needs approval: Use tool <tool> of <server>" (a terminal-only
+  card says "Use MCP tool. Open the terminal to answer."); the box reads "<agent> asks to use tool <tool> of
+  <server>, named <raw name>, with arguments <text>". Source and unit tests only; not checked in the GUI.
 - **Three card sizes (2026-11-21, replaces Review).**
   `ApprovalPeekContent.resolve(request:decision:oversize:isExpanded:)` gives
   `.answer` when the request fits (the whole text, Allow, Deny, the menu),

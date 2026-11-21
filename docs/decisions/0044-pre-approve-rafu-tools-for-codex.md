@@ -44,7 +44,9 @@ It shows in the terminal only, as "Needs you · Answer in the terminal".
    not to be enough. It does not replace decision 1.
 5. **No Up next support for other servers' approvals.** The user decided not to build it. A Codex approval for an
    MCP server that is not Rafu keeps showing in the terminal only. The Codex proxy does not follow the elicitation
-   method.
+   method. (Amended 2026-11-21: this holds for Codex only. A Claude request for another server's MCP tool is now
+   answerable from the peek; see the amendment "Claude requests for MCP tools answer in the peek" in
+   [`0042-answer-agent-requests-from-up-next.md`](0042-answer-agent-requests-from-up-next.md).)
 
 ## Amendment: Claude Code (2026-11-21)
 

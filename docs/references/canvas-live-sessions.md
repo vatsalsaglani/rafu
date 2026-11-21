@@ -36,8 +36,11 @@ working directory, history file, or terminal output.
 MCP config overrides force the ordinary Codex launch away from its shared daemon.
 A private `app-server --listen unix://...` with the visible TUI attached through
 `--remote` keeps one real conversation. `queue --remote ... --thread ... --message`
-adds to that same thread. The versioned source shows idle wakeup and delivery
-after an active turn. An interrupted thread can retain queued input until resumed.
+adds to that same thread. Delivery after an active turn ends is verified live
+(Codex 0.171.0, see "2026-11-21: Codex has no inbox"). Whether a queued message
+starts a turn for a Codex that is already idle at its prompt is **not verified**:
+the 0.163.0 source was read as showing idle wakeup, but no live run confirmed it.
+An interrupted thread can retain queued input until resumed.
 
 Sources (version rust-v0.163.0):
 - https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/core/src/mcp_tool_call.rs
@@ -1061,9 +1064,11 @@ provider run yet.
   shows Failed.
 - **`list_connections` fields.** A peer now has `pending` (held messages, a count) and `lastDelivery` (`expired` or
   `failed`, cleared by the next message the peer takes). A sender whose message expired can see it.
-- **Idle Codex.** `codex queue` adds the message to the thread, but it does not start a turn for an idle agent
-  (see "Codex conversation navigation" above). The accepted reply for a Codex peer now adds: "Codex reads a queued
-  message when it next runs. If it waits at its prompt, start it with terminal_send."
+- **Idle Codex.** `codex queue` adds the message to the thread. Whether it starts a turn for an idle agent is **not
+  verified** (this bullet first said it does not; that claim had no live evidence either, and it disagreed with the
+  statement near the top of this note). The accepted reply for a Codex peer first said: "Codex reads a queued
+  message when it next runs. If it waits at its prompt, start it with terminal_send." The same day it was replaced
+  by text that covers both cases (see "2026-11-21: Codex has no inbox").
 - **Register without route keys.** A Codex MCP client that registered without `RAFU_CANVAS_CODEX_ENDPOINT` and
   `RAFU_CANVAS_CODEX_EXECUTABLE` used to write nil over the bound route and clear the thread: the peer showed
   connected, and every delivery found no route. A Codex register without route keys now keeps the route and thread
@@ -1083,7 +1088,61 @@ Verification:
 Manual checks (the user, Rafu Lightning only): a coordinator Claude sends to a child Claude and the child answers
 over the channel with no question about the sender; a message to a Codex peer right after it starts says "not
 connected yet" or "cannot take messages yet", never a wrong cause; after 5 minutes `list_connections` shows
-`lastDelivery: expired` and the link shows Failed; a send to an idle Codex tells the sender to use `terminal_send`.
+`lastDelivery: expired` and the link shows Failed; a send to a Codex peer says it takes the message when its
+current turn ends and names `terminal_send` for a Codex that stays idle (reworded the same day, see the next
+section).
+
+## 2026-11-21: Codex has no inbox; agents wait by ending their turn
+
+Applies to: the `receive_messages` case and the MCP instructions in `CanvasBridgeMCPServer.swift`
+(`codexInboxNote`), `accepted(_:)` in `CanvasLiveBridge.swift`, the `prompt` descriptions in
+`CanvasAgentTools.swift`, the `rafu-ensemble` skill. Verified live with Codex 0.171.0 (rollout of 2026-11-21) for
+the failure; the fix is source and unit tests only. Decision record:
+[`0045-codex-messages-are-queued-turns.md`](../decisions/0045-codex-messages-are-queued-turns.md).
+
+- **Failure.** A Codex agent told "wait for the next message" looped `receive_messages` plus the hidden Codex tool
+  `clock.sleep {"duration_ms":60000}`: 9 polls in 9.5 minutes. The Codex TUI showed only "Working". Every
+  `receive_messages` result was empty because `CanvasLiveBridge` returns an empty response for a non-Claude caller
+  (Rafu has no inbox for Codex). The tool text ("Use receive_messages to read pending messages") told Codex to poll.
+- **Delivery.** Messages sent with `codex queue` during the active turn started new turns (`turn_trigger: "queue"`)
+  only after that turn ended. Codex then answered in seconds. The polling turn never ended, so the messages waited
+  about 9 minutes.
+- **Rule now.** A Codex message arrives as a new user turn. To wait, the agent ends its turn. For a Codex client,
+  `receive_messages` still calls the app (it is the heartbeat that retries held messages) but ignores the message
+  list and returns the fixed note `codexInboxNote` ("No inbox for Codex ... end your turn now. Do not sleep and do
+  not call receive_messages again."), `isError` false. Claude is unchanged. The MCP instructions differ by provider,
+  `receive_messages` is described as "Claude Code only", the `terminal_create` and `terminal_send` `prompt`
+  descriptions say not to tell an agent to wait or poll, and the skill and its snippet say the same.
+- **Sender hint.** The accepted reply for a Codex peer now says Codex takes the message as a new turn when its
+  current turn ends, and that if Codex waits idle at its prompt and does not start, the sender can use
+  `terminal_send`. It covers both cases because the idle case is unverified.
+- **Unverified: a queued message for an idle Codex.** The rollout shows only messages queued during a turn. The
+  two older statements in this note disagreed (one said the source shows idle wakeup, one said `codex queue` does
+  not start an idle agent); both now say "unverified". To close it: start a Codex peer with a neutral prompt, wait
+  until it is idle at its prompt, then `send_message` to it, and record whether a turn starts. `codex queue` has a
+  `--resume` flag ("After queueing, try to resume the thread on the local daemon or selected --remote server. A
+  failed resume produces a warning and the command still succeeds"); Rafu does not pass it, and no result with it is recorded.
+- **`turn/steer` exists but is not used.** The stable Codex 0.171.0 client protocol has `turn/steer` (`threadId`,
+  `expectedTurnId`, `input`; it fails when `expectedTurnId` is not the active turn; result `{ turnId }`). The
+  `thread/queue/*` requests exist only with `--experimental`; only the notification `thread/queue/changed` is in
+  the stable set. Rafu defers steering: it cannot be proven without an inference call, it needs a new app-to-proxy
+  path (the proxy runs in the helper, the app delivers through a spawned `codex queue`), the proxy would have to
+  hide a response frame the terminal UI did not request (today it never changes the forwarded stream), and it
+  would put peer text into a task in progress. Design notes are in the decision record.
+- **Old sessions.** A Codex session started before the change keeps its old instructions until it restarts; the
+  fixed note still stops its loop at the first poll.
+
+Verification:
+
+```bash
+swift test --filter CanvasBridgeTests
+swift test --filter CanvasLiveBridge
+```
+
+Manual checks (the user, Rafu Lightning only): repeat the failing prompt; Codex must end its first turn in seconds.
+Send "ping" from the coordinator; Codex must start a turn and answer "pong" with `send_message` in seconds. Send a
+message during a long Codex task; the sender result must say it waits for the end of the turn, and the message must
+arrive as a new turn when the task ends.
 
 ## 2026-11-14: NUL gaps — the real reason Allow still waited
 

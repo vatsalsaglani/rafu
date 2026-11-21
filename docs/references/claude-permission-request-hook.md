@@ -76,7 +76,8 @@ the request lifetime and the Up next row that shows and answers a request exist 
   harmless.
 - The helper reads all of stdin, builds the event with a bounded `requestSummary` and writes it to the spool. It
   prints a decision only when Rafu answered `allow` or `deny`. It prints nothing (Claude keeps its dialog) when
-  Rafu is not watching, the tool is not Bash, Edit, MultiEdit or Write, the summary is empty, Rafu sent `dismiss`,
+  Rafu is not watching, the tool is not Bash, Edit, MultiEdit, Write or an MCP tool (`mcp__<server>__<tool>`, added
+  2026-11-21), the summary is empty, Rafu sent `dismiss`,
   Rafu stopped watching, or 285 s passed (`waitSeconds`). A 290 s alarm is the last resort (`alarmSeconds`).
 - **"Rafu is watching" is a held `flock`.** The app holds an exclusive lock on `AgentTracking/answers/watcher.lock`
   (`AgentAnswerWatchLock`). The helper takes a shared lock without waiting; a refusal means a live holder. The kernel
@@ -232,8 +233,41 @@ request summary"), `ClaudePermissionAnswerBridgeTests`.
   `[{"type": "setMode", "mode": "acceptEdits", "destination": "session"}]`, which would make Claude Code accept edits
   for the session. Rafu does **not** send it (not verified live; the person should see each change). It is the known
   alternative if answering every edit proves too slow.
-- Why an `mcp__` tool (for example a Rafu tool) produced no row: the summary reads only Bash, Edit, MultiEdit and
-  Write, so the answer-mode helper returns at once for any other tool and Claude Code shows its own dialog.
+- Why an `mcp__` tool (for example a Rafu tool) produced no row: the summary read only Bash, Edit, MultiEdit and
+  Write, so the answer-mode helper returned at once for any other tool and Claude Code showed its own dialog. (It
+  now reads an MCP tool name; see the next section. Any other tool, such as `WebFetch`, still gets no row.)
+
+## MCP tool requests (2026-11-21, source and unit tests only)
+
+Applies to: `AgentPermissionRequestSummary.swift` (`ToolCall`, `mcpParts(of:)`, `friendlyServer`, `toolReason`),
+`CanvasAgentRequest.Kind.toolCall`, `ClaudePermissionAnswerBridge.request(for:)`. Decision record: the amendment
+"Claude requests for MCP tools answer in the peek" in
+[`0042-answer-agent-requests-from-up-next.md`](../decisions/0042-answer-agent-requests-from-up-next.md).
+
+- **Name rule.** Only `mcp__<server>__<tool>`: at most 200 bytes, bytes in `A-Z a-z 0-9 _ - .` only, server and tool
+  not empty, split at the first `__` after the prefix. Anything else gives no summary, so no row, and the helper
+  prints nothing (Claude's dialog stays). Example: `mcp__claude_ai_Atlassian_MCP__atlassianUserInfo` gives server
+  `claude_ai_Atlassian_MCP` and tool `atlassianUserInfo`.
+- **Arguments.** The whole `tool_input`, as `JSONSerialization` text with sorted keys, pretty printing and
+  unescaped slashes. JSON escapes line breaks and control characters in strings, so they stay visible. An absent
+  `tool_input` is `{}`; a present one that is not an object gives no summary. The text goes through the same
+  sanitizer as a command (2 KiB, `clean`, `hidesText`). A cut or changed text makes the summary incomplete and the
+  row offers "Open terminal" only.
+- **No masking.** "Redacted" here means sanitized and bounded. Rafu does not hide any value: a hidden value would let
+  the person approve what the card does not show. The text stays in memory and in the private spool file and is
+  never logged.
+- **Request shape.** Kind `toolCall`; the arguments in `command`; the identity in `reason` as `"<friendly
+  server>: <tool>\n<raw name>"` (a reason the sanitizer changes makes the request terminal-only); `terminalOnly`
+  is `!summary.isComplete`; `offersSessionAllow` is false. The decoder of the summary accepts a stored tool call
+  only if re-sanitizing gives the same value.
+- **The decision JSON is unchanged.** `hookSpecificOutput.decision.behavior` is `allow` or `deny` (deny with the
+  fixed text and optional `interrupt`). The answer channel carries no tool name, so no change to the answer files,
+  the spool or the hook entry was needed.
+- **Spool size.** The summary is at most about 3 KiB, so it fits `AgentHookSpool.maximumFileBytes` (64 KiB).
+- **Not verified live:** that Claude Code sends `PermissionRequest` with `tool_name` in the `mcp__server__tool`
+  form and `tool_input` as the arguments object. An earlier live run showed the row as "Needs you" for such a
+  tool, which makes the form probable but does not prove it. If the form differs, the name rule gives no row and
+  the terminal dialog stays.
 
 ## Claude Code questions use a different hook
 
