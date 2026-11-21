@@ -57,16 +57,20 @@ nonisolated enum AgentCardStatus: Equatable, Sendable {
         if session.state == .needsInput, session.lastEventName == "StopFailure" {
             return .failed
         }
-        if session.state == .waitingForPermission { return .needsYou(.approval) }
-        if session.state == .needsInput { return .needsYou(.input) }
+        // A Claude wait nothing answered for five minutes reads as done: Claude
+        // sends no event after a "No" in the terminal.
+        let isAttentionStale = session.isAttentionStale(at: now)
+        if session.state == .waitingForPermission, !isAttentionStale { return .needsYou(.approval) }
+        if session.state == .needsInput, !isAttentionStale { return .needsYou(.input) }
         if session.state == .working, !session.isStale(at: now) { return .working }
 
         let elapsed = now.timeIntervalSince(session.updatedAt)
         let isIdleTooLong =
-            session.state == .finished || (session.state == .working && session.isStale(at: now))
+            session.state == .finished || isAttentionStale
+            || (session.state == .working && session.isStale(at: now))
         if isIdleTooLong, elapsed >= inactiveInterval { return .inactive }
 
-        guard session.state == .finished else { return nil }
+        guard session.state == .finished || isAttentionStale else { return nil }
         if session.replyEventID != nil, !isReplyAcknowledged { return .doneUnread }
         return .done
     }

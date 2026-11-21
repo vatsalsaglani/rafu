@@ -221,13 +221,16 @@ struct CanvasBridgeLaunchTests {
                     == [
                         "--mcp-config=\(config)",
                         "--dangerously-load-development-channels=server:rafu",
+                        "--allowedTools=mcp__rafu",
                     ] + arguments)
             // The spaced variadic form must never appear: it would capture what follows.
             #expect(!launch.arguments.contains("--mcp-config"))
             #expect(!launch.arguments.contains("--dangerously-load-development-channels"))
+            #expect(!launch.arguments.contains("--allowedTools"))
             let parsed = VariadicCapture(launch.arguments)
             #expect(parsed.values["--mcp-config"] == [config])
             #expect(parsed.values["--dangerously-load-development-channels"] == ["server:rafu"])
+            #expect(parsed.values["--allowedTools"] == ["mcp__rafu"])
             #expect(parsed.rest == arguments)
         }
         // The old spaced prefix: the parse model reproduces the reported failure.
@@ -238,6 +241,44 @@ struct CanvasBridgeLaunchTests {
         #expect(old.rest.isEmpty)
     }
 
+    /// Claude asked "Tool use - rafu - Send Message Tool (MCP). Do you want to proceed?"
+    /// for Rafu's own tools. The server-level spec pre-approves them for this session.
+    @Test func theClaudeLaunchPreApprovesRafuTools() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let launch = try CanvasBridgeLaunch.plan(
+            provider: "claude", arguments: [], environment: fixture.environment)
+        #expect(launch.arguments.contains("--allowedTools=mcp__rafu"))
+        #expect(!launch.arguments.contains("--allowedTools"))
+        #expect(launch.arguments.filter { $0.hasPrefix("--allowedTools") }.count == 1)
+    }
+
+    @Test func theUserArgumentsFollowTheRafuFlags() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let user = ["--allowedTools", "Bash(git status)", "--permission-mode", "plan", "prompt"]
+        let launch = try CanvasBridgeLaunch.plan(
+            provider: "claude", arguments: user, environment: fixture.environment)
+        #expect(Array(launch.arguments.suffix(user.count)) == user)
+        #expect(launch.arguments.prefix(3).allSatisfy { $0.hasPrefix("--") && $0.contains("=") })
+        #expect(CanvasBridgeLaunch.shouldAttach(provider: "claude", arguments: user))
+    }
+
+    @Test func theCodexLaunchIsUnchanged() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let launch = try CanvasBridgeLaunch.plan(
+            provider: "codex", arguments: ["hello"], environment: fixture.environment)
+        #expect(!launch.arguments.contains { $0.contains("allowedTools") })
+        #expect(launch.arguments.last == "hello")
+    }
+
+    @Test func theClaudeAttachRulesKeepSubcommandsAndPrintOut() {
+        #expect(!CanvasBridgeLaunch.shouldAttach(provider: "claude", arguments: ["mcp", "list"]))
+        #expect(!CanvasBridgeLaunch.shouldAttach(provider: "claude", arguments: ["-p", "hi"]))
+        #expect(!CanvasBridgeLaunch.shouldAttach(provider: "claude", arguments: ["--help"]))
+    }
+
     /// Commander's rule for the two Rafu flags: `--flag value...` takes each later token
     /// up to the next one that starts with `-`; `--flag=value` takes only its own value.
     private struct VariadicCapture {
@@ -245,7 +286,9 @@ struct CanvasBridgeLaunchTests {
         var rest: [String] = []
 
         init(_ argv: [String]) {
-            let flags = ["--mcp-config", "--dangerously-load-development-channels"]
+            let flags = [
+                "--mcp-config", "--dangerously-load-development-channels", "--allowedTools",
+            ]
             var active: String?
             for (index, token) in argv.enumerated() {
                 if token == "--" {

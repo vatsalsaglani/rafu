@@ -52,15 +52,95 @@ struct AgentSessionLedgerTests {
         #expect(ledger.sessions.first?.state == .ended)
     }
 
-    @Test("Notifications: permission and input prompts need the person")
+    @Test("Notifications: a real choice needs the person; other types change nothing")
     func notifications() {
         var ledger = AgentSessionLedger()
         ledger.apply(event("Notification", at: 1, notification: "permission_prompt"))
         #expect(ledger.sessions.first?.state == .waitingForPermission)
+        ledger.apply(event("Notification", at: 2, notification: "auth_success"))
+        #expect(ledger.sessions.first?.state == .waitingForPermission)
+    }
+
+    @Test("An idle prompt does not need you and keeps the reply")
+    func anIdlePromptDoesNotNeedYou() throws {
+        var ledger = AgentSessionLedger()
+        let stop = event("Stop", at: 1, message: "Done")
+        ledger.apply(stop)
         ledger.apply(event("Notification", at: 2, notification: "idle_prompt"))
+        let session = try #require(ledger.sessions.first)
+        #expect(session.state == .finished)
+        #expect(!session.needsAttention)
+        #expect(session.replyEventID == stop.id)
+        #expect(session.replyAt == Date(timeIntervalSince1970: 1))
+    }
+
+    @Test("An idle prompt clears a permission wait answered in the terminal")
+    func anIdlePromptClearsAStalePermissionWait() {
+        var ledger = AgentSessionLedger()
+        ledger.apply(event("UserPromptSubmit", at: 1))
+        ledger.apply(event("PermissionRequest", at: 2, tool: "Bash"))
+        #expect(ledger.sessions.first?.needsAttention == true)
+        ledger.apply(event("Notification", at: 3, notification: "idle_prompt"))
+        #expect(ledger.sessions.first?.state == .finished)
+        #expect(ledger.sessions.first?.needsAttention == false)
+    }
+
+    @Test("A permission prompt still needs you")
+    func aPermissionPromptStillNeedsYou() {
+        var ledger = AgentSessionLedger()
+        ledger.apply(event("Notification", at: 1, notification: "permission_prompt"))
+        #expect(ledger.sessions.first?.state == .waitingForPermission)
+        #expect(ledger.sessions.first?.needsAttention == true)
+    }
+
+    @Test("A worker permission prompt needs you")
+    func aWorkerPermissionPromptNeedsYou() {
+        var ledger = AgentSessionLedger()
+        ledger.apply(event("Notification", at: 1, notification: "worker_permission_prompt"))
+        #expect(ledger.sessions.first?.state == .waitingForPermission)
+    }
+
+    @Test("An elicitation dialog needs you")
+    func anElicitationDialogNeedsYou() {
+        var ledger = AgentSessionLedger()
+        ledger.apply(event("Notification", at: 1, notification: "elicitation_dialog"))
         #expect(ledger.sessions.first?.state == .needsInput)
-        ledger.apply(event("Notification", at: 3, notification: "auth_success"))
+        #expect(ledger.sessions.first?.needsAttention == true)
+    }
+
+    @Test("An elicitation URL dialog needs you")
+    func anElicitationUrlDialogNeedsYou() {
+        var ledger = AgentSessionLedger()
+        ledger.apply(event("Notification", at: 1, notification: "elicitation_url_dialog"))
         #expect(ledger.sessions.first?.state == .needsInput)
+    }
+
+    @Test("An agent_completed notification changes nothing")
+    func anAgentCompletedNotificationChangesNothing() {
+        var ledger = AgentSessionLedger()
+        ledger.apply(event("UserPromptSubmit", at: 1))
+        ledger.apply(event("Notification", at: 2, notification: "agent_completed"))
+        #expect(ledger.sessions.first?.state == .working)
+        ledger.apply(event("Notification", at: 3, notification: "agent_needs_input"))
+        #expect(ledger.sessions.first?.state == .working)
+    }
+
+    @Test("A Claude wait older than five minutes is stale; a Codex wait never is")
+    func attentionStaleness() throws {
+        var ledger = AgentSessionLedger()
+        ledger.apply(event("PermissionRequest", at: 0))
+        ledger.apply(event("PermissionRequest", session: "c", provider: .codex, at: 0))
+        let claude = try #require(ledger.sessions.first { $0.provider == .claude })
+        let codex = try #require(ledger.sessions.first { $0.provider == .codex })
+        let limit = TrackedAgentSession.attentionStaleInterval
+        let before = Date(timeIntervalSince1970: limit - 1)
+        let after = Date(timeIntervalSince1970: limit + 1)
+        #expect(!claude.isAttentionStale(at: before))
+        #expect(claude.isAttentionStale(at: after))
+        #expect(!codex.isAttentionStale(at: after))
+        let working = TrackedAgentSession(
+            provider: .claude, sessionID: "w", state: .working, startedAt: .distantPast)
+        #expect(!working.isAttentionStale(at: after))
     }
 
     @Test("A question tool needs input; its answer resumes work")

@@ -68,6 +68,10 @@ public struct TrackedAgentSession: Equatable, Identifiable, Sendable {
     static let maximumStoppedSubagentIDs = 32
     /// After this long without an event, a `working` session is not current.
     public static let staleInterval: TimeInterval = 10 * 60
+    /// A Claude wait for approval or input older than this reads as idle: after a
+    /// "No" in the terminal, Claude sends no event until the next one. A live
+    /// request in the Up next store still forces "Needs you".
+    public static let attentionStaleInterval: TimeInterval = 5 * 60
     /// A reply counts as fresh for this long when no Rafu terminal owns it.
     public static let replyFreshInterval: TimeInterval = 2 * 60
 
@@ -141,6 +145,14 @@ public struct TrackedAgentSession: Equatable, Identifiable, Sendable {
     /// A `working` session whose events stopped arriving.
     public func isStale(at now: Date) -> Bool {
         state == .working && now.timeIntervalSince(updatedAt) > Self.staleInterval
+    }
+
+    /// A Claude session that waited for the person longer than
+    /// `attentionStaleInterval` without any event. Never true for Codex, whose
+    /// approval requests arrive on a channel Rafu can see.
+    public func isAttentionStale(at now: Date) -> Bool {
+        provider == .claude && needsAttention
+            && now.timeIntervalSince(updatedAt) > Self.attentionStaleInterval
     }
 
     /// The session finished a turn with a reply within `replyFreshInterval`.
@@ -363,8 +375,15 @@ public struct AgentSessionLedger: Equatable, Sendable {
             row.state = .waitingForPermission
         case "Notification":
             switch event.notificationType {
-            case "permission_prompt": row.state = .waitingForPermission
-            case "idle_prompt", "elicitation_dialog": row.state = .needsInput
+            case "permission_prompt", "worker_permission_prompt":
+                row.state = .waitingForPermission
+            case "elicitation_dialog", "elicitation_url_dialog":
+                row.state = .needsInput
+            case "idle_prompt":
+                // Claude sends this only when no dialog is on screen and the agent
+                // idles at its prompt. That is "waiting", not a choice for the person,
+                // and it also ends a permission wait the person answered in the terminal.
+                row.state = .finished
             default: break
             }
         case "Stop":

@@ -38,14 +38,18 @@ nonisolated enum AgentTrackedPhase {
         case .idle, .exited: return nil
         case .running, .bell: break
         }
+        func finishedPhase() -> NotchAgentPhase? {
+            if status == .bell { return session.replyEventID == nil ? nil : .replyReady }
+            return .idle
+        }
         switch session.state {
         case .working:
             return session.isStale(at: now) ? nil : .working
         case .waitingForPermission, .needsInput:
-            return .needsYou
+            // A Claude wait nothing answered for five minutes reads as idle.
+            return session.isAttentionStale(at: now) ? finishedPhase() : .needsYou
         case .finished:
-            if status == .bell { return session.replyEventID == nil ? nil : .replyReady }
-            return .idle
+            return finishedPhase()
         case .ended:
             return nil
         }
@@ -77,7 +81,8 @@ nonisolated enum AgentTrackedPhase {
     static func externalPhase(session: TrackedAgentSession, now: Date) -> NotchAgentPhase {
         switch session.state {
         case .working: session.isStale(at: now) ? .idle : .working
-        case .waitingForPermission, .needsInput: .needsYou
+        case .waitingForPermission, .needsInput:
+            session.isAttentionStale(at: now) ? .idle : .needsYou
         case .finished: session.hasFreshReply(at: now) ? .replyReady : .idle
         case .ended: .stopped
         }
@@ -109,9 +114,11 @@ extension AgentActivityStore {
             session: trackedSession(for: controller), status: controller.status, now: now)
     }
 
-    /// Whether the agent in `controller` waits for approval or an answer.
+    /// Whether the agent in `controller` waits for approval or an answer. A
+    /// Claude wait nothing answered for five minutes no longer counts.
     func needsAttention(_ controller: WorkspaceTerminalController) -> Bool {
-        trackedSession(for: controller)?.needsAttention ?? false
+        guard let session = trackedSession(for: controller) else { return false }
+        return session.needsAttention && !session.isAttentionStale(at: now)
     }
 
     /// The Ensemble terminal node header word for `controller`, or `nil`.
