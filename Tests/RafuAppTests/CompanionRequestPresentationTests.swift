@@ -74,3 +74,26 @@ func companionRequestActions() {
         CompanionRequestPresentation.message(for: .stale) == "This request was already answered.")
     #expect(CompanionRequestPresentation.message(for: .alreadyChosen) == nil)
 }
+
+@MainActor
+@Test func companionToolCallPresentation() {
+    let request = CanvasAgentRequest(
+        kind: .toolCall, command: "{}",
+        reason: AgentPermissionRequestSummary.toolReason(name: "mcp__github__search"),
+        offersSessionAllow: false)
+    let model = CompanionRequestPresentation(request: request, decision: nil)
+    #expect(model.title == "Use MCP tool")
+    guard case .options(let options) = model.controls else {
+        Issue.record("Missing approval buttons")
+        return
+    }
+    #expect(options.map(\.decision) == [.accept, .decline, .cancel])
+    #expect(options.map(\.label) == ["Allow", "Deny", "Deny and stop"])
+    let actions = CompanionRequestActions(request: request)
+    #expect(actions.primaryLabel == "Allow")
+    #expect(actions.overflow.map(\.decision) == [.cancel])
+    #expect(
+        CompanionRequestPresentation(request: request, decision: .accept).controls == .sending)
+    let restricted = CanvasAgentRequest(kind: .toolCall, command: "{}", reason: nil)
+    #expect(CompanionRequestPresentation(request: restricted, decision: nil).controls == .terminal)
+}

@@ -251,6 +251,7 @@ private struct ApprovalPeekCardBody: View {
         case .fileChange: "Apply file changes"
         case .permissions: "Grant permissions"
         case .userInput: "Answer questions"
+        case .toolCall: "Use MCP tool"
         }
     }
 
@@ -320,12 +321,16 @@ private struct ApprovalPeekCardBody: View {
         case .answerInUpNext:
             if let question = request.questions.first { questionText(question, limit: 3) }
         case .answer, .sending:
+            toolHeader
             if let text = ApprovalPeekText.boxText(request) {
                 CompanionCommandBox(command: text)
                     .accessibilityLabel(spokenBox)
             }
             CompanionRequestDetails(request: request)
         case .needsExpand, .terminalOnly:
+            toolHeader
+                .lineLimit(1)
+                .truncationMode(.middle)
             if let text = ApprovalPeekText.boxText(request) {
                 CompanionCommandBox(command: text, lineLimit: 2)
             }
@@ -333,6 +338,7 @@ private struct ApprovalPeekCardBody: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
         case .expanded:
+            toolHeader
             if let text = ApprovalPeekText.boxText(request) {
                 // The whole request, selectable, in a box that scrolls. One
                 // VoiceOver element reads all of it.
@@ -342,12 +348,22 @@ private struct ApprovalPeekCardBody: View {
                 .frame(
                     height: ApprovalPeekGeometry.expandedBoxHeight(
                         lines: ApprovalPeekFit.wrappedLines(text),
-                        visibleFrame: controller.visibleFrame, reserved: 150)
+                        visibleFrame: controller.visibleFrame,
+                        reserved: request.kind == .toolCall ? 190 : 150)
                 )
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(spokenBox)
             }
             CompanionRequestDetails(request: request)
+        }
+    }
+
+    /// The tool a tool call asks to use, above its arguments. Nothing for any
+    /// other kind.
+    @ViewBuilder
+    private var toolHeader: some View {
+        if entry.request.kind == .toolCall {
+            CompanionToolCallHeader(request: entry.request)
         }
     }
 

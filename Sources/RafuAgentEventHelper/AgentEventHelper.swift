@@ -46,7 +46,8 @@ enum AgentEventHelper {
         else { return }
         if answering {
             // Not watched means nobody can answer. A tool Rafu does not
-            // summarize stays with Claude's own dialog.
+            // summarize (not Bash, a file tool, or an `mcp__` tool) stays
+            // with Claude's own dialog.
             guard event.hookEventName == "PermissionRequest", event.requestSummary != nil,
                 channel.isWatched
             else { return }

@@ -24,6 +24,7 @@ struct CompanionRequestPresentation {
         case .fileChange: "Apply file changes"
         case .permissions: "Grant permissions"
         case .userInput: "Answer questions"
+        case .toolCall: "Use MCP tool"
         }
     }
 

@@ -42,7 +42,7 @@ nonisolated struct ClaudePermissionAnswerBridge: Equatable, Sendable {
     }
 
     /// The request for `event`, or nil when the event is not answerable. A
-    /// command, or a file change, that was cut or changed becomes
+    /// command, a file change, or an MCP tool call that was cut or changed becomes
     /// terminal-only: the row shows the whole request or none of it.
     static func request(for event: AgentHookEvent) -> CanvasAgentRequest? {
         guard isAnswerable(event), let summary = event.requestSummary else { return nil }
@@ -51,6 +51,14 @@ nonisolated struct ClaudePermissionAnswerBridge: Equatable, Sendable {
             return CanvasAgentRequest(
                 key: event.id, kind: .command, command: command, cwd: cwd,
                 reason: summary.description, terminalOnly: !summary.isComplete,
+                offersSessionAllow: false, receivedAt: event.time)
+        }
+        if let call = summary.toolCall {
+            // The arguments ride in `command` (bounded, exact or terminal-only)
+            // and the tool identity in `reason`. No session answer.
+            return CanvasAgentRequest(
+                key: event.id, kind: .toolCall, command: call.arguments, cwd: cwd,
+                reason: call.reasonLine, terminalOnly: !summary.isComplete,
                 offersSessionAllow: false, receivedAt: event.time)
         }
         if let path = summary.filePath {

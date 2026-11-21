@@ -21,6 +21,10 @@ public nonisolated struct CanvasAgentRequest: Codable, Hashable, Sendable {
         case permissions
         /// Answer multiple-choice questions (`item/tool/requestUserInput`).
         case userInput
+        /// Use a tool of an MCP server (Claude Code hook only). `command`
+        /// holds the arguments as JSON text and `reason` the tool identity
+        /// (see `AgentPermissionRequestSummary.toolReason(name:)`).
+        case toolCall
     }
 
     /// One file the agent asks to change, with the whole change: the full new
@@ -232,8 +236,8 @@ public nonisolated struct CanvasAgentRequest: Codable, Hashable, Sendable {
                         isDiff: change.isDiff, movePath: moved?.text))
             }
         }
-        // Only a command request carries a command.
-        let cleanCommand = (kind == .command ? command : nil).map {
+        // Only a command or a tool call carries a command (the arguments).
+        let cleanCommand = (kind == .command || kind == .toolCall ? command : nil).map {
             Self.clean($0, limit: Limits.commandBytes, keepsLineBreaks: true)
         }
         // What the user reads must be exactly what runs.
@@ -243,7 +247,17 @@ public nonisolated struct CanvasAgentRequest: Codable, Hashable, Sendable {
         {
             restricted = true
         }
-        if kind == .command, cleanCommand == nil { restricted = true }
+        if kind == .command || kind == .toolCall, cleanCommand == nil { restricted = true }
+        // A tool call names its tool in `reason`: no identity, or one the
+        // sanitizer changed, means the row would not show what is used.
+        if kind == .toolCall {
+            let identity = reason.map {
+                Self.clean($0, limit: Limits.reasonBytes, keepsLineBreaks: true)
+            }
+            if identity == nil || identity?.altered == true || identity?.text.isEmpty == true {
+                restricted = true
+            }
+        }
         var lines: [String] = []
         for line in permissions.prefix(Limits.permissionLines) {
             let clean = Self.clean(line, limit: Limits.permissionLineBytes, keepsLineBreaks: false)
@@ -311,6 +325,14 @@ public nonisolated struct CanvasAgentRequest: Codable, Hashable, Sendable {
                 Option(decision: .accept, label: "Allow for this turn"),
                 Option(decision: .acceptForSession, label: "Allow for this session"),
                 Option(decision: .decline, label: "Deny"),
+            ]
+        case .toolCall:
+            // No session answer, also when `offersSessionAllow` is true: a
+            // Claude Code hook has no such answer for a tool.
+            return [
+                Option(decision: .accept, label: "Allow"),
+                Option(decision: .decline, label: "Deny"),
+                Option(decision: .cancel, label: "Deny and stop"),
             ]
         case .userInput:
             return []
@@ -691,6 +713,10 @@ extension CanvasAgentRequest {
             ]
         case (.command, _), (.fileChange, _):
             return ["decision": decision.name]
+        case (.toolCall, _):
+            // Only the Claude Code hook answers a tool call. The Codex proxy
+            // never builds this kind, so it must never answer it.
+            return nil
         default:
             return nil
         }

@@ -487,3 +487,99 @@ func approvalPeekAnnouncement() {
         request: CanvasAgentRequest(kind: .userInput, questions: [question(choices: ["a"])]))
     #expect(ApprovalPeekText.announcement(for: ask) == "Codex asks: Which theme?")
 }
+
+// MARK: - MCP tool call
+
+private let atlassianName = "mcp__claude_ai_Atlassian_MCP__atlassianUserInfo"
+
+private func toolCallRequest(
+    arguments: String = "{}", name: String = atlassianName, terminalOnly: Bool = false
+) -> CanvasAgentRequest {
+    CanvasAgentRequest(
+        kind: .toolCall, command: arguments, cwd: "/repo",
+        reason: AgentPermissionRequestSummary.toolReason(name: name), terminalOnly: terminalOnly,
+        offersSessionAllow: false)
+}
+
+@Test("ApprovalPeekContent: a tool call shows its arguments and Allow, Deny and the menu")
+func aToolCallIsAnswerable() {
+    let request = toolCallRequest()
+    #expect(ApprovalPeekText.boxText(request) == "{}")
+    guard
+        case .answer(let actions) = ApprovalPeekContent.resolve(
+            request: request, decision: nil, oversize: false)
+    else {
+        Issue.record("Expected an answer card")
+        return
+    }
+    #expect(actions.primary?.decision == .accept)
+    #expect(actions.primaryLabel == "Allow")
+    #expect(actions.deny?.decision == .decline)
+    #expect(actions.overflow.map(\.label) == ["Deny and stop"])
+}
+
+@Test("ApprovalPeekContent: tool call arguments of eleven lines need Show all, then Allow")
+func longToolCallArgumentsNeedExpand() {
+    let long = toolCallRequest(arguments: lines(11))
+    #expect(!ApprovalPeekFit.fits(long))
+    guard
+        case .needsExpand(let collapsed) = ApprovalPeekContent.resolve(
+            request: long, decision: nil, oversize: false)
+    else {
+        Issue.record("Expected a Show all card")
+        return
+    }
+    #expect(collapsed.primary == nil)
+    guard
+        case .expanded(let expanded) = ApprovalPeekContent.resolve(
+            request: long, decision: nil, oversize: false, isExpanded: true)
+    else {
+        Issue.record("Expected an expanded card")
+        return
+    }
+    #expect(expanded.primary?.decision == .accept)
+}
+
+@Test("ApprovalPeekContent: a long tool identity needs Show all")
+func aLongToolIdentityNeedsExpand() {
+    let name =
+        "mcp__" + String(repeating: "s", count: 80) + "__" + String(repeating: "t", count: 110)
+    let request = toolCallRequest(name: name)
+    #expect(!request.terminalOnly)
+    #expect(!ApprovalPeekFit.fits(request))
+    #expect(ApprovalPeekFit.fits(toolCallRequest()))
+}
+
+@Test("ApprovalPeekContent: a tool call with too long arguments shows Open terminal only")
+func aTerminalOnlyToolCallShowsOpenTerminal() {
+    let request = toolCallRequest(
+        arguments: String(repeating: "a", count: CanvasAgentRequest.Limits.commandBytes + 1))
+    #expect(request.terminalOnly)
+    let content = ApprovalPeekContent.resolve(request: request, decision: nil, oversize: false)
+    #expect(content == .terminalOnly)
+    #expect(!content.allowsSwipeRight && !content.allowsSwipeLeft)
+}
+
+@Test("ApprovalPeekText: the tool call announcement names the tool and the server")
+func theToolCallAnnouncementNamesTheTool() {
+    let entry = ApprovalPeekEntry(
+        controllerID: UUID(), title: "t", cli: .claudeCode, request: toolCallRequest())
+    #expect(
+        ApprovalPeekText.announcement(for: entry)
+            == "Claude Code needs approval: Use tool atlassianUserInfo of Atlassian MCP (claude.ai)"
+    )
+    let terminal = ApprovalPeekEntry(
+        controllerID: UUID(), title: "t", cli: .claudeCode,
+        request: toolCallRequest(terminalOnly: true))
+    #expect(
+        ApprovalPeekText.announcement(for: terminal)
+            == "Claude Code needs approval: Use MCP tool. Open the terminal to answer.")
+    // It never says that it runs a command.
+    let spoken = ApprovalPeekText.spokenBox(
+        agent: "Claude Code", request: toolCallRequest(arguments: "{\n  \"a\" : 1\n}"))
+    #expect(
+        spoken
+            == "Claude Code asks to use tool atlassianUserInfo of Atlassian MCP (claude.ai), "
+            + "named \(atlassianName), with arguments {\n  \"a\" : 1\n}")
+    #expect(spoken?.contains("run") == false)
+}

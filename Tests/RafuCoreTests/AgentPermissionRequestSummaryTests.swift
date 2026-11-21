@@ -312,4 +312,180 @@ struct AgentPermissionRequestSummaryTests {
         #expect(decode(#"{"command":"ls","isComplete":false}"#)?.isComplete == false)
         #expect(decode(#"{"isComplete":true}"#) == nil)
     }
+
+    // MARK: MCP tools
+
+    private static let atlassian = "mcp__claude_ai_Atlassian_MCP__atlassianUserInfo"
+
+    @Test("An MCP tool with no arguments is complete and names its server and tool")
+    func mcpToolWithEmptyInput() throws {
+        let summary = try #require(
+            AgentPermissionRequestSummary(toolName: Self.atlassian, toolInput: [String: Any]()))
+        #expect(summary.isComplete)
+        #expect(summary.command == nil)
+        #expect(summary.filePath == nil)
+        let call = try #require(summary.toolCall)
+        #expect(call.name == Self.atlassian)
+        #expect(call.server == "claude_ai_Atlassian_MCP")
+        #expect(call.tool == "atlassianUserInfo")
+        #expect(call.arguments == "{}")
+        #expect(
+            call.reasonLine == "Atlassian MCP (claude.ai): atlassianUserInfo\n" + Self.atlassian)
+        // An absent input counts as an empty object.
+        let absent = try #require(
+            AgentPermissionRequestSummary(toolName: Self.atlassian, toolInput: nil))
+        #expect(absent.toolCall?.arguments == "{}")
+    }
+
+    @Test("Only a server with the claude.ai prefix gets the claude.ai label")
+    func mcpServerLabel() throws {
+        #expect(
+            AgentPermissionRequestSummary.friendlyServer("claude_ai_Atlassian_MCP")
+                == "Atlassian MCP (claude.ai)")
+        #expect(AgentPermissionRequestSummary.friendlyServer("github") == "github")
+        #expect(AgentPermissionRequestSummary.friendlyServer("claude_ai_") == "claude_ai_")
+        let identity = try #require(
+            AgentPermissionRequestSummary.toolIdentity(
+                fromReason: AgentPermissionRequestSummary.toolReason(name: "mcp__github__search")
+                    ?? ""))
+        #expect(identity.server == "github")
+        #expect(identity.tool == "search")
+        #expect(identity.name == "mcp__github__search")
+        // Text that was not built by toolReason has no identity.
+        #expect(
+            AgentPermissionRequestSummary.toolIdentity(
+                fromReason: "Atlassian: tool\nmcp__github__search") == nil)
+        #expect(AgentPermissionRequestSummary.toolIdentity(fromReason: "one line") == nil)
+    }
+
+    @Test("MCP arguments are sorted, pretty, stable JSON text")
+    func mcpArgumentsAreStable() throws {
+        let input: [String: Any] = [
+            "query": "project = A/B", "limit": 5, "nested": ["z": 1, "a": [true, NSNull()]],
+        ]
+        let first = try #require(
+            AgentPermissionRequestSummary(toolName: "mcp__jira__search", toolInput: input))
+        let second = try #require(
+            AgentPermissionRequestSummary(toolName: "mcp__jira__search", toolInput: input))
+        #expect(first == second)
+        let text = try #require(first.toolCall?.arguments)
+        #expect(first.isComplete)
+        // Sorted keys, and a slash is not escaped.
+        let limit = try #require(text.range(of: "\"limit\""))
+        let nested = try #require(text.range(of: "\"nested\""))
+        let query = try #require(text.range(of: "\"query\""))
+        #expect(limit.lowerBound < nested.lowerBound && nested.lowerBound < query.lowerBound)
+        #expect(text.contains("project = A/B"))
+        // What is shown is valid JSON that holds the same value.
+        let back = try #require(
+            try JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any])
+        #expect(back["limit"] as? Int == 5)
+    }
+
+    @Test("A line break in an argument shows as an escape and stays complete")
+    func mcpLineBreakIsEscaped() throws {
+        let summary = try #require(
+            AgentPermissionRequestSummary(
+                toolName: "mcp__jira__comment", toolInput: ["body": "a\nb\u{1}c"]))
+        let text = try #require(summary.toolCall?.arguments)
+        #expect(summary.isComplete)
+        #expect(text.contains(#"a\nb\u0001c"#))
+    }
+
+    @Test("MCP arguments over the limit, or with a hidden character, are incomplete")
+    func mcpArgumentsThatCannotShowWhole() throws {
+        let long = String(repeating: "a", count: CanvasAgentRequest.Limits.commandBytes)
+        let tooLong = try #require(
+            AgentPermissionRequestSummary(toolName: "mcp__x__y", toolInput: ["q": long]))
+        #expect(!tooLong.isComplete)
+        #expect(
+            (tooLong.toolCall?.arguments.utf8.count ?? .max)
+                <= CanvasAgentRequest.Limits.commandBytes)
+        let bidi = try #require(
+            AgentPermissionRequestSummary(
+                toolName: "mcp__x__y", toolInput: ["q": "safe\u{202E}evil"]))
+        #expect(!bidi.isComplete)
+        #expect(bidi.toolCall?.arguments.contains("\u{202E}") == false)
+        // Deep nesting makes a run of blank space that could hide the end.
+        var deep: Any = "end"
+        for _ in 0..<40 { deep = ["k": deep] }
+        let nested = try #require(
+            AgentPermissionRequestSummary(toolName: "mcp__x__y", toolInput: ["d": deep]))
+        #expect(!nested.isComplete)
+    }
+
+    @Test("A name that is not mcp__server__tool in the strict form gives no summary")
+    func mcpBadNames() {
+        let tooLong = "mcp__s__" + String(repeating: "t", count: 200)
+        for name in [
+            "mcp__", "mcp__x", "mcp____tool", "mcp__server__", "mcp__a b__tool", "mcp__a/b__tool",
+            "mcp__srv__to\u{202E}ol", "mcp__srv__tool\n", "MCP__a__b", "mcp_a__b", tooLong,
+        ] {
+            #expect(
+                AgentPermissionRequestSummary(toolName: name, toolInput: [String: Any]()) == nil,
+                "\(name)")
+        }
+        #expect(
+            AgentPermissionRequestSummary(toolName: "mcp__a__b.c-d_e", toolInput: nil) != nil)
+        // Only the first double underscore splits the name.
+        #expect(AgentPermissionRequestSummary.mcpParts(of: "mcp__a__b__c")?.tool == "b__c")
+    }
+
+    @Test("A non-object tool input gives no MCP summary")
+    func mcpNonObjectInput() {
+        #expect(AgentPermissionRequestSummary(toolName: "mcp__x__y", toolInput: "text") == nil)
+        #expect(AgentPermissionRequestSummary(toolName: "mcp__x__y", toolInput: [1, 2]) == nil)
+        #expect(AgentPermissionRequestSummary(toolName: "mcp__x__y", toolInput: NSNull()) == nil)
+    }
+
+    @Test("An MCP summary round-trips, and a decoded one that is not sanitized is rejected")
+    func mcpCodable() throws {
+        let summary = try #require(
+            AgentPermissionRequestSummary(toolName: "mcp__jira__search", toolInput: ["q": "x"]))
+        let data = try JSONEncoder().encode(summary)
+        #expect(try JSONDecoder().decode(AgentPermissionRequestSummary.self, from: data) == summary)
+        func decode(_ json: String) -> AgentPermissionRequestSummary? {
+            try? JSONDecoder().decode(AgentPermissionRequestSummary.self, from: Data(json.utf8))
+        }
+        #expect(
+            decode(#"{"toolCall":{"name":"mcp__a__b","arguments":"{}"},"isComplete":true}"#) != nil)
+        // An unclean argument text, a bad name, or a command beside a tool call.
+        #expect(
+            decode(#"{"toolCall":{"name":"mcp__a__b","arguments":"{\u0007}"},"isComplete":true}"#)
+                == nil)
+        #expect(
+            decode(#"{"toolCall":{"name":"Bash","arguments":"{}"},"isComplete":true}"#) == nil)
+        #expect(
+            decode(
+                #"{"command":"ls","toolCall":{"name":"mcp__a__b","arguments":"{}"},"isComplete":true}"#
+            ) == nil)
+        // It may claim less than the sanitizer finds, never more.
+        let wide = String(repeating: "a", count: CanvasAgentRequest.Limits.commandBytes + 1)
+        #expect(
+            decode(#"{"toolCall":{"name":"mcp__a__b","arguments":"\#(wide)"},"isComplete":true}"#)
+                == nil)
+    }
+
+    @Test("The helper's answer mode adds an MCP summary; the normal mode never does")
+    func mcpEventSummary() throws {
+        let data = try permissionRequest(tool: Self.atlassian, input: [:])
+        let plain = try AgentHookEvent(provider: .claude, payload: data)
+        #expect(plain.requestSummary == nil)
+        let answering = try AgentHookEvent(
+            provider: .claude, payload: data, includesRequestSummary: true)
+        #expect(answering.requestSummary?.toolCall?.name == Self.atlassian)
+        let codex = try AgentHookEvent(
+            provider: .codex, payload: data, includesRequestSummary: true)
+        #expect(codex.requestSummary == nil)
+        // The event with its summary fits one spool file, also with the most arguments.
+        let wide = try AgentHookEvent(
+            provider: .claude,
+            payload: permissionRequest(
+                tool: Self.atlassian,
+                input: ["q": String(repeating: "\"", count: CanvasAgentRequest.Limits.commandBytes)]
+            ), includesRequestSummary: true)
+        let encoded = try JSONEncoder().encode(wide)
+        #expect(encoded.count <= AgentHookSpool.maximumFileBytes)
+        #expect(try JSONDecoder().decode(AgentHookEvent.self, from: encoded) == wide)
+    }
 }
