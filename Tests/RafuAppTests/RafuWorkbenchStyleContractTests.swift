@@ -614,7 +614,9 @@ struct RafuWorkbenchStyleContractTests {
         // width now comes from `WorkbenchDeckLane.handleHitArea` (window gap
         // tightening 2), not a fixed 10 pt.
         #expect(source.contains(".frame(width: hitAreaWidth)"))
-        #expect(source.contains(".offset(x: -WorkbenchDeckLane.handleDeckOverlap / 2)"))
+        #expect(
+            source.contains(
+                ".offset(x: edge.seamOffset(distance: -WorkbenchDeckLane.handleDeckOverlap / 2))"))
         #expect(source.contains("NSCursor.resizeLeftRight.push()"))
         #expect(source.contains(".accessibilityAdjustableAction(handleAccessibilityAdjustment)"))
     }

@@ -747,6 +747,25 @@ struct CommandPaletteView: View {
                 dismiss()
                 session.toggleSidebar()
             },
+            .init(
+                title: WorkbenchLayoutPreferences.sidebarEdge().moveCommandTitle,
+                symbolName: "sidebar.right",
+                keywords: ["left", "right", "swap", "edge", "side", "rail", "panel"],
+                shortcut: WorkbenchLayoutShortcuts.moveSidebarLabel
+            ) {
+                dismiss()
+                WorkbenchLayoutPreferences.toggleSidebarEdge()
+            },
+            .init(
+                title: WorkbenchLayoutShortcuts.zenCommandTitle(isOn: session.isZenMode),
+                symbolName: "rectangle.center.inset.filled",
+                keywords: ["focus", "distraction", "hide", "sidebar", "rail", "full"],
+                shortcut: WorkbenchLayoutShortcuts.zenModeLabel,
+                isEnabled: session.descriptor != nil || session.isZenMode
+            ) {
+                dismiss()
+                session.toggleZenMode()
+            },
             .init(title: "New File", symbolName: "doc.badge.plus", keywords: ["create"]) {
                 dismiss()
                 session.requestFileCreation(isDirectory: false)

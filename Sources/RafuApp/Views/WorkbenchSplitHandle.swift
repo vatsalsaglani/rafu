@@ -37,6 +37,15 @@ nonisolated enum WorkbenchSidebarResize {
     static func shouldReopen(dragTranslation: Double) -> Bool {
         dragTranslation > reopenThreshold
     }
+
+    /// A pointer drag's horizontal translation, as growth of the sidebar.
+    /// On the leading edge the sidebar grows when the pointer moves right.
+    /// On the trailing edge it grows when the pointer moves left, so the sign
+    /// flips. Every width, collapse and reopen rule reads this value, never
+    /// the raw translation.
+    static func outwardTranslation(_ translation: Double, edge: WorkbenchSidebarEdge) -> Double {
+        edge == .leading ? translation : -translation
+    }
 }
 
 /// The gutter around the workbench deck card, and where the split handle
@@ -49,15 +58,25 @@ nonisolated enum WorkbenchSidebarResize {
 ///   padding make `RafuMetrics.deckGapCollapsedRail` (5; was 3 + 10 = 13),
 ///   so the padding is that gap less the strip, never below zero.
 nonisolated enum WorkbenchDeckLane {
+    /// `edge` is the side the rail is on. The collapsed-rail rule applies to
+    /// the deck's rail-side padding: leading on the leading edge, trailing on
+    /// the trailing edge. In Zen mode there is no rail, so callers pass
+    /// `isSidebarCollapsed: false` and get the plain insets.
     static func padding(
         isSidebarCollapsed: Bool,
         railDeckSideInset: CGFloat,
         insets: EdgeInsets = WorkbenchDeckLane.insets,
-        collapsedGap: CGFloat = RafuMetrics.deckGapCollapsedRail
+        collapsedGap: CGFloat = RafuMetrics.deckGapCollapsedRail,
+        edge: WorkbenchSidebarEdge = .leading
     ) -> EdgeInsets {
         var padding = insets
         if isSidebarCollapsed {
-            padding.leading = max(0, collapsedGap - railDeckSideInset)
+            let gap = max(0, collapsedGap - railDeckSideInset)
+            if edge == .leading {
+                padding.leading = gap
+            } else {
+                padding.trailing = gap
+            }
         }
         return padding
     }
@@ -87,18 +106,23 @@ nonisolated enum WorkbenchDeckLane {
     /// Collapsed: from the rail icons' trailing edge (the rail's empty
     /// deck-side strip) across the gap and into the card — never over an
     /// icon.
+    ///
+    /// On the trailing edge the numbers are the mirror image: `x` is measured
+    /// from the pane's leading edge toward the deck, which lies to the left.
     static func handleHitArea(
         isSidebarCollapsed: Bool,
         railDeckSideInset: CGFloat,
         insets: EdgeInsets = WorkbenchDeckLane.insets,
-        collapsedGap: CGFloat = RafuMetrics.deckGapCollapsedRail
+        collapsedGap: CGFloat = RafuMetrics.deckGapCollapsedRail,
+        edge: WorkbenchSidebarEdge = .leading
     ) -> HandleHitArea {
         let lane = padding(
             isSidebarCollapsed: isSidebarCollapsed, railDeckSideInset: railDeckSideInset,
-            insets: insets, collapsedGap: collapsedGap)
+            insets: insets, collapsedGap: collapsedGap, edge: edge)
         let strip = isSidebarCollapsed ? railDeckSideInset : 0
+        let railSideGap = edge == .leading ? lane.leading : lane.trailing
         return HandleHitArea(
-            x: -strip, width: strip + lane.leading + handleDeckOverlap)
+            x: -strip, width: strip + railSideGap + handleDeckOverlap)
     }
 }
 
@@ -113,6 +137,11 @@ nonisolated enum WorkbenchDeckLane {
 struct WorkbenchSplitHandle: View {
     @Bindable var session: WorkspaceSession
     @Environment(\.rafuTheme) private var theme
+
+    /// Which window edge holds the rail and sidebar. On the trailing edge the
+    /// handle sits on the sidebar's leading seam and a drag toward the
+    /// leading side widens the sidebar.
+    let edge: WorkbenchSidebarEdge
 
     @State private var isHovering = false
     @State private var isDragging = false
@@ -129,9 +158,12 @@ struct WorkbenchSplitHandle: View {
 
     /// Explicit init: the private state would otherwise make the synthesized
     /// memberwise init private.
-    init(session: WorkspaceSession, hitAreaWidth: CGFloat) {
+    init(
+        session: WorkspaceSession, hitAreaWidth: CGFloat, edge: WorkbenchSidebarEdge = .leading
+    ) {
         self.session = session
         self.hitAreaWidth = hitAreaWidth
+        self.edge = edge
     }
 
     var body: some View {
@@ -166,7 +198,7 @@ struct WorkbenchSplitHandle: View {
                 .frame(width: Self.grabBarSize.width, height: Self.grabBarSize.height)
                 // Centred on the visible gap, not on the part of the hit
                 // area that reaches into the card.
-                .offset(x: -WorkbenchDeckLane.handleDeckOverlap / 2)
+                .offset(x: edge.seamOffset(distance: -WorkbenchDeckLane.handleDeckOverlap / 2))
         } else {
             // Idle: nothing drawn. The deck card's own hairline is the one
             // line between the sidebar and the content; a second 1 pt seam
@@ -183,12 +215,14 @@ struct WorkbenchSplitHandle: View {
         DragGesture(minimumDistance: 1)
             .onChanged { value in
                 beginDraggingIfNeeded()
+                let outward = WorkbenchSidebarResize.outwardTranslation(
+                    value.translation.width, edge: edge)
                 if session.isSidebarCollapsed {
-                    reopenIfPastThreshold(translation: value.translation.width)
+                    reopenIfPastThreshold(translation: outward)
                     return
                 }
                 let base = dragStartWidth ?? session.sidebarWidth
-                session.sidebarWidth = WorkbenchSidebarResize.clamp(base + value.translation.width)
+                session.sidebarWidth = WorkbenchSidebarResize.clamp(base + outward)
             }
             .onEnded { value in
                 endDragging()
@@ -197,7 +231,10 @@ struct WorkbenchSplitHandle: View {
                     return
                 }
                 dragStartWidth = nil
-                let proposed = base + value.translation.width
+                let proposed =
+                    base
+                    + WorkbenchSidebarResize.outwardTranslation(
+                        value.translation.width, edge: edge)
                 // Collapse is decided only here, on release — a live
                 // collapse mid-drag would hide the handle the pointer is
                 // still tracking.

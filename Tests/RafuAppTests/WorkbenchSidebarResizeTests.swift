@@ -1,3 +1,4 @@
+import SwiftUI
 import Testing
 
 @testable import RafuApp
@@ -65,5 +66,56 @@ struct WorkbenchSidebarResizeTests {
     @Test("A drag inward while collapsed never reopens")
     func negativeTranslationNeverReopens() {
         #expect(!WorkbenchSidebarResize.shouldReopen(dragTranslation: -40))
+    }
+
+    @Test("On the trailing edge a drag toward the leading side widens the sidebar")
+    func trailingEdgeDragTowardLeadingWidens() {
+        // Pointer moves 40 pt left: the sidebar on the right grows by 40.
+        #expect(WorkbenchSidebarResize.outwardTranslation(-40, edge: .trailing) == 40)
+        #expect(WorkbenchSidebarResize.outwardTranslation(40, edge: .trailing) == -40)
+        // A leftward drag from a collapsed trailing sidebar reopens it.
+        #expect(
+            WorkbenchSidebarResize.shouldReopen(
+                dragTranslation: WorkbenchSidebarResize.outwardTranslation(-33, edge: .trailing)))
+        #expect(
+            !WorkbenchSidebarResize.shouldReopen(
+                dragTranslation: WorkbenchSidebarResize.outwardTranslation(33, edge: .trailing)))
+    }
+
+    @Test("The leading edge keeps its old sign")
+    func leadingEdgeBehaviourIsUnchanged() {
+        #expect(WorkbenchSidebarResize.outwardTranslation(40, edge: .leading) == 40)
+        #expect(WorkbenchSidebarResize.outwardTranslation(-40, edge: .leading) == -40)
+    }
+
+    @Test("The deck lane mirrors its collapsed-rail gap on the trailing edge")
+    func deckLaneMirrorsOnTheTrailingEdge() {
+        let insets = WorkbenchDeckLane.insets
+        let strip = WorkspaceActivityRail.deckSideInset
+        let gap: CGFloat = RafuMetrics.deckGapCollapsedRail - strip
+
+        let leading = WorkbenchDeckLane.padding(
+            isSidebarCollapsed: true, railDeckSideInset: strip, edge: .leading)
+        #expect(leading.leading == gap)
+        #expect(leading.trailing == insets.trailing)
+
+        let trailing = WorkbenchDeckLane.padding(
+            isSidebarCollapsed: true, railDeckSideInset: strip, edge: .trailing)
+        #expect(trailing.trailing == gap)
+        #expect(trailing.leading == insets.leading)
+
+        let open = WorkbenchDeckLane.padding(
+            isSidebarCollapsed: false, railDeckSideInset: strip, edge: .trailing)
+        #expect(open == insets)
+
+        // The hit area has the same size on both edges.
+        for collapsed in [false, true] {
+            #expect(
+                WorkbenchDeckLane.handleHitArea(
+                    isSidebarCollapsed: collapsed, railDeckSideInset: strip, edge: .leading)
+                    == WorkbenchDeckLane.handleHitArea(
+                        isSidebarCollapsed: collapsed, railDeckSideInset: strip,
+                        edge: .trailing))
+        }
     }
 }

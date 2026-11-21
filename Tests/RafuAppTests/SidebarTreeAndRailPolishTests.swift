@@ -187,7 +187,7 @@ struct SidebarTreeAndRailPolishTests {
         let railOnly = try Self.section(
             of: source, from: "struct WorkspaceActivityRail: View", to: "private func railButton")
         #expect(!railOnly.contains(".rafuFrameSurface("))
-        #expect(rail.contains(".frame(width: Self.width, alignment: .leading)"))
+        #expect(rail.contains(".frame(width: Self.width, alignment: edge.frameAlignment)"))
         // Clicks on the tile fall through to the rail's window-drag handle.
         let railBody = try Self.section(
             of: source, from: "struct WorkspaceActivityRail: View", to: "struct RafuRailAppTile")

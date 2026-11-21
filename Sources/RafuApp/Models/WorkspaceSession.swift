@@ -40,6 +40,26 @@ nonisolated enum WorkspaceNavigatorMode: String, CaseIterable, Codable, Sendable
         }
     }
 
+    /// The digit of this mode's ⌘-number shortcut, in rail order: Files is
+    /// ⌘1 and History is ⌘6. The View menu, the rail tooltips and the
+    /// hold-⌘ badges all read this one value.
+    var shortcutDigit: Character {
+        switch self {
+        case .files: "1"
+        case .search: "2"
+        case .sourceControl: "3"
+        case .terminals: "4"
+        case .ensemble: "5"
+        case .history: "6"
+        }
+    }
+
+    /// The full shortcut as shown to the user, for example "⌘1".
+    var shortcutLabel: String { "⌘\(shortcutDigit)" }
+
+    /// The VoiceOver hint for the rail button, for example "Command 1".
+    var shortcutHint: String { "Command \(shortcutDigit)" }
+
     /// Tolerant decode: a persisted raw value this build does not know (an
     /// older build reading a newer `RestorableWorkspace`, or a value for a
     /// removed mode such as the retired `runs` navigator) falls back to
@@ -507,8 +527,46 @@ final class WorkspaceSession {
     /// one explicit sidebar toggle lives in `WindowTitlebarRow`/⌘B
     /// (`toggleSidebar()`), per ADR 0002's "one system sidebar toggle".
     func showNavigator(_ mode: WorkspaceNavigatorMode) {
+        exitZenMode()
         navigatorMode = mode
         isSidebarCollapsed = false
+    }
+
+    /// True when `mode` can be shown now. Files needs no folder (it shows
+    /// "Open a folder to begin" itself); every other mode needs a workspace.
+    /// The rail buttons, the View menu and the ⌘-number keys all use this
+    /// one rule, so a key never does what its rail icon will not.
+    func isNavigatorModeAvailable(_ mode: WorkspaceNavigatorMode) -> Bool {
+        mode == .files || descriptor != nil
+    }
+
+    /// ⌘1 to ⌘6 (and their View menu items): switch to `mode` and never
+    /// toggle. A key that hid the sidebar when the mode was already shown
+    /// would make the same press do two different things.
+    func switchNavigator(to mode: WorkspaceNavigatorMode) {
+        guard isNavigatorModeAvailable(mode) else { return }
+        showNavigator(mode)
+    }
+
+    /// Zen mode hides the rail and the sidebar in this window only. It is
+    /// ephemeral: `RestorableWorkspace` encodes explicit fields and has none
+    /// for it, so a relaunch always starts with the rail and sidebar shown.
+    /// The title bar and the status bar stay.
+    var isZenMode = false
+
+    /// The Activity Rail is shown unless Zen mode hides it.
+    var showsNavigatorRail: Bool { !isZenMode }
+
+    /// The sidebar pane is shown unless Zen mode or the collapse bit hides it.
+    var showsSidebarPane: Bool { !isZenMode && !isSidebarCollapsed }
+
+    func toggleZenMode() {
+        isZenMode.toggle()
+    }
+
+    func exitZenMode() {
+        guard isZenMode else { return }
+        isZenMode = false
     }
 
     /// Activity Rail icon click. Clicking the already-selected mode's icon
@@ -516,7 +574,9 @@ final class WorkspaceSession {
     /// returns to the same section); clicking any other mode's icon selects
     /// it and expands the sidebar if it was collapsed.
     func selectNavigatorRailIcon(_ mode: WorkspaceNavigatorMode) {
-        if navigatorMode == mode {
+        if isZenMode {
+            showNavigator(mode)
+        } else if navigatorMode == mode {
             isSidebarCollapsed.toggle()
         } else {
             navigatorMode = mode
@@ -562,8 +622,15 @@ final class WorkspaceSession {
         didSet { persistWorkspaceState() }
     }
 
+    /// ⌘B and the title bar toggle. In Zen mode they leave Zen and show the
+    /// sidebar: a toggle that left the pane hidden would look broken.
     func toggleSidebar() {
-        isSidebarCollapsed.toggle()
+        if isZenMode {
+            exitZenMode()
+            isSidebarCollapsed = false
+        } else {
+            isSidebarCollapsed.toggle()
+        }
     }
 
     /// The sidebar pane's width while expanded, in points. Restored and
