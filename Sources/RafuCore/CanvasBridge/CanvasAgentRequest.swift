@@ -23,6 +23,34 @@ public nonisolated struct CanvasAgentRequest: Codable, Hashable, Sendable {
         case userInput
     }
 
+    /// One file the agent asks to change, with the whole change: the full new
+    /// content of a created or overwritten file, or the full diff (or the
+    /// removed and added lines) of an edit. The request keeps it only when it
+    /// fits the bounds exactly, so the row can show all of it.
+    public struct FileChange: Codable, Hashable, Sendable {
+        public enum Kind: String, Codable, Hashable, Sendable {
+            case create, overwrite, edit, delete, move
+        }
+
+        public let path: String
+        public let kind: Kind
+        /// The new content (`isDiff` false) or the diff (`isDiff` true).
+        public let body: String
+        public let isDiff: Bool
+        /// The new path of a move.
+        public let movePath: String?
+
+        public init(
+            path: String, kind: Kind, body: String, isDiff: Bool, movePath: String? = nil
+        ) {
+            self.path = path
+            self.kind = kind
+            self.body = body
+            self.isDiff = isDiff
+            self.movePath = movePath
+        }
+    }
+
     /// A button the user can choose. Derived from the kind; never sent.
     public struct Option: Hashable, Sendable {
         public let decision: CanvasAgentRequestDecision
@@ -119,6 +147,11 @@ public nonisolated struct CanvasAgentRequest: Codable, Hashable, Sendable {
         public static let commandBytes = 2 * 1_024
         public static let reasonBytes = 512
         public static let cwdBytes = 1_024
+        /// The most body text (new content or diff) of one file change.
+        public static let fileChangeBodyBytes = 4 * 1_024
+        /// The most file changes one request carries. More makes it terminal-only.
+        public static let fileChanges = 2
+        public static let filePathBytes = 480
         public static let questions = 4
         public static let choices = 6
         public static let identifierBytes = 128
@@ -148,12 +181,15 @@ public nonisolated struct CanvasAgentRequest: Codable, Hashable, Sendable {
     public let grantRoot: String?
     /// For a permissions request: one short line per requested grant.
     public let permissions: [String]
+    /// For a file change: the whole change of each file.
+    public let fileChanges: [FileChange]
     public let questions: [Question]
     /// Only the terminal can answer: the request did not fit the bounds
     /// exactly, the command text was changed by sanitizing or could hide text
     /// behind blank space, a question needs free text or a secret, or the
-    /// request is a file change (the row cannot show the change itself). The
-    /// row then offers only "Open terminal".
+    /// request is a file change that does not carry its whole change (no
+    /// change, too many files, a cut or changed path or body). The row then
+    /// offers only "Open terminal".
     public let terminalOnly: Bool
     /// The agent can grant "allow for this session". False for a Claude Code
     /// request answered through its hook, which has no such answer.
@@ -167,12 +203,35 @@ public nonisolated struct CanvasAgentRequest: Codable, Hashable, Sendable {
     public init(
         key: UUID = UUID(), kind: Kind, isHumanCheckpoint: Bool = false,
         command: String? = nil, cwd: String? = nil, reason: String? = nil,
-        grantRoot: String? = nil, permissions: [String] = [], questions: [Question] = [],
+        grantRoot: String? = nil, permissions: [String] = [], fileChanges: [FileChange] = [],
+        questions: [Question] = [],
         terminalOnly: Bool = false, offersSessionAllow: Bool = true, receivedAt: Date = Date()
     ) {
-        // A file change never shows the change itself, so what the row shows
-        // is not all that would happen: only the terminal can answer it.
-        var restricted = terminalOnly || kind == .fileChange
+        var restricted = terminalOnly
+        // A file change is answerable only when the row shows the whole
+        // change: what the user reads must be all that would happen.
+        var changes: [FileChange] = []
+        if kind == .fileChange {
+            if fileChanges.isEmpty || fileChanges.count > Limits.fileChanges { restricted = true }
+            for change in fileChanges.prefix(Limits.fileChanges) {
+                let path = Self.clean(
+                    change.path, limit: Limits.filePathBytes, keepsLineBreaks: false)
+                let moved = change.movePath.map {
+                    Self.clean($0, limit: Limits.filePathBytes, keepsLineBreaks: false)
+                }
+                let body = Self.clean(
+                    change.body, limit: Limits.fileChangeBodyBytes, keepsLineBreaks: true)
+                restricted =
+                    restricted || path.altered || path.text.isEmpty || body.altered
+                    || Self.hidesText(body.text) || moved?.altered == true
+                    || moved?.text.isEmpty == true
+                    || (change.isDiff && body.text.isEmpty && change.kind == .edit)
+                changes.append(
+                    FileChange(
+                        path: path.text, kind: change.kind, body: body.text,
+                        isDiff: change.isDiff, movePath: moved?.text))
+            }
+        }
         // Only a command request carries a command.
         let cleanCommand = (kind == .command ? command : nil).map {
             Self.clean($0, limit: Limits.commandBytes, keepsLineBreaks: true)
@@ -213,6 +272,7 @@ public nonisolated struct CanvasAgentRequest: Codable, Hashable, Sendable {
             ? grantRoot.map { Self.clean($0, limit: Limits.cwdBytes, keepsLineBreaks: false).text }
             : nil
         self.permissions = kind == .permissions ? lines : []
+        self.fileChanges = changes
         self.questions = kept
         self.terminalOnly = restricted
         self.offersSessionAllow = offersSessionAllow
@@ -240,8 +300,12 @@ public nonisolated struct CanvasAgentRequest: Codable, Hashable, Sendable {
                 Option(decision: .cancel, label: "Deny and stop"),
             ])
         case .fileChange:
-            // Always terminal-only; see `terminalOnly`.
-            return []
+            return withSessionOption([
+                Option(decision: .accept, label: "Allow"),
+                Option(decision: .acceptForSession, label: "Allow for this session"),
+                Option(decision: .decline, label: "Deny"),
+                Option(decision: .cancel, label: "Deny and stop"),
+            ])
         case .permissions:
             return [
                 Option(decision: .accept, label: "Allow for this turn"),
@@ -277,7 +341,7 @@ public nonisolated struct CanvasAgentRequest: Codable, Hashable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case key, kind, isHumanCheckpoint, command, cwd, reason, grantRoot, permissions
-        case questions, terminalOnly, offersSessionAllow, receivedAt
+        case fileChanges, questions, terminalOnly, offersSessionAllow, receivedAt
     }
 
     /// Decodes, then re-sanitizes. A value that the sanitizer would change is
@@ -293,6 +357,8 @@ public nonisolated struct CanvasAgentRequest: Codable, Hashable, Sendable {
             reason: container.decodeIfPresent(String.self, forKey: .reason),
             grantRoot: container.decodeIfPresent(String.self, forKey: .grantRoot),
             permissions: container.decode([String].self, forKey: .permissions),
+            // An older peer does not send it.
+            fileChanges: container.decodeIfPresent([FileChange].self, forKey: .fileChanges) ?? [],
             questions: container.decode([Question].self, forKey: .questions),
             terminalOnly: container.decode(Bool.self, forKey: .terminalOnly),
             // An older peer does not send it; the Codex answers all allow a session.
@@ -305,6 +371,7 @@ public nonisolated struct CanvasAgentRequest: Codable, Hashable, Sendable {
             key: decoded.key, kind: decoded.kind, isHumanCheckpoint: decoded.isHumanCheckpoint,
             command: decoded.command, cwd: decoded.cwd, reason: decoded.reason,
             grantRoot: decoded.grantRoot, permissions: decoded.permissions,
+            fileChanges: decoded.fileChanges,
             questions: decoded.questions, terminalOnly: decoded.terminalOnly,
             offersSessionAllow: decoded.offersSessionAllow, receivedAt: decoded.receivedAt)
         guard sanitized == decoded else {
@@ -319,7 +386,8 @@ public nonisolated struct CanvasAgentRequest: Codable, Hashable, Sendable {
     /// Stores decoded fields as they are, for the comparison in `init(from:)`.
     private init(
         key: UUID, kind: Kind, isHumanCheckpoint: Bool, command: String?, cwd: String?,
-        reason: String?, grantRoot: String?, permissions: [String], questions: [Question],
+        reason: String?, grantRoot: String?, permissions: [String], fileChanges: [FileChange],
+        questions: [Question],
         terminalOnly: Bool, offersSessionAllow: Bool, receivedAt: Date, unchecked: Void
     ) {
         self.key = key
@@ -330,6 +398,7 @@ public nonisolated struct CanvasAgentRequest: Codable, Hashable, Sendable {
         self.reason = reason
         self.grantRoot = grantRoot
         self.permissions = permissions
+        self.fileChanges = fileChanges
         self.questions = questions
         self.terminalOnly = terminalOnly
         self.offersSessionAllow = offersSessionAllow
@@ -480,8 +549,13 @@ extension CanvasAgentRequest {
 
     /// Builds a sanitized approval from a Codex app-server request, or nil
     /// when the method is not one Rafu can show. The caller checks the thread.
+    /// `fileChanges` are the changes the caller knows for a file-change
+    /// request: the request params carry no diff, so the caller passes the
+    /// patch it saw in an earlier notification. Without them the request is
+    /// terminal-only.
     public static func parse(
-        method: String, params: [String: Any], key: UUID = UUID(), receivedAt: Date = Date()
+        method: String, params: [String: Any], key: UUID = UUID(), receivedAt: Date = Date(),
+        fileChanges: [FileChange] = []
     ) -> CanvasAgentRequest? {
         switch method {
         case "item/commandExecution/requestApproval":
@@ -496,10 +570,14 @@ extension CanvasAgentRequest {
                 reason: params["reason"] as? String, terminalOnly: !knownKind || asksNetwork,
                 receivedAt: receivedAt)
         case "item/fileChange/requestApproval":
-            // The params carry no diff, so the row cannot show the change.
+            // The params carry no diff: the change comes from the patch
+            // notification the caller saw. No patch, no answer from the row.
+            // "Allow for this session" stays off: what a Codex session grant
+            // covers for files is not verified.
             return CanvasAgentRequest(
                 key: key, kind: .fileChange, reason: params["reason"] as? String,
-                grantRoot: params["grantRoot"] as? String, terminalOnly: true,
+                grantRoot: params["grantRoot"] as? String, fileChanges: fileChanges,
+                terminalOnly: fileChanges.isEmpty, offersSessionAllow: false,
                 receivedAt: receivedAt)
         case "item/permissions/requestApproval":
             let summary = permissionSummary(params["permissions"])
@@ -544,6 +622,52 @@ extension CanvasAgentRequest {
         default:
             return nil
         }
+    }
+
+    /// The changes of a Codex `item/fileChange/patchUpdated` notification
+    /// (`params.changes`), or nil when a change has a shape Rafu does not
+    /// know. At most `Limits.fileChanges + 1` changes are kept: one more than
+    /// a request holds, so a request with too many files stays terminal-only.
+    /// The bodies are the diffs as Codex sent them; the request sanitizes
+    /// them.
+    public static func fileChanges(fromPatchUpdated params: [String: Any]) -> [FileChange]? {
+        guard let raw = params["changes"] as? [Any] else { return nil }
+        var changes: [FileChange] = []
+        for item in raw.prefix(Limits.fileChanges + 1) {
+            guard let object = item as? [String: Any], let path = object["path"] as? String,
+                let diff = object["diff"] as? String
+            else { return nil }
+            let kind: FileChange.Kind
+            var movePath: String?
+            if let name = object["kind"] as? String {
+                switch name {
+                case "add": kind = .create
+                case "delete": kind = .delete
+                case "update": kind = .edit
+                default: return nil
+                }
+            } else if let object = object["kind"] as? [String: Any],
+                let name = object["type"] as? String
+            {
+                switch name {
+                case "add": kind = .create
+                case "delete": kind = .delete
+                case "update":
+                    if let target = object["move_path"] as? String, !target.isEmpty {
+                        kind = .move
+                        movePath = target
+                    } else {
+                        kind = .edit
+                    }
+                default: return nil
+                }
+            } else {
+                return nil
+            }
+            changes.append(
+                FileChange(path: path, kind: kind, body: diff, isDiff: true, movePath: movePath))
+        }
+        return changes
     }
 
     /// The JSON-RPC `result` object that answers this request with

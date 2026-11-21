@@ -83,7 +83,7 @@ struct CanvasAgentRequestTests {
         #expect(missing.terminalOnly)
     }
 
-    @Test("A file change keeps its grant root and needs the terminal")
+    @Test("A file change with no patch keeps its grant root and needs the terminal")
     func fileChange() throws {
         let request = try #require(
             CanvasAgentRequest.parse(
@@ -93,13 +93,176 @@ struct CanvasAgentRequestTests {
         #expect(request.grantRoot == "/repo/src")
         #expect(request.reason == "Edit two files")
         #expect(request.command == nil)
-        // The row cannot show the change, so it cannot answer it.
+        // The params carry no diff, so the row cannot show the change.
         #expect(request.terminalOnly)
         #expect(request.options.isEmpty)
         for decision in [CanvasAgentRequestDecision.accept, .acceptForSession, .decline, .cancel] {
             #expect(!request.permits(decision))
         }
         #expect(CanvasAgentRequest(kind: .fileChange, terminalOnly: false).terminalOnly)
+    }
+
+    // MARK: File changes
+
+    private static func change(
+        _ path: String = "/repo/a.swift", kind: CanvasAgentRequest.FileChange.Kind = .overwrite,
+        body: String = "let a = 1\n", isDiff: Bool = false
+    ) -> CanvasAgentRequest.FileChange {
+        .init(path: path, kind: kind, body: body, isDiff: isDiff)
+    }
+
+    @Test("A file change with its whole content is answerable")
+    func fileChangeWithFullContentIsAnswerable() {
+        let request = CanvasAgentRequest(
+            kind: .fileChange, fileChanges: [Self.change()], offersSessionAllow: false)
+        #expect(!request.terminalOnly)
+        #expect(request.fileChanges == [Self.change()])
+        #expect(
+            request.options.map(\.decision)
+                == [.accept, .decline, .cancel])
+        #expect(request.permits(.accept))
+        #expect(request.permits(.decline))
+        #expect(request.permits(.cancel))
+        #expect(request.result(for: .accept)?["decision"] as? String == "accept")
+    }
+
+    @Test("A file change with no changes stays terminal-only")
+    func fileChangeWithoutChangesStaysTerminalOnly() {
+        let request = CanvasAgentRequest(kind: .fileChange, fileChanges: [])
+        #expect(request.terminalOnly)
+        #expect(request.options.isEmpty)
+    }
+
+    @Test("A file change with a cut body or path stays terminal-only")
+    func fileChangeWithCutBodyStaysTerminalOnly() {
+        let longBody = String(
+            repeating: "a", count: CanvasAgentRequest.Limits.fileChangeBodyBytes + 1)
+        #expect(
+            CanvasAgentRequest(kind: .fileChange, fileChanges: [Self.change(body: longBody)])
+                .terminalOnly)
+        let longPath = "/" + String(repeating: "p", count: CanvasAgentRequest.Limits.filePathBytes)
+        #expect(
+            CanvasAgentRequest(kind: .fileChange, fileChanges: [Self.change(longPath)])
+                .terminalOnly)
+        // A body that sanitizing changes cannot be shown as it is.
+        #expect(
+            CanvasAgentRequest(
+                kind: .fileChange, fileChanges: [Self.change(body: "a\u{1B}b")]
+            ).terminalOnly)
+        // A body at the limit is kept whole.
+        let exact = String(repeating: "a", count: CanvasAgentRequest.Limits.fileChangeBodyBytes)
+        #expect(
+            !CanvasAgentRequest(kind: .fileChange, fileChanges: [Self.change(body: exact)])
+                .terminalOnly)
+    }
+
+    @Test("A file change body with blank space that hides its end stays terminal-only")
+    func fileChangeWithHiddenTailStaysTerminalOnly() {
+        for body in ["a\n\n\n\nb", "a" + String(repeating: " ", count: 65) + "b", "a\u{200B}b"] {
+            #expect(
+                CanvasAgentRequest(kind: .fileChange, fileChanges: [Self.change(body: body)])
+                    .terminalOnly)
+        }
+    }
+
+    @Test("A file change over the file limit stays terminal-only")
+    func fileChangeOverFileLimitStaysTerminalOnly() {
+        let two = [Self.change("/a"), Self.change("/b")]
+        #expect(!CanvasAgentRequest(kind: .fileChange, fileChanges: two).terminalOnly)
+        let three = two + [Self.change("/c")]
+        let request = CanvasAgentRequest(kind: .fileChange, fileChanges: three)
+        #expect(request.terminalOnly)
+        #expect(request.fileChanges.count == CanvasAgentRequest.Limits.fileChanges)
+    }
+
+    @Test("A file change survives a JSON round trip, even the largest")
+    func fileChangeRoundTripsThroughCodable() throws {
+        let move = CanvasAgentRequest.FileChange(
+            path: "/a", kind: .move, body: "@@ -1 +1 @@\n-a\n+b", isDiff: true, movePath: "/b")
+        let request = CanvasAgentRequest(
+            kind: .fileChange, fileChanges: [Self.change(), move], offersSessionAllow: false)
+        #expect(!request.terminalOnly)
+        #expect(try roundTrip(request) == request)
+        // Worst case for JSON: every character is escaped. The bridge frame
+        // is 64 KiB.
+        let quotes = String(repeating: "\"", count: CanvasAgentRequest.Limits.fileChangeBodyBytes)
+        let path = "/" + String(repeating: "\"", count: CanvasAgentRequest.Limits.filePathBytes - 1)
+        let largest = CanvasAgentRequest(
+            kind: .fileChange,
+            fileChanges: [Self.change(path, body: quotes), Self.change(path, body: quotes)])
+        #expect(!largest.terminalOnly)
+        let data = try JSONEncoder().encode(largest)
+        #expect(data.count < 32 * 1_024)
+        #expect(try JSONDecoder().decode(CanvasAgentRequest.self, from: data) == largest)
+    }
+
+    @Test("A decoded file change with an unclean body is rejected")
+    func decodedFileChangeWithUncleanBodyIsRejected() throws {
+        let request = CanvasAgentRequest(kind: .fileChange, fileChanges: [Self.change()])
+        let data = try JSONEncoder().encode(request)
+        var object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        func decodes(_ changes: [[String: Any]]) throws -> Bool {
+            object["fileChanges"] = changes
+            let data = try JSONSerialization.data(withJSONObject: object)
+            return (try? JSONDecoder().decode(CanvasAgentRequest.self, from: data)) != nil
+        }
+        func raw(_ body: String) -> [String: Any] {
+            ["path": "/a", "kind": "overwrite", "body": body, "isDiff": false]
+        }
+        #expect(try decodes([raw("ok")]))
+        #expect(try !decodes([raw("bad\u{1B}")]))
+        #expect(try !decodes([raw(String(repeating: "a", count: 5_000))]))
+        #expect(try !decodes([raw("a"), raw("b"), raw("c")]))
+        // A request with no change cannot arrive marked answerable.
+        #expect(try !decodes([]))
+        // An older peer sends no changes at all: it was terminal-only.
+        object["fileChanges"] = nil
+        object["terminalOnly"] = true
+        let old = try JSONSerialization.data(withJSONObject: object)
+        #expect(try JSONDecoder().decode(CanvasAgentRequest.self, from: old).terminalOnly)
+    }
+
+    @Test("A Claude file change has no session allow")
+    func claudeFileChangeHasNoSessionAllow() {
+        let request = CanvasAgentRequest(
+            kind: .fileChange, fileChanges: [Self.change()], offersSessionAllow: false)
+        #expect(!request.options.contains { $0.decision == .acceptForSession })
+        #expect(!request.permits(.acceptForSession))
+        // The default offers it; the Codex parse turns it off as well.
+        let codex = CanvasAgentRequest.parse(
+            method: fileChangeMethod, params: ["itemId": "i"], fileChanges: [Self.change()])
+        #expect(codex?.offersSessionAllow == false)
+        #expect(codex?.terminalOnly == false)
+    }
+
+    @Test("The patch notification maps add, delete, update and move")
+    func patchUpdatedMapping() throws {
+        let changes = try #require(
+            CanvasAgentRequest.fileChanges(fromPatchUpdated: [
+                "changes": [
+                    ["path": "/a", "diff": "x", "kind": ["type": "add"]],
+                    ["path": "/b", "diff": "y", "kind": ["type": "delete"]],
+                    [
+                        "path": "/c", "diff": "z",
+                        "kind": ["type": "update", "move_path": NSNull()],
+                    ],
+                ]
+            ]))
+        #expect(changes.map(\.kind) == [.create, .delete, .edit])
+        let moved = try #require(
+            CanvasAgentRequest.fileChanges(fromPatchUpdated: [
+                "changes": [
+                    ["path": "/a", "diff": "d", "kind": ["type": "update", "move_path": "/b"]]
+                ]
+            ]))
+        #expect(moved.first?.kind == .move)
+        #expect(moved.first?.movePath == "/b")
+        #expect(moved.first?.isDiff == true)
+        #expect(
+            CanvasAgentRequest.fileChanges(fromPatchUpdated: [
+                "changes": [["path": "/a", "diff": "d", "kind": ["type": "rename"]]]
+            ]) == nil)
+        #expect(CanvasAgentRequest.fileChanges(fromPatchUpdated: [:]) == nil)
     }
 
     @Test("A command approval with a network context needs the terminal")

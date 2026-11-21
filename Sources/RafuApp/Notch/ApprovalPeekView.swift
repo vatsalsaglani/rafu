@@ -320,19 +320,40 @@ private struct ApprovalPeekCardBody: View {
         case .answerInUpNext:
             if let question = request.questions.first { questionText(question, limit: 3) }
         case .answer, .sending:
-            if let command = request.command {
-                CompanionCommandBox(command: command)
-                    .accessibilityLabel("\(entry.cli.displayName) asks to run \(command)")
+            if let text = ApprovalPeekText.boxText(request) {
+                CompanionCommandBox(command: text)
+                    .accessibilityLabel(spokenBox)
             }
             CompanionRequestDetails(request: request)
-        case .review, .terminalOnly:
-            if let command = request.command {
-                CompanionCommandBox(command: command, lineLimit: 2)
+        case .needsExpand, .terminalOnly:
+            if let text = ApprovalPeekText.boxText(request) {
+                CompanionCommandBox(command: text, lineLimit: 2)
             }
             CompanionRequestDetails(request: request)
                 .lineLimit(1)
                 .truncationMode(.middle)
+        case .expanded:
+            if let text = ApprovalPeekText.boxText(request) {
+                // The whole request, selectable, in a box that scrolls. One
+                // VoiceOver element reads all of it.
+                ScrollView {
+                    CompanionCommandBox(command: text, selectable: true)
+                }
+                .frame(
+                    height: ApprovalPeekGeometry.expandedBoxHeight(
+                        lines: ApprovalPeekFit.wrappedLines(text),
+                        visibleFrame: controller.visibleFrame, reserved: 150)
+                )
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(spokenBox)
+            }
+            CompanionRequestDetails(request: request)
         }
+    }
+
+    /// What VoiceOver reads for the request box: all of it.
+    private var spokenBox: String {
+        ApprovalPeekText.spokenBox(agent: entry.cli.displayName, request: entry.request) ?? ""
     }
 
     private func questionText(_ question: CanvasAgentRequest.Question, limit: Int? = nil)
@@ -367,10 +388,13 @@ private struct ApprovalPeekCardBody: View {
             case .answer(let actions):
                 CompanionRequestActionRow(
                     actions: actions, choose: choose, menuItems: menuItems)
-            case .review(let actions):
+            case .needsExpand(let actions):
                 CompanionRequestActionRow(
-                    actions: actions, review: { controller.review(entry) }, choose: choose,
+                    actions: actions, showAll: { controller.expand(entry) }, choose: choose,
                     menuItems: menuItems)
+            case .expanded(let actions):
+                CompanionRequestActionRow(
+                    actions: actions, choose: choose, menuItems: menuItems)
             case .choices(let question):
                 HStack(spacing: RafuMetrics.space2) {
                     ForEach(question.choices.indices, id: \.self) { index in

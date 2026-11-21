@@ -52,22 +52,56 @@ struct ClaudePermissionAnswerBridgeTests {
         #expect(request.permits(.cancel))
     }
 
-    @Test("An Edit or Write request becomes a terminal-only file change with the path")
-    func fileChange() throws {
-        for tool in ["Edit", "Write", "MultiEdit"] {
-            let request = try #require(
-                ClaudePermissionAnswerBridge.request(
-                    for: try event(
-                        tool: tool,
-                        input: ["file_path": "/Users/me/repo/a.swift", "content": "body"])))
-            #expect(request.kind == .fileChange)
-            #expect(request.command == nil)
-            #expect(request.reason == "Change file: /Users/me/repo/a.swift")
-            // The row shows the path, not the change: only the terminal answers.
-            #expect(request.terminalOnly)
-            #expect(request.options.isEmpty)
-            #expect(!request.permits(.accept))
-        }
+    @Test("A file change request carries the content and is answerable")
+    func theFileChangeRequestCarriesTheContent() throws {
+        let write = try #require(
+            ClaudePermissionAnswerBridge.request(
+                for: try event(
+                    tool: "Write",
+                    input: ["file_path": "/Users/me/repo/a.swift", "content": "body"])))
+        #expect(write.kind == .fileChange)
+        #expect(write.command == nil)
+        #expect(write.reason == "Change file: /Users/me/repo/a.swift")
+        #expect(!write.terminalOnly)
+        #expect(write.fileChanges.first?.body == "body")
+        #expect(write.fileChanges.first?.kind == .overwrite)
+        #expect(
+            write.options.map(\.label) == ["Allow", "Deny", "Deny and stop"])
+        let edit = try #require(
+            ClaudePermissionAnswerBridge.request(
+                for: try event(
+                    tool: "Edit",
+                    input: ["file_path": "/r/a.swift", "old_string": "a", "new_string": "b"])))
+        #expect(!edit.terminalOnly)
+        #expect(edit.fileChanges.first?.body == "- a\n+ b")
+        // A tool input of a shape Rafu does not know stays in the terminal.
+        let odd = try #require(
+            ClaudePermissionAnswerBridge.request(
+                for: try event(tool: "Edit", input: ["file_path": "/r/a.swift"])))
+        #expect(odd.terminalOnly)
+        #expect(odd.options.isEmpty)
+        #expect(!odd.permits(.accept))
+    }
+
+    @Test("Accept on a file change maps to allow")
+    func acceptOnAFileChangeMapsToAllow() throws {
+        let hook = try event(tool: "Write", input: ["file_path": "/r/a", "content": "x"])
+        let request = try #require(ClaudePermissionAnswerBridge.request(for: hook))
+        #expect(request.permits(.accept))
+        #expect(
+            ClaudePermissionAnswerBridge.answer(for: .accept, eventID: hook.id)
+                == AgentPermissionAnswer(eventID: hook.id, verdict: .allow))
+        #expect(!request.permits(.acceptForSession))
+    }
+
+    @Test("Cancel on a file change maps to deny and stop")
+    func cancelMapsToDenyAndStop() throws {
+        let hook = try event(tool: "Write", input: ["file_path": "/r/a", "content": "x"])
+        let request = try #require(ClaudePermissionAnswerBridge.request(for: hook))
+        #expect(request.permits(.cancel))
+        #expect(
+            ClaudePermissionAnswerBridge.answer(for: .cancel, eventID: hook.id)
+                == AgentPermissionAnswer(eventID: hook.id, verdict: .deny, interrupt: true))
     }
 
     @Test("A command or path that was cut or changed needs the terminal")

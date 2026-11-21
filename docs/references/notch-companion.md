@@ -559,15 +559,35 @@ Code: `ApprovalPeekModels.swift` (pure), `ApprovalPeekController.swift`,
   applies the result after it, so a write cannot re-trigger the tracking.
   Defaults that are not observed (the companion switch) are re-read on each
   `activateIfEnabled()`.
-- **Fit rule.** `ApprovalPeekFit`: ASCII counts 1 column, a tab 8, any other
-  scalar 2; 44 columns per line. A command fits in 4 wrapped lines, a folder
-  in 88 columns, permission lines in 4 wrapped lines total. A request that
-  does not fit, or whose measured card is taller than 260 pt, is a Review card:
-  the command is cut to 2 lines, "Review" replaces Allow (it opens Up next, or
-  the terminal when no surface shows Up next), and the menu has no accept
-  answer. Only a Review card cuts text. One question with 4 or fewer choices,
-  at most 44 label columns and at most 120 characters of text shows choice
-  buttons; any other question shows "Answer in Up next".
+- **Fit rule (changed 2026-11-21).** `ApprovalPeekFit`: ASCII counts 1
+  column, a tab 8, any other scalar 2; 44 columns per line. A command fits in
+  10 wrapped lines (`maxCommandLines`), the text of a file change (one header
+  line with the action and the path, then the content or diff;
+  `ApprovalPeekText.fileChangeText`) in 10 wrapped lines (`maxBodyLines`), a
+  folder in 88 columns, permission lines in 4 wrapped lines total. The measured
+  card may be at most `ApprovalPeekGeometry.maxCardHeight(visibleFrame:)` =
+  `max(260, min(420, 0.45 * visible height))`; 260 is
+  `defaultMaxCardHeight` (used before the screen is known). One question with
+  4 or fewer choices, at most 44 label columns and at most 120 characters of
+  text shows choice buttons; any other question shows "Answer in Up next".
+- **Three card sizes (2026-11-21, replaces Review).**
+  `ApprovalPeekContent.resolve(request:decision:oversize:isExpanded:)` gives
+  `.answer` when the request fits (the whole text, Allow, Deny, the menu),
+  `.needsExpand` when it does not and the person has not expanded it (the text
+  cut to 2 lines, "Show all" instead of Allow, a menu with no accept answer),
+  and `.expanded` after the click (the whole text in a selectable
+  `ScrollView`, at most `expandedBodyHeight` = 220 pt, with Allow active; the
+  button row stays outside the scroll area). Only `.needsExpand` and the
+  measured-oversize rule cut text.
+- **Expand state machine.** `ApprovalPeekController.expandedKeys` holds the
+  requests the person expanded. `expand(_:)` ignores a click during the 0.5 s
+  click guard and inserts the key. A key leaves the set where `oversizeKeys`
+  clears (the request is no longer pending), so a new card always starts
+  collapsed, and nothing but a click expands. `cardHeightChanged` never marks
+  an expanded card oversize. `review(_:)` stays for "Answer in Up next" only.
+- **Swipe rule.** Right swipe (`allowsSwipeRight`) is on for `.answer` and
+  `.expanded` only. Left swipe (Deny) is on wherever Deny exists
+  (`.answer`, `.needsExpand`, `.expanded`).
 - **Safety.** Every answer (button, choice, swipe) goes through
   `ApprovalPeekController.answer`, which returns at once during the 0.5 s
   `ApprovalClickGuard` quiet interval after the shown card changed, then calls
@@ -581,7 +601,7 @@ Code: `ApprovalPeekModels.swift` (pure), `ApprovalPeekController.swift`,
   horizontal is ignored, the label ("Allow" or "Deny", with a symbol) shows
   from 24 pt and is bold at 120 pt, the tilt is `x / 15` clamped to 8 degrees,
   the green or red tint grows to 0.35. Only the distance at release decides
-  (120 pt); velocity and the predicted end are not used. A Review card
+  (120 pt); velocity and the predicted end are not used. A "Show all" card
   rubber-bands to the right (at most 24 pt, no label). Terminal-only, choice
   and "Answer in Up next" cards do not swipe. On a commit the card flies
   ±440 pt in 0.22 s and the next card shows; under Reduce Motion it does not
@@ -599,9 +619,13 @@ Code: `ApprovalPeekModels.swift` (pure), `ApprovalPeekController.swift`,
 - **VoiceOver.** A new card that the person did not select posts
   `NSAccessibility` `.announcementRequested` (high priority):
   "Codex needs approval: npm test", "... needs approval: Grant permissions",
-  "... needs approval: Apply file changes. Open the terminal to answer.",
+  "... needs approval: Apply file changes to <path>" (a terminal-only file
+  change says "Apply file changes. Open the terminal to answer."),
   "... asks: <question>". The back cards are hidden from VoiceOver. Every
-  swipe answer also has a button.
+  swipe answer also has a button. The request box reads as one element with the
+  whole text: a command "<agent> asks to run <command>", a file change
+  "<agent> asks to write <path>. New content: <body>" or "<agent> asks to change
+  <path>. Diff: <body>". "Show all" is labelled "Show the whole request".
 
 ## Why it matters
 

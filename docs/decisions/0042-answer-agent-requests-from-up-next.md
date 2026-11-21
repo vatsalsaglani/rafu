@@ -84,7 +84,9 @@ dialog must stay usable, and an answer must never be typed into a terminal as ke
    questions use a different hook" in
    [`claude-permission-request-hook.md`](../references/claude-permission-request-hook.md).
 
-10. **File changes are terminal-only (coordinator decision after the review).** A Codex `fileChange` approval and a
+10. **File changes are terminal-only (coordinator decision after the review).** *Superseded on 2026-11-21 by the
+    amendment "File changes and long commands answer in the peek" below: a file change is answerable when the row
+    shows the whole change.* The original text follows. A Codex `fileChange` approval and a
     Claude Code Edit, MultiEdit or Write request show the title ("Apply file changes"), the path or reason, the
     write root when Codex sends one, and "Open terminal". The row offers no Apply or Deny. Reason: the row cannot show
     the change itself (Codex sends no diff with the request; Rafu reads only the Claude `file_path`), so "what the
@@ -132,7 +134,7 @@ coordinator's brief named the first three, and their reasons are listed as far a
   row then has no effect. Details: [`claude-permission-request-hook.md`](../references/claude-permission-request-hook.md),
   observation 10.
 - Claude answer files older than 10 minutes are removed. The spool file limit rose from 8 KiB to 16 KiB so the
-  largest summary fits.
+  largest summary fits (and to 64 KiB on 2026-11-21, see the last amendment).
 - The release app and Rafu Lightning never share an answer channel (the answers folder is a sibling of the spool).
 - The Claude install step was verified with unit tests only. No live probe of the full app path exists yet.
 - Codex permission replies with scope `session` were not run live. They follow the same schema. File changes are no
@@ -178,6 +180,47 @@ under an active Allow with a "Show all" control (rejected by decision 1).
 
 Still not checked in the GUI: the anchors on each surface, keyboard and VoiceOver use of the card, the menu in a
 non-key panel, and the two-finger swipe direction on a real trackpad.
+
+## Amendment: file changes and long commands answer in the peek (2026-11-21)
+
+On the user's direction. Two live cases showed the limits. A Claude "Create file" request showed only "Open
+terminal" ("can't this be coming in the peek? The options!"). A command of about 190 characters showed Deny and
+Review ("Again review not approve"). The rule stays: never allow what the person cannot see in full.
+
+1. **Decision 10 is superseded.** A file change is answerable when the request carries the whole change and every
+   part of it fits the bounds exactly. The sources:
+   - Claude Code: `tool_input` of Write (`file_path`, `content`), Edit (`file_path`, `old_string`, `new_string`,
+     `replace_all`, or an `edits` array) and MultiEdit (`file_path`, `edits`). An edit shows as `- ` lines (removed)
+     and `+ ` lines (added).
+   - Codex: the `item/fileChange/requestApproval` params carry no diff (only item, thread and turn ids, `reason`
+     and `grantRoot`). The diff arrives earlier in the notification `item/fileChange/patchUpdated` for the same
+     `itemId`. The proxy keeps the newest patch of at most 8 items per connection, clears them when the turn ends
+     or the connection retires, and never logs them. A request with no patch stays terminal-only.
+   - A file change is terminal-only when there is no change, more than 2 files, a path over 480 bytes, a body over
+     4 KiB, text that sanitizing changed, blank space that could hide the end (decision 5), or a tool input of a
+     shape Rafu does not know.
+   - Options: Allow, Deny, Deny and stop. "Allow for this session" stays off for both agents. Claude has no such
+     answer here. Codex's session grant for files is not verified live, and `grantRoot` is not stable.
+2. **The fit rule (peek amendment, rule 2) changes.** The peek shows Allow when the command, or the file change
+   text (one line that names the action and the path, then the content or diff), fits 10 wrapped lines of 44
+   columns, and the measured card is at most 45% of the visible screen height (between 260 and 420 pt).
+3. **In-peek expand replaces Review.** A request that does not fit shows its text cut to 2 lines and a "Show all"
+   button. There is no Allow and no right swipe on this card. Deny and a left swipe still work. A click on "Show
+   all" (guarded by the 0.5 s click guard) shows the whole request in a selectable box that scrolls (at most
+   220 pt tall), with Allow and the right swipe active. A new card always starts collapsed. Only a click expands;
+   nothing expands by itself. VoiceOver reads the whole box as one element, with the path and "New content" or
+   "Diff".
+4. **The spool file limit rose from 16 KiB to 64 KiB** (the summary of a file change holds up to 4 KiB of body).
+
+Alternatives considered: Claude's "accept edits for this session" through `updatedPermissions` with
+`{type: "setMode", mode: "acceptEdits", destination: "session"}` (not built: not verified live, and the person
+should see each change); a Review button that opens Up next (rejected: the user asked for the answer in the peek);
+a larger fixed card (rejected: small screens).
+
+Revisit trigger: the Codex `patchUpdated` notification and the Claude `tool_input` key names are now load-bearing.
+A Codex or Claude Code release that renames them, sends the patch after the request, or splits one change over
+several notifications makes the file-change rows terminal-only again (the safe result) until Rafu reads the new
+shape.
 
 ## GUI checks pending
 

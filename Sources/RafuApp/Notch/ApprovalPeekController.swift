@@ -65,8 +65,12 @@ final class ApprovalPeekController: NSObject {
     /// The message of an answer that did not go through.
     private(set) var feedback: String?
     /// Requests whose measured card was taller than the limit: they show as
-    /// Review cards.
+    /// "Show all" cards.
     private(set) var oversizeKeys: Set<UUID> = []
+    /// Requests the person expanded with "Show all". Only a click adds a
+    /// key, so a card always starts collapsed and Allow stays off until the
+    /// person has asked to see the whole request.
+    private(set) var expandedKeys: Set<UUID> = []
     private(set) var theme = RafuThemeCatalog.indigo
     /// The panel is on screen.
     private(set) var isShowing = false
@@ -162,6 +166,7 @@ final class ApprovalPeekController: NSObject {
         deck.update(inputs.entries, chosenKeys: inputs.chosenKeys)
         let pending = Set(inputs.entries.map(\.key))
         if !oversizeKeys.isSubset(of: pending) { oversizeKeys.formIntersection(pending) }
+        if !expandedKeys.isSubset(of: pending) { expandedKeys.formIntersection(pending) }
         sync()
     }
 
@@ -192,11 +197,24 @@ final class ApprovalPeekController: NSObject {
             request: entry.request,
             decision: AgentRequestStore.shared.decision(
                 for: entry.controllerID, key: entry.key),
-            oversize: oversizeKeys.contains(entry.key))
+            oversize: oversizeKeys.contains(entry.key),
+            isExpanded: expandedKeys.contains(entry.key))
     }
 
-    /// A surface can show Up next ("Show in Up next" and "Review").
+    /// A surface can show Up next ("Show in Up next" and "Answer in Up next").
     var canRevealUpNext: Bool { model?.canRevealUpNext ?? false }
+
+    /// The visible frame of the screen the card hangs on, for height limits.
+    var visibleFrame: CGRect? { anchor()?.visibleFrame }
+
+    /// "Show all": the card shows the whole request in a scrollable box, and
+    /// Allow becomes active. Ignored during the click guard's quiet interval
+    /// after the shown card changed, like every other click of the card.
+    func expand(_ entry: ApprovalPeekEntry) {
+        guard clickGuard.allowsClick, !expandedKeys.contains(entry.key) else { return }
+        expandedKeys.insert(entry.key)
+        sync()
+    }
 
     // MARK: - Answers
 
@@ -280,8 +298,8 @@ final class ApprovalPeekController: NSObject {
         model?.revealUpNext()
     }
 
-    /// "Review": the full request in Up next, or the terminal when no
-    /// surface shows Up next.
+    /// "Answer in Up next": the full row, or the terminal when no surface
+    /// shows Up next.
     func review(_ entry: ApprovalPeekEntry) {
         if canRevealUpNext {
             showInUpNext()
@@ -290,12 +308,16 @@ final class ApprovalPeekController: NSObject {
         }
     }
 
-    /// The top card's measured height. A card taller than the limit becomes
-    /// a Review card, so the layout never has to cut a command while Allow
-    /// is active.
+    /// The top card's measured height. A collapsed card taller than the
+    /// limit needs "Show all", so the layout never has to cut a command while
+    /// Allow is active. An expanded card is not marked: its box scrolls, and
+    /// its own height is clamped to the screen.
     func cardHeightChanged(_ height: CGFloat, for key: UUID) {
         guard height > 0, key == deck.shown?.key else { return }
-        if height > ApprovalPeekGeometry.maxCardHeight, !oversizeKeys.contains(key) {
+        let limit =
+            visibleFrame.map { ApprovalPeekGeometry.maxCardHeight(visibleFrame: $0) }
+            ?? ApprovalPeekGeometry.defaultMaxCardHeight
+        if !expandedKeys.contains(key), !oversizeKeys.contains(key), height > limit {
             oversizeKeys.insert(key)
             return
         }
@@ -383,12 +405,17 @@ final class ApprovalPeekController: NSObject {
         var answered = false
         switch outcome {
         case .allow:
-            if case .answer(let actions) = content, let primary = actions.primary {
-                answered = answer(primary.decision, for: entry, startOffset: offset)
+            // Only a card that shows the whole request can be allowed.
+            switch content {
+            case .answer(let actions), .expanded(let actions):
+                if let primary = actions.primary {
+                    answered = answer(primary.decision, for: entry, startOffset: offset)
+                }
+            default: break
             }
         case .deny:
             switch content {
-            case .answer(let actions), .review(let actions):
+            case .answer(let actions), .needsExpand(let actions), .expanded(let actions):
                 if let deny = actions.deny {
                     answered = answer(deny.decision, for: entry, startOffset: offset)
                 }

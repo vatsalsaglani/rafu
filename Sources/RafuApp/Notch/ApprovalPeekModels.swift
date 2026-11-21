@@ -117,13 +117,19 @@ nonisolated struct ApprovalPeekDeck: Equatable, Sendable {
 }
 
 /// Estimates whether a request fits the compact card. The estimate decides
-/// only whether the card is compact: the card never cuts the command while
-/// Allow is active (`ApprovalPeekContent.answer`), and the controller also
-/// checks the measured height (`ApprovalPeekGeometry.maxCardHeight`).
+/// only whether the card is compact: the card never cuts the command or the
+/// file change while Allow is active (`ApprovalPeekContent.answer`), and the
+/// controller also checks the measured height
+/// (`ApprovalPeekGeometry.maxCardHeight(visibleFrame:)`).
 nonisolated enum ApprovalPeekFit {
     /// Columns in one line of the command box (11 pt monospaced, 360 pt card).
     static let lineColumns = 44
-    static let maxCommandLines = 4
+    /// The longest command, in wrapped lines, that Allow stays active for
+    /// with no expand.
+    static let maxCommandLines = 10
+    /// The same bound for the text of a file change (its header line and its
+    /// content or diff).
+    static let maxBodyLines = 10
     static let maxFolderColumns = 88
     static let maxPermissionLines = 4
 
@@ -166,6 +172,10 @@ nonisolated enum ApprovalPeekFit {
         wrappedLines(command) <= maxCommandLines
     }
 
+    static func fileChangeFits(_ text: String) -> Bool {
+        wrappedLines(text) <= maxBodyLines
+    }
+
     static func folderFits(_ folder: String) -> Bool {
         columns(folder) <= maxFolderColumns
     }
@@ -177,6 +187,9 @@ nonisolated enum ApprovalPeekFit {
     /// Every part the request has fits the compact card.
     static func fits(_ request: CanvasAgentRequest) -> Bool {
         if let command = request.command, !commandFits(command) { return false }
+        if let text = ApprovalPeekText.fileChangeText(request), !fileChangeFits(text) {
+            return false
+        }
         if let cwd = request.cwd, !folderFits(cwd) { return false }
         if !request.permissions.isEmpty, !permissionsFit(request.permissions) { return false }
         return true
@@ -189,9 +202,13 @@ nonisolated enum ApprovalPeekContent: Equatable, Sendable {
     case terminalOnly
     /// The full command, Allow, Deny, and the menu.
     case answer(CompanionRequestActions)
-    /// The request does not fit: the command is cut to 2 lines, "Review"
-    /// replaces Allow, and the actions have no accept option.
-    case review(CompanionRequestActions)
+    /// The request does not fit: its text is cut to 2 lines, "Show all"
+    /// replaces Allow, and the actions have no accept option. Nothing can be
+    /// allowed until the person expands the card.
+    case needsExpand(CompanionRequestActions)
+    /// The whole request in a scrollable, selectable box, with Allow active.
+    /// Only a person's click on "Show all" gets here.
+    case expanded(CompanionRequestActions)
     /// One short question: one button for each choice.
     case choices(CanvasAgentRequest.Question)
     /// Any other question: answered from the full Up next row.
@@ -207,7 +224,8 @@ nonisolated enum ApprovalPeekContent: Equatable, Sendable {
     static let maxQuestionCharacters = 120
 
     static func resolve(
-        request: CanvasAgentRequest, decision: CanvasAgentRequestDecision?, oversize: Bool
+        request: CanvasAgentRequest, decision: CanvasAgentRequestDecision?, oversize: Bool,
+        isExpanded: Bool = false
     ) -> ApprovalPeekContent {
         if request.terminalOnly { return .terminalOnly }
         if decision != nil { return .sending }
@@ -224,21 +242,25 @@ nonisolated enum ApprovalPeekContent: Equatable, Sendable {
         let actions = CompanionRequestActions(request: request)
         guard actions.primary != nil || actions.deny != nil else { return .terminalOnly }
         if oversize || !ApprovalPeekFit.fits(request) {
-            return .review(actions.withoutAccept)
+            return isExpanded ? .expanded(actions) : .needsExpand(actions.withoutAccept)
         }
         return .answer(actions)
     }
 
-    /// A drag or two-finger swipe to the right sends the primary answer.
+    /// A drag or two-finger swipe to the right sends the primary answer. Not
+    /// before the card shows the whole request.
     var allowsSwipeRight: Bool {
-        if case .answer(let actions) = self { return actions.primary != nil }
-        return false
+        switch self {
+        case .answer(let actions), .expanded(let actions): actions.primary != nil
+        default: false
+        }
     }
 
     /// A drag or two-finger swipe to the left denies.
     var allowsSwipeLeft: Bool {
         switch self {
-        case .answer(let actions), .review(let actions): actions.deny != nil
+        case .answer(let actions), .needsExpand(let actions), .expanded(let actions):
+            actions.deny != nil
         default: false
         }
     }
@@ -320,8 +342,35 @@ nonisolated enum ApprovalPeekGeometry {
     static let bottomGutter: CGFloat = 16
     /// Each blank card behind the top card is this much lower.
     static let stackStep: CGFloat = 6
-    /// A measured top card taller than this becomes a Review card.
-    static let maxCardHeight: CGFloat = 260
+    /// The card height limit before the screen is known, and the least limit
+    /// on any screen.
+    static let defaultMaxCardHeight: CGFloat = 260
+    /// The most height the card limit reaches on a tall screen.
+    static let tallestMaxCardHeight: CGFloat = 420
+    /// The height of the scrollable box that shows a whole request.
+    static let expandedBodyHeight: CGFloat = 220
+    /// The height of one line of the 11 pt monospaced request box.
+    static let bodyLineHeight: CGFloat = 14
+
+    /// A measured top card taller than this needs "Show all": 45% of the
+    /// visible screen height, between 260 and 420 pt.
+    static func maxCardHeight(visibleFrame: CGRect) -> CGFloat {
+        max(defaultMaxCardHeight, min(tallestMaxCardHeight, visibleFrame.height * 0.45))
+    }
+
+    /// The height of the expanded request box: the text's own height, at
+    /// most `expandedBodyHeight`, and never more than the screen leaves room
+    /// for (`visibleFrame` less `reserved`, the rest of the card).
+    static func expandedBoxHeight(
+        lines: Int, visibleFrame: CGRect? = nil, reserved: CGFloat = 0
+    ) -> CGFloat {
+        let wanted = CGFloat(lines) * bodyLineHeight + 12
+        var limit = expandedBodyHeight
+        if let visibleFrame {
+            limit = min(limit, visibleFrame.height - 2 * screenInset - reserved)
+        }
+        return max(60, min(wanted, limit))
+    }
 
     /// The card (with its stack) hangs `anchorGap` below `anchor`, centred
     /// on it, and stays `screenInset` inside `visibleFrame` at the sides.
@@ -374,7 +423,12 @@ nonisolated enum ApprovalPeekText {
             let text = request.questions.first?.text ?? ""
             return text.isEmpty ? "\(agent) asks: Answer questions" : "\(agent) asks: \(text)"
         case .fileChange:
-            return "\(agent) needs approval: Apply file changes. Open the terminal to answer."
+            guard !request.terminalOnly, let first = request.fileChanges.first else {
+                return "\(agent) needs approval: Apply file changes. Open the terminal to answer."
+            }
+            let more = request.fileChanges.count - 1
+            let target = more > 0 ? "\(first.path) and \(more) more" : first.path
+            return "\(agent) needs approval: Apply file changes to \(target)"
         case .permissions:
             return "\(agent) needs approval: Grant permissions"
         case .command:
@@ -383,5 +437,49 @@ nonisolated enum ApprovalPeekText {
             }
             return "\(agent) needs approval: \(command)"
         }
+    }
+
+    // MARK: Request text
+
+    /// The text of the box that shows a file change whole: for each file one
+    /// line that names the action and the path, then its content or diff.
+    /// Nil for a request with no file change.
+    static func fileChangeText(_ request: CanvasAgentRequest) -> String? {
+        guard request.kind == .fileChange, !request.fileChanges.isEmpty else { return nil }
+        return request.fileChanges.map { change in
+            let header: String
+            switch change.kind {
+            case .create: header = "Create \(change.path)"
+            case .overwrite: header = "Write \(change.path)"
+            case .edit: header = "Edit \(change.path)"
+            case .delete: header = "Delete \(change.path)"
+            case .move: header = "Move \(change.path) to \(change.movePath ?? "")"
+            }
+            return change.body.isEmpty ? header : header + "\n" + change.body
+        }.joined(separator: "\n\n")
+    }
+
+    /// The command or the file change text: what the box shows whole.
+    static func boxText(_ request: CanvasAgentRequest) -> String? {
+        request.command ?? fileChangeText(request)
+    }
+
+    /// What VoiceOver reads for the box: all of it, with the path and the
+    /// kind of body ("New content" or "Diff").
+    static func spokenBox(agent: String, request: CanvasAgentRequest) -> String? {
+        if let command = request.command { return "\(agent) asks to run \(command)" }
+        guard request.kind == .fileChange, !request.fileChanges.isEmpty else { return nil }
+        return request.fileChanges.map { change in
+            let lead: String
+            switch change.kind {
+            case .create, .overwrite: lead = "\(agent) asks to write \(change.path)."
+            case .edit: lead = "\(agent) asks to change \(change.path)."
+            case .delete: lead = "\(agent) asks to delete \(change.path)."
+            case .move:
+                lead = "\(agent) asks to move \(change.path) to \(change.movePath ?? "")."
+            }
+            guard !change.body.isEmpty else { return lead }
+            return lead + (change.isDiff ? " Diff: " : " New content: ") + change.body
+        }.joined(separator: " ")
     }
 }

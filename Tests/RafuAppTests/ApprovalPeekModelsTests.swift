@@ -137,12 +137,12 @@ func approvalPeekFitColumns() {
     #expect(ApprovalPeekFit.wrappedLines("a\r\nb") == 2)
 }
 
-@Test("ApprovalPeekFit: a 4-line command fits and a 5-line command does not")
+@Test("ApprovalPeekFit: a 10-line command fits and an 11-line command does not")
 func approvalPeekFitCommandLines() {
-    #expect(ApprovalPeekFit.commandFits("a\nb\nc\nd"))
-    #expect(!ApprovalPeekFit.commandFits("a\nb\nc\nd\ne"))
-    #expect(ApprovalPeekFit.commandFits(String(repeating: "a", count: 44 * 4)))
-    #expect(!ApprovalPeekFit.commandFits(String(repeating: "a", count: 44 * 4 + 1)))
+    #expect(ApprovalPeekFit.commandFits("a\nb\nc\nd\ne\nf\ng\nh\ni\nj"))
+    #expect(!ApprovalPeekFit.commandFits("a\nb\nc\nd\ne\nf\ng\nh\ni\nj\nk"))
+    #expect(ApprovalPeekFit.commandFits(String(repeating: "a", count: 44 * 10)))
+    #expect(!ApprovalPeekFit.commandFits(String(repeating: "a", count: 44 * 10 + 1)))
 }
 
 @Test("ApprovalPeekFit: the folder limit is 88 columns; permission lines total 4")
@@ -181,26 +181,163 @@ func approvalPeekContentTerminalOnly() {
     #expect(!content.allowsSwipeRight && !content.allowsSwipeLeft)
 }
 
-@Test("ApprovalPeekContent: a long command or an oversize card gives Review, with no accept")
-func approvalPeekContentReview() {
-    let long = CanvasAgentRequest(
-        kind: .command, command: (1...6).map { "echo \($0)" }.joined(separator: "\n"))
+private func lines(_ count: Int) -> String {
+    (1...count).map { "echo \($0)" }.joined(separator: "\n")
+}
+
+@Test("ApprovalPeekContent: a command of ten lines fits, with Allow active")
+func aCommandOfTenLinesFits() {
+    let request = CanvasAgentRequest(kind: .command, command: lines(10))
+    #expect(ApprovalPeekFit.fits(request))
+    guard
+        case .answer(let actions) = ApprovalPeekContent.resolve(
+            request: request, decision: nil, oversize: false)
+    else {
+        Issue.record("Expected an answer card")
+        return
+    }
+    #expect(actions.primary?.decision == .accept)
+    // A command of about 190 characters wraps to 5 lines and fits.
+    let chained = CanvasAgentRequest(
+        kind: .command, command: String(repeating: "cat a && ", count: 20) + "echo done")
+    #expect(ApprovalPeekFit.fits(chained))
+}
+
+@Test("ApprovalPeekContent: a command of eleven lines needs Show all, with no accept")
+func aCommandOfElevenLinesNeedsExpand() {
+    let long = CanvasAgentRequest(kind: .command, command: lines(11))
     for (request, oversize) in [
         (long, false), (CanvasAgentRequest(kind: .command, command: "ls"), true),
     ] {
         let content = ApprovalPeekContent.resolve(
             request: request, decision: nil, oversize: oversize)
-        guard case .review(let actions) = content else {
-            Issue.record("Expected a review card")
+        guard case .needsExpand(let actions) = content else {
+            Issue.record("Expected a Show all card")
             continue
         }
         #expect(actions.primary == nil)
         #expect(actions.deny?.decision == .decline)
         #expect(!actions.overflow.contains { $0.decision == .acceptForSession })
         #expect(actions.overflow.map(\.decision) == [.cancel])
-        #expect(!content.allowsSwipeRight)
-        #expect(content.allowsSwipeLeft)
     }
+}
+
+@Test("ApprovalPeekContent: the expanded card offers Allow")
+func theExpandedCardOffersAllow() {
+    let long = CanvasAgentRequest(kind: .command, command: lines(11))
+    guard
+        case .expanded(let actions) = ApprovalPeekContent.resolve(
+            request: long, decision: nil, oversize: false, isExpanded: true)
+    else {
+        Issue.record("Expected an expanded card")
+        return
+    }
+    #expect(actions.primary?.decision == .accept)
+    #expect(actions.deny?.decision == .decline)
+    // A request that fits is never changed by the expand flag.
+    let short = CanvasAgentRequest(kind: .command, command: "ls")
+    guard
+        case .answer = ApprovalPeekContent.resolve(
+            request: short, decision: nil, oversize: false, isExpanded: true)
+    else {
+        Issue.record("Expected an answer card")
+        return
+    }
+}
+
+@Test("ApprovalPeekContent: the collapsed card blocks a right swipe")
+func theCollapsedCardBlocksARightSwipe() {
+    let long = CanvasAgentRequest(kind: .command, command: lines(11))
+    let content = ApprovalPeekContent.resolve(request: long, decision: nil, oversize: false)
+    #expect(!content.allowsSwipeRight)
+}
+
+@Test("ApprovalPeekContent: the expanded card allows a right swipe")
+func theExpandedCardAllowsARightSwipe() {
+    let long = CanvasAgentRequest(kind: .command, command: lines(11))
+    let content = ApprovalPeekContent.resolve(
+        request: long, decision: nil, oversize: false, isExpanded: true)
+    #expect(content.allowsSwipeRight)
+    #expect(content.allowsSwipeLeft)
+}
+
+@Test("ApprovalPeekContent: a collapsed card still allows Deny")
+func aCollapsedCardStillAllowsDeny() {
+    let long = CanvasAgentRequest(kind: .command, command: lines(11))
+    let content = ApprovalPeekContent.resolve(request: long, decision: nil, oversize: false)
+    #expect(content.allowsSwipeLeft)
+}
+
+@Test("ApprovalPeekGeometry: the height cap follows the screen")
+func theHeightCapFollowsTheScreen() {
+    func cap(_ height: CGFloat) -> CGFloat {
+        ApprovalPeekGeometry.maxCardHeight(
+            visibleFrame: CGRect(x: 0, y: 0, width: 1_000, height: height))
+    }
+    #expect(cap(400) == 260)
+    #expect(cap(800) == 360)
+    #expect(cap(2_000) == 420)
+    #expect(ApprovalPeekGeometry.defaultMaxCardHeight == 260)
+    // The expanded box never passes its own bound or the screen.
+    #expect(ApprovalPeekGeometry.expandedBoxHeight(lines: 100) == 220)
+    #expect(ApprovalPeekGeometry.expandedBoxHeight(lines: 11) == 166)
+    let small = CGRect(x: 0, y: 0, width: 1_000, height: 300)
+    #expect(
+        ApprovalPeekGeometry.expandedBoxHeight(lines: 100, visibleFrame: small, reserved: 150)
+            == 134)
+}
+
+private func fileChangeRequest(
+    body: String = "let a = 1", kind: CanvasAgentRequest.FileChange.Kind = .overwrite,
+    isDiff: Bool = false
+) -> CanvasAgentRequest {
+    CanvasAgentRequest(
+        kind: .fileChange,
+        fileChanges: [.init(path: "/repo/a.swift", kind: kind, body: body, isDiff: isDiff)],
+        offersSessionAllow: false)
+}
+
+@Test("ApprovalPeekContent: a small file change shows its content and Allow")
+func aSmallFileChangeIsAnswerable() {
+    let request = fileChangeRequest()
+    #expect(ApprovalPeekText.boxText(request) == "Write /repo/a.swift\nlet a = 1")
+    guard
+        case .answer(let actions) = ApprovalPeekContent.resolve(
+            request: request, decision: nil, oversize: false)
+    else {
+        Issue.record("Expected an answer card")
+        return
+    }
+    #expect(actions.primary?.decision == .accept)
+    #expect(actions.primaryLabel == "Allow")
+    // A big one needs Show all first.
+    let big = fileChangeRequest(body: lines(11))
+    #expect(
+        {
+            if case .needsExpand = ApprovalPeekContent.resolve(
+                request: big, decision: nil, oversize: false)
+            {
+                return true
+            }
+            return false
+        }())
+}
+
+@Test("ApprovalPeekText: the file change announcement names the path")
+func theFileChangeAnnouncementNamesThePath() {
+    let request = fileChangeRequest()
+    let entry = ApprovalPeekEntry(
+        controllerID: UUID(), title: "t", cli: .claudeCode, request: request)
+    #expect(
+        ApprovalPeekText.announcement(for: entry)
+            == "Claude Code needs approval: Apply file changes to /repo/a.swift")
+    #expect(
+        ApprovalPeekText.spokenBox(agent: "Claude Code", request: request)
+            == "Claude Code asks to write /repo/a.swift. New content: let a = 1")
+    let diff = fileChangeRequest(body: "- a\n+ b", kind: .edit, isDiff: true)
+    #expect(
+        ApprovalPeekText.spokenBox(agent: "Claude Code", request: diff)
+            == "Claude Code asks to change /repo/a.swift. Diff: - a\n+ b")
 }
 
 @Test("ApprovalPeekContent: one question with 4 short choices gives choice buttons")

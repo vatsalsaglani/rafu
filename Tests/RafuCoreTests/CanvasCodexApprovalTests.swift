@@ -353,7 +353,7 @@ struct CanvasCodexApprovalTests {
             var all = params
             all["threadId"] = thread ?? self.thread
             all["turnId"] = "turn-1"
-            all["itemId"] = "item-1"
+            all["itemId"] = params["itemId"] ?? "item-1"
             return ["id": id, "method": method, "params": all]
         }
 
@@ -540,6 +540,102 @@ struct CanvasCodexApprovalTests {
         #expect(Set(harness.hooks.cleared.withLock { $0 }).count == 2)
         let keys = harness.hooks.requests.withLock { $0.map(\.key) }
         for key in keys { #expect(harness.proxy.inject(key: key, decision: .accept) == .unknown) }
+    }
+
+    private static func patchFrame(
+        _ harness: Harness, item: String, diff: String = "@@ -1 +1 @@\n-a\n+b",
+        kind: [String: Any] = ["type": "update", "move_path": NSNull()]
+    ) -> [String: Any] {
+        [
+            "method": "item/fileChange/patchUpdated",
+            "params": [
+                "threadId": harness.thread, "turnId": "turn-1", "itemId": item,
+                "changes": [["path": "/work/a.swift", "diff": diff, "kind": kind]],
+            ],
+        ]
+    }
+
+    @Test func patchUpdatedFillsTheFileChangeRequest() throws {
+        let harness = try Harness()
+        defer { harness.tearDown() }
+        let tui = try harness.tui()
+        defer { tui.close() }
+        tui.serverSends([
+            Self.patchFrame(harness, item: "i1"),
+            harness.approvalFrame(
+                id: 81, method: "item/fileChange/requestApproval",
+                params: ["itemId": "i1", "reason": "edit"]),
+        ])
+        let request = try #require(harness.hooks.awaitRequest())
+        #expect(request.kind == .fileChange)
+        #expect(!request.terminalOnly)
+        #expect(request.fileChanges.count == 1)
+        #expect(request.fileChanges.first?.path == "/work/a.swift")
+        #expect(request.fileChanges.first?.kind == .edit)
+        #expect(request.fileChanges.first?.body == "@@ -1 +1 @@\n-a\n+b")
+        #expect(request.fileChanges.first?.isDiff == true)
+        // The session allow stays off for files.
+        #expect(!request.options.contains { $0.decision == .acceptForSession })
+        #expect(harness.proxy.inject(key: request.key, decision: .accept) == .sent)
+        let answers = harness.serverMessages(upToEcho: tui).filter(Self.isAnswer)
+        #expect(answers.map { Self.jsonText($0["result"]) } == [#"{"decision":"accept"}"#])
+    }
+
+    @Test func aFileChangeWithoutAPatchStaysTerminalOnly() throws {
+        let harness = try Harness()
+        defer { harness.tearDown() }
+        let tui = try harness.tui()
+        defer { tui.close() }
+        tui.serverSends([
+            // A patch for another item does not fill this request.
+            Self.patchFrame(harness, item: "other"),
+            harness.approvalFrame(
+                id: 82, method: "item/fileChange/requestApproval", params: ["itemId": "i1"]),
+            // A patch of a shape Rafu does not know forgets the item.
+            Self.patchFrame(harness, item: "i2"),
+            Self.patchFrame(harness, item: "i2", kind: ["type": "rename"]),
+            harness.approvalFrame(
+                id: 83, method: "item/fileChange/requestApproval", params: ["itemId": "i2"]),
+        ])
+        let first = try #require(harness.hooks.awaitRequest())
+        let second = try #require(harness.hooks.awaitRequest())
+        #expect(first.terminalOnly)
+        #expect(second.terminalOnly)
+        #expect(harness.proxy.inject(key: first.key, decision: .accept) == .refused)
+    }
+
+    @Test func thePatchCacheClearsWhenTheTurnEnds() throws {
+        let harness = try Harness()
+        defer { harness.tearDown() }
+        let tui = try harness.tui()
+        defer { tui.close() }
+        tui.serverSends([
+            Self.patchFrame(harness, item: "i1"),
+            ["method": "turn/completed", "params": ["threadId": harness.thread, "turn": [:]]],
+            harness.approvalFrame(
+                id: 84, method: "item/fileChange/requestApproval", params: ["itemId": "i1"]),
+        ])
+        let request = try #require(harness.hooks.awaitRequest())
+        #expect(request.terminalOnly)
+    }
+
+    @Test func thePatchCacheKeepsAtMostEightItems() throws {
+        let harness = try Harness()
+        defer { harness.tearDown() }
+        let tui = try harness.tui()
+        defer { tui.close() }
+        var frames = (1...9).map { Self.patchFrame(harness, item: "i\($0)") }
+        frames.append(
+            harness.approvalFrame(
+                id: 85, method: "item/fileChange/requestApproval", params: ["itemId": "i1"]))
+        frames.append(
+            harness.approvalFrame(
+                id: 86, method: "item/fileChange/requestApproval", params: ["itemId": "i2"]))
+        tui.serverSends(frames)
+        let oldest = try #require(harness.hooks.awaitRequest())
+        let newer = try #require(harness.hooks.awaitRequest())
+        #expect(oldest.terminalOnly)
+        #expect(!newer.terminalOnly)
     }
 
     @Test func theTableHoldsEightAndEverythingStillReachesTheTerminal() throws {

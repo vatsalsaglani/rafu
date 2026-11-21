@@ -41,9 +41,11 @@ struct CompanionRequestView: View {
             Text(presentation.title)
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(theme.palette.warning)
-            if let command = request.command {
-                CompanionCommandBox(command: command, selectable: true)
-                    .accessibilityLabel("\(row.cli.displayName) asks to run \(command)")
+            if let text = ApprovalPeekText.boxText(request) {
+                requestBox(text)
+                    .accessibilityLabel(
+                        ApprovalPeekText.spokenBox(agent: row.cli.displayName, request: request)
+                            ?? "")
             }
             CompanionRequestDetails(request: request, showsReason: true)
             controls(presentation.controls)
@@ -52,6 +54,22 @@ struct CompanionRequestView: View {
         .padding(RafuMetrics.space2)
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .contain)
+    }
+
+    /// The request whole and selectable. A long file change scrolls in a box
+    /// of bounded height, so the answer buttons stay in view; a command
+    /// (at most 2 KiB) is always shown in full.
+    @ViewBuilder
+    private func requestBox(_ text: String) -> some View {
+        let lines = ApprovalPeekFit.wrappedLines(text)
+        if request.command == nil, lines > ApprovalPeekFit.maxBodyLines {
+            ScrollView {
+                CompanionCommandBox(command: text, selectable: true)
+            }
+            .frame(height: ApprovalPeekGeometry.expandedBoxHeight(lines: lines))
+        } else {
+            CompanionCommandBox(command: text, selectable: true)
+        }
     }
 
     @ViewBuilder
@@ -108,8 +126,9 @@ struct CompanionRequestView: View {
     }
 }
 
-/// A command in a dark monospaced box. `lineLimit` nil shows it whole; only
-/// a card with no accept answer (the peek's Review card) cuts it.
+/// A command (or file change) in a dark monospaced box. `lineLimit` nil shows
+/// it whole; only a card with no accept answer (the peek's "Show all" card)
+/// cuts it.
 struct CompanionCommandBox: View {
     let command: String
     var lineLimit: Int?
@@ -209,9 +228,9 @@ struct CompanionAllowButtonStyle: ButtonStyle {
 /// and a "More actions" menu with the other answers and `menuItems`.
 struct CompanionRequestActionRow: View {
     let actions: CompanionRequestActions
-    /// Set on a card that cannot show the request whole: "Review" replaces
-    /// the primary answer.
-    var review: (() -> Void)?
+    /// Set on a card that cannot show the request whole: "Show all" replaces
+    /// the primary answer until the person expands the card.
+    var showAll: (() -> Void)?
     let choose: (CanvasAgentRequestDecision) -> Void
     var menuItems: [CompanionRequestMenuItem] = []
 
@@ -225,12 +244,13 @@ struct CompanionRequestActionRow: View {
                 }
                 .buttonStyle(.bordered)
             }
-            if let review {
-                Button(action: review) {
-                    Text("Review").frame(maxWidth: .infinity)
+            if let showAll {
+                Button(action: showAll) {
+                    Text("Show all").frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
-                .help("Show the full request")
+                .help("Show the whole request before you allow it")
+                .accessibilityLabel("Show the whole request")
             } else if let primary = actions.primary, let label = actions.primaryLabel {
                 Button {
                     choose(primary.decision)
