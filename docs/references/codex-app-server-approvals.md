@@ -131,6 +131,10 @@ Not verified: that `approve` removes the question in a live Codex turn. If it st
 tool list marks read-only tools with `readOnlyHint`), then the per-tool `approval_mode`. Note: inside a Rafu terminal
 the `codex` on `PATH` is Rafu's wrapper, so run the probe with the real binary path.
 
+Claude Code's equivalent of this approval mode is `--allowedTools=mcp__rafu` (see the notification section of
+[`claude-permission-request-hook.md`](claude-permission-request-hook.md) and the amendment in the decision record about
+pre-approving Rafu's tool server).
+
 ## Verification
 
 ```bash

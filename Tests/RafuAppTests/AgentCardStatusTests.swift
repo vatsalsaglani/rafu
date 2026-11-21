@@ -106,6 +106,44 @@ struct AgentCardStatusTests {
                 isReplyAcknowledged: true, now: Date(timeIntervalSince1970: 1)) == .done)
     }
 
+    @Test("An idle prompt reads done, not needs you")
+    func anIdleSessionReadsDone() throws {
+        let session = try foldedSession([
+            hookEvent("UserPromptSubmit", at: 0), hookEvent("Stop", at: 1),
+            AgentHookEvent(
+                provider: .claude, sessionID: "s", hookEventName: "Notification", cwd: "/repo/app",
+                notificationType: "idle_prompt", time: Date(timeIntervalSince1970: 2)),
+        ])
+        #expect(
+            AgentCardStatus.resolve(
+                session: session, terminalStatus: .running, paneStatus: .live, ranAgent: true,
+                isReplyAcknowledged: true, now: Date(timeIntervalSince1970: 3)) == .done)
+    }
+
+    @Test("A Claude wait older than five minutes reads done")
+    func aStaleClaudeWaitReadsDone() {
+        let waiting = trackedSession(
+            state: .waitingForPermission, updatedAt: Date(timeIntervalSince1970: 0))
+        let before = Date(timeIntervalSince1970: TrackedAgentSession.attentionStaleInterval - 1)
+        let after = Date(timeIntervalSince1970: TrackedAgentSession.attentionStaleInterval + 1)
+        #expect(
+            AgentCardStatus.resolve(
+                session: waiting, terminalStatus: .running, paneStatus: .live, ranAgent: true,
+                isReplyAcknowledged: true, now: before) == .needsYou(.approval))
+        #expect(
+            AgentCardStatus.resolve(
+                session: waiting, terminalStatus: .running, paneStatus: .live, ranAgent: true,
+                isReplyAcknowledged: true, now: after) == .done)
+        // A failed turn stays failed however long it waits.
+        let failed = trackedSession(
+            state: .needsInput, lastEventName: "StopFailure",
+            updatedAt: Date(timeIntervalSince1970: 0))
+        #expect(
+            AgentCardStatus.resolve(
+                session: failed, terminalStatus: .running, paneStatus: .live, ranAgent: true,
+                isReplyAcknowledged: true, now: after) == .failed)
+    }
+
     @Test("A done session goes inactive at 30 minutes, not a moment before")
     func inactiveBoundary() {
         let finished = trackedSession(state: .finished, updatedAt: Date(timeIntervalSince1970: 0))

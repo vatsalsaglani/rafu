@@ -132,6 +132,32 @@ seven-state vocabulary and never change the parent's state.
   arguments; Rafu reads `agent_type` from any event that has `agent_id` and has no
   Codex tool-input path. Cursor is unchanged.
 
+### Amendment 2026-11-21: "Needs you" means a real choice only
+
+User report: "Needs you" did not go away after the user went to the terminal and
+answered nothing. "Needs you" must show only when the person has to select
+something, such as an approval for a command or an answer to a question.
+
+- **Idle is not a choice.** Claude Code sends the notification `idle_prompt`
+  ("Claude is waiting for your input") only when no dialog is on screen and the
+  agent idles at its prompt. The ledger folds it to `finished`, not `needsInput`,
+  and keeps the reply (`replyEventID`, `replyAt`). The card reads "Done" and the
+  notch reads "Waiting". It also ends a permission wait that the person answered
+  with "No" in the terminal, because Claude sends no other event after a "No".
+- **What still needs the person.** `permission_prompt` and
+  `worker_permission_prompt` give `waitingForPermission`; `elicitation_dialog`
+  and `elicitation_url_dialog` give `needsInput`. Other notification types
+  (`agent_completed`, `auth_success`, quota and plugin messages, and so on)
+  change nothing.
+- **Stale fallback (Claude only).** A Claude wait with no event for 5 minutes
+  (`TrackedAgentSession.attentionStaleInterval`) reads as `done` on the card and
+  `idle` in the notch and in the attention count. A live request in Up next still
+  forces "Needs you". It is never applied to Codex, whose approval requests
+  arrive on a channel Rafu can see, and a Failed card stays Failed.
+- **Looking at the terminal does not clear it.** A real dialog can still wait
+  there. Focus keeps its earlier effect: it clears the bell and marks the reply
+  read.
+
 ## Alternatives considered
 
 - **Derive Failed from a non-zero exit status.** Rejected: it mislabels a

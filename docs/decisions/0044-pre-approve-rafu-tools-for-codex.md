@@ -1,8 +1,10 @@
-# ADR 0044: Pre-approve Rafu's own tool server for Codex in Ensemble terminals
+# ADR 0044: Pre-approve Rafu's own tool server for the agents in Ensemble terminals
 
 - **Status:** Accepted (2026-11-21) on the user's direction. The effect of the Codex setting `approve` is verified
   only in part (see "Evidence" and "Hand checks"). GUI checks pending.
 - **Date:** 2026-11-21
+- **Amended 2026-11-21:** the decision now covers Claude Code as well as Codex (see "Amendment: Claude Code"). The
+  file name keeps "for-codex" so existing links stay valid.
 - **Related:** [`codex-app-server-approvals.md`](../references/codex-app-server-approvals.md),
   [`canvas-live-sessions.md`](../references/canvas-live-sessions.md),
   the decision about answering agent requests from the Up next row
@@ -44,6 +46,29 @@ It shows in the terminal only, as "Needs you · Answer in the terminal".
    MCP server that is not Rafu keeps showing in the terminal only. The Codex proxy does not follow the elicitation
    method.
 
+## Amendment: Claude Code (2026-11-21)
+
+A Claude Code agent in an Ensemble terminal asked "Tool use · rafu — Send Message Tool (MCP) … Do you want to
+proceed?" before it called a Rafu tool. This is the same second question, so the same reasoning applies.
+
+1. **Mechanism.** The Claude launcher adds `--allowedTools=mcp__rafu` after `--mcp-config=…` and
+   `--dangerously-load-development-channels=server:rafu`. `mcp__rafu` is a server-level permission spec: it covers
+   every tool of the `rafu` server. The `=` form is required, because `--allowedTools` is variadic like the other
+   two flags, and the spaced form would take the user's prompt as a tool name.
+2. **Scope.** One Claude session (the launch arguments), the `rafu` server only. Rafu never writes
+   `~/.claude/settings.json`. Other MCP servers and the built-in tools (Bash, Edit, Write) keep their prompts.
+   Claude outside an Ensemble terminal is unchanged.
+3. **Ensemble Agent control stays the only gate** (Off, Ask, Allow), as for Codex.
+4. **Open questions (not solved).** A `--allowedTools` the user types after Rafu's flags may replace or add to
+   Rafu's entry; Rafu does not merge them. A user `--permission-mode` interacts with the allow list in ways that
+   Claude decides. If a Claude release stops matching the server-level name, the fallbacks are `mcp__rafu__*`, then
+   one entry per tool name.
+5. **Equivalent for Codex.** Claude's `--allowedTools` plays the role of the Codex setting `default_tools_approval_mode`.
+
+Evidence, Claude Code 2.1.330: `claude --help` lists `--allowedTools, --allowed-tools <tools...>`;
+`claude --allowedTools=mcp__rafu mcp list` runs; the binary documents server-level specs of the form
+`mcp__server`. Not verified live: that the "Tool use" question no longer shows. It needs the hand check below.
+
 ## Alternatives considered
 
 - **Show the elicitation in Up next.** Rejected for now (user decision). It needs a new request kind, a new
@@ -84,6 +109,11 @@ A Codex release that changes the value names or the key, a hand check that shows
 the Up next row.
 
 ## Hand checks
+
+Claude: start a Claude agent with `terminal_create` and a link, and make it send a Rafu message. No "Tool use · rafu
+… proceed?" question may show. Agent control Ask still asks for a changing tool; Off refuses it.
+
+Codex:
 
 Start a Codex agent with `terminal_create` and a link; ask it to call `ensemble_describe` and `list_connections`
 and see that no "Allow the rafu MCP server to run tool" question shows. In Ask, check that a changing tool (for

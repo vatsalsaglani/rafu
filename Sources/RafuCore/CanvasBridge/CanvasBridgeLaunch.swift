@@ -170,14 +170,23 @@ public nonisolated enum CanvasBridgeLaunch {
         _ = try? client.exchange(LauncherIPCEnvelope(kind: .canvasBridge, canvasBridge: request))
     }
 
-    /// Claude's `--mcp-config` and `--dangerously-load-development-channels` are variadic.
-    /// The spaced form takes every later non-option token, so a user prompt became a
-    /// channel entry. The `--flag=value` form takes exactly one value and never reads
-    /// the next argument, so the user's arguments keep their own meaning.
+    /// Claude's `--mcp-config`, `--dangerously-load-development-channels`, and
+    /// `--allowedTools` are variadic. The spaced form takes every later non-option token,
+    /// so a user prompt became a channel entry. The `--flag=value` form takes exactly one
+    /// value and never reads the next argument, so the user's arguments keep their own
+    /// meaning.
+    ///
+    /// `--allowedTools=mcp__rafu` is a server-level permission spec: it pre-approves every
+    /// tool of Rafu's own tool server for this one Claude session, as the Codex launch does
+    /// with its approval mode. It writes no settings file. Ensemble's Agent control
+    /// (Off / Ask / Allow) stays the only gate on what those tools may change. If a Claude
+    /// build stops matching the server-level name, the fallbacks are `mcp__rafu__*` and
+    /// each tool name.
     static func claudeBridgeArguments(configPath: String) -> [String] {
         [
             "--mcp-config=\(configPath)",
             "--dangerously-load-development-channels=server:rafu",
+            "--allowedTools=mcp__rafu",
         ]
     }
 

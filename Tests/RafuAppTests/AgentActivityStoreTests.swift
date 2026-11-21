@@ -238,6 +238,32 @@ struct AgentTrackedPhaseTests {
         #expect(AgentTrackedPhase.externalPhase(session: working, now: later) == .idle)
     }
 
+    @Test("A Claude wait older than five minutes reads idle")
+    func aClaudeWaitOlderThanFiveMinutesIsStale() throws {
+        let waiting = try session([hookEvent("PermissionRequest", at: 0)])
+        let later = Date(timeIntervalSince1970: TrackedAgentSession.attentionStaleInterval + 1)
+        #expect(
+            AgentTrackedPhase.terminalPhase(session: waiting, status: .running, now: later)
+                == .idle)
+        #expect(AgentTrackedPhase.externalPhase(session: waiting, now: later) == .idle)
+        #expect(
+            AgentTrackedPhase.terminalPhase(
+                session: waiting, status: .running, now: Date(timeIntervalSince1970: 60))
+                == .needsYou)
+    }
+
+    @Test("A Codex wait is never stale")
+    func aCodexWaitIsNeverStale() {
+        let waiting = TrackedAgentSession(
+            provider: .codex, sessionID: "c", state: .waitingForPermission,
+            startedAt: Date(timeIntervalSince1970: 0))
+        let later = Date(timeIntervalSince1970: TrackedAgentSession.attentionStaleInterval * 10)
+        #expect(
+            AgentTrackedPhase.terminalPhase(session: waiting, status: .running, now: later)
+                == .needsYou)
+        #expect(AgentTrackedPhase.externalPhase(session: waiting, now: later) == .needsYou)
+    }
+
     @Test("Outside Rafu: a reply is ready only while fresh")
     func externalReply() throws {
         let replied = try session([hookEvent("Stop", at: 90)])

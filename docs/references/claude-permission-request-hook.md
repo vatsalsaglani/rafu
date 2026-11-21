@@ -231,3 +231,44 @@ and `description` strings, and `multiSelect: false`. The terminal showed a
 running-hook indicator during the wait. The first selectable choices appeared
 about 20 ms after hook exit. The safety check ended the probe at that point.
 Answer injection and timeout behavior remain unverified for this hook.
+
+## Claude Code notification types and "Needs you"
+
+Verified by strings in the Claude Code 2.1.330 binary and by the hook payloads Rafu receives, 2026-11-21. Applies to
+the `Notification` hook event and its `notification_type` field.
+
+The 2.1.330 types: `permission_prompt`, `idle_prompt`, `auth_success`, `elicitation_dialog`, `agent_needs_input`,
+`agent_completed`, `elicitation_url_dialog`, `worker_permission_prompt`, `push_notification`, `computer_use_enter`,
+`computer_use_exit`, `quota_auto_resume_fired`, `quota_auto_resume_stale`, `quota_auto_resume_disabled`,
+`model_refusal_fallback`, `auth_storage_failure`, `plugin_notification`.
+
+Rules Rafu follows (`TrackedAgentSession`, case `Notification`):
+
+- `permission_prompt` and `worker_permission_prompt` mean a permission dialog is open: state `waitingForPermission`.
+- `elicitation_dialog` and `elicitation_url_dialog` mean a question dialog is open: state `needsInput`.
+- `idle_prompt` ("Claude is waiting for your input") is sent only when no dialog is on screen and the agent idles at
+  its prompt. It is not a choice for the person: Rafu folds it to `finished` and keeps the reply. It earlier read as
+  "Needs you" and never cleared.
+- Every other type changes nothing.
+- After the person answers "No" in the terminal dialog, Claude sends no hook event of its own; the next event is
+  usually this `idle_prompt`. So the idle fold also clears a "Needs approval" the person answered at the terminal.
+  A Claude wait with no event for 5 minutes is shown as done anyway (`attentionStaleInterval`), because a session
+  can also stay silent.
+
+Why it matters: a status word that does not go away teaches the person to ignore it. "Needs you" must mean there is
+something to choose.
+
+Reproduce: run a Claude session with a hook that logs `notification_type` of `Notification` events, finish a turn and
+wait. The log shows `idle_prompt` with no permission dialog open. Verification:
+`swift test --filter "AgentSessionLedgerTests|AgentCardStatusTests|AgentTrackedPhaseTests"`.
+
+## Pre-approving Rafu's tools for Claude Code
+
+Claude Code 2.1.330. The launcher passes `--allowedTools=mcp__rafu` (the `=` form, because the flag is variadic and
+would take the user's prompt in the spaced form). `claude --help` lists `--allowedTools, --allowed-tools <tools...>`,
+and the binary documents server-level specs `mcp__server`. It stops the question "Tool use · rafu — Send Message Tool
+(MCP) … Do you want to proceed?" for this one session without writing `~/.claude/settings.json`. Not verified live.
+Open points: a user-typed `--allowedTools` after Rafu's, and a user `--permission-mode`. Fallbacks if the server-level
+name does not match: `mcp__rafu__*`, then each tool name. Decision:
+[`0044-pre-approve-rafu-tools-for-codex.md`](../decisions/0044-pre-approve-rafu-tools-for-codex.md). Test:
+`swift test --filter CanvasBridgeLaunchTests`.
