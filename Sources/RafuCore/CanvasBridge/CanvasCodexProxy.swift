@@ -562,6 +562,7 @@ final class CanvasCodexProxy: Sendable {
     private static let approvalMethods: Set<String> = [
         "item/commandExecution/requestApproval", "item/fileChange/requestApproval",
         "item/permissions/requestApproval", "item/tool/requestUserInput",
+        "mcpServer/elicitation/request",
     ]
 
     /// Follows server requests for the bound thread. Returns the request to hand

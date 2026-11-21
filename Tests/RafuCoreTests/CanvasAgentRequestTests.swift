@@ -7,6 +7,40 @@ private let commandMethod = "item/commandExecution/requestApproval"
 private let fileChangeMethod = "item/fileChange/requestApproval"
 private let permissionsMethod = "item/permissions/requestApproval"
 private let userInputMethod = "item/tool/requestUserInput"
+private let elicitationMethod = "mcpServer/elicitation/request"
+
+/// A Codex tool approval elicitation. The schema fields (mode, requestedSchema,
+/// serverName) follow the Codex 0.171.0 generated schema. The `_meta` keys are
+/// INFERRED from the Codex binary, not captured from a live request.
+private func elicitationParams(
+    server: Any = "atlassian", mode: Any = "form",
+    schema: Any? = ["type": "object", "properties": [String: Any]()] as [String: Any],
+    meta: Any? = nil, metaOverrides: [String: Any?] = [:]
+) -> [String: Any] {
+    var metaObject: [String: Any] = [
+        "codex_approval_kind": "mcp_tool_call", "persist": ["session", "always"],
+        "tool_name": "getJiraIssue",
+        "tool_params": ["issueKey": "ABC-1", "fields": ["summary"]] as [String: Any],
+    ]
+    for (key, value) in metaOverrides {
+        if let value { metaObject[key] = value } else { metaObject.removeValue(forKey: key) }
+    }
+    var params: [String: Any] = [
+        "threadId": "t", "turnId": "turn-1", "serverName": server,
+        "environmentId": NSNull(), "mode": mode,
+        "message": "Allow the atlassian MCP server to run tool \"getJiraIssue\"?",
+    ]
+    if let schema { params["requestedSchema"] = schema }
+    params["_meta"] = meta ?? metaObject
+    return params
+}
+
+private func jsonText(_ value: [String: Any]?) -> String {
+    guard let value,
+        let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys])
+    else { return "" }
+    return String(decoding: data, as: UTF8.self)
+}
 
 private func question(
     _ id: String, labels: [String] = ["Yes", "No"], isOther: Bool = false,
@@ -260,19 +294,14 @@ struct CanvasAgentRequestTests {
         }
     }
 
-    @Test("The Codex mapping never answers a tool call")
-    func toolCallHasNoCodexResult() {
+    @Test("A tool call has no session or question result; other methods never build one")
+    func toolCallHasNoSessionResult() {
         let request = CanvasAgentRequest(kind: .toolCall, command: "{}", reason: Self.toolReason)
-        for decision in [
-            CanvasAgentRequestDecision.accept, .acceptForSession, .decline, .cancel,
-        ] {
-            #expect(request.result(for: decision) == nil)
-        }
+        #expect(request.result(for: .acceptForSession) == nil)
+        #expect(request.result(for: .answers(["q": "a"])) == nil)
         for method in [commandMethod, fileChangeMethod, permissionsMethod, userInputMethod] {
             #expect(CanvasAgentRequest.parse(method: method, params: [:])?.kind != .toolCall)
         }
-        #expect(
-            CanvasAgentRequest.parse(method: "mcpServer/elicitation/request", params: [:]) == nil)
     }
 
     @Test("A tool call with no arguments, no identity or a changed identity is terminal-only")
@@ -408,9 +437,153 @@ struct CanvasAgentRequestTests {
 
     @Test("Unknown methods are not requests")
     func unknownMethod() {
-        #expect(
-            CanvasAgentRequest.parse(method: "mcpServer/elicitation/request", params: [:]) == nil)
+        // An elicitation with no params is not a tool approval: the rule gives nil.
+        #expect(CanvasAgentRequest.parse(method: elicitationMethod, params: [:]) == nil)
         #expect(CanvasAgentRequest.parse(method: "execCommandApproval", params: [:]) == nil)
+    }
+
+    // MARK: Codex MCP tool approval
+
+    private static let sortedArguments = """
+        {
+          "fields" : [
+            "summary"
+          ],
+          "issueKey" : "ABC-1"
+        }
+        """
+
+    @Test("A Codex tool approval becomes a tool call card")
+    func elicitationToolApproval() throws {
+        let request = try #require(
+            CanvasAgentRequest.parse(method: elicitationMethod, params: elicitationParams()))
+        #expect(request.kind == .toolCall)
+        #expect(!request.terminalOnly)
+        #expect(request.reason == "atlassian: getJiraIssue\nmcp__atlassian__getJiraIssue")
+        #expect(request.command == Self.sortedArguments)
+        #expect(request.cwd == nil)
+        #expect(!request.offersSessionAllow)
+        #expect(request.options.map(\.id) == ["accept", "decline", "cancel"])
+        let identity = try #require(
+            AgentPermissionRequestSummary.toolIdentity(fromReason: request.reason ?? ""))
+        #expect(identity.server == "atlassian")
+        #expect(identity.tool == "getJiraIssue")
+        #expect(identity.name == "mcp__atlassian__getJiraIssue")
+        #expect(try roundTrip(request) == request)
+    }
+
+    @Test("A Codex tool approval with empty arguments shows {}")
+    func elicitationEmptyArguments() throws {
+        let request = try #require(
+            CanvasAgentRequest.parse(
+                method: elicitationMethod,
+                params: elicitationParams(metaOverrides: ["tool_params": [String: Any]()])))
+        #expect(request.command == "{}")
+        #expect(!request.terminalOnly)
+    }
+
+    @Test("A schema without a properties key still counts as an empty form")
+    func elicitationSchemaWithoutProperties() throws {
+        let request = try #require(
+            CanvasAgentRequest.parse(
+                method: elicitationMethod,
+                params: elicitationParams(schema: ["type": "object"] as [String: Any])))
+        #expect(!request.terminalOnly)
+    }
+
+    @Test("A request that is not a tool approval gives no row")
+    func elicitationRecognitionRule() {
+        let longTool = String(repeating: "a", count: 200)
+        let oneProperty: [String: Any] = [
+            "type": "object", "properties": ["email": ["type": "string"]],
+            "required": ["email"],
+        ]
+        let cases: [(String, [String: Any])] = [
+            ("mode url", elicitationParams(mode: "url")),
+            ("mode openai/form", elicitationParams(mode: "openai/form")),
+            ("mode openaiForm", elicitationParams(mode: "openaiForm")),
+            ("mode missing", elicitationParams(mode: NSNull())),
+            ("meta null", elicitationParams(meta: NSNull())),
+            ("meta string", elicitationParams(meta: "mcp_tool_call")),
+            ("kind missing", elicitationParams(metaOverrides: ["codex_approval_kind": nil])),
+            ("kind other", elicitationParams(metaOverrides: ["codex_approval_kind": "other"])),
+            ("schema property", elicitationParams(schema: oneProperty)),
+            ("schema missing", elicitationParams(schema: nil)),
+            ("schema array", elicitationParams(schema: [1])),
+            ("server empty", elicitationParams(server: "")),
+            ("server number", elicitationParams(server: 3)),
+            ("server with __", elicitationParams(server: "a__b")),
+            ("server with space", elicitationParams(server: "my server")),
+            ("server with bidi", elicitationParams(server: "a\u{202E}b")),
+            ("tool missing", elicitationParams(metaOverrides: ["tool_name": nil])),
+            ("tool empty", elicitationParams(metaOverrides: ["tool_name": ""])),
+            ("tool line break", elicitationParams(metaOverrides: ["tool_name": "a\nb"])),
+            ("tool too long", elicitationParams(metaOverrides: ["tool_name": longTool])),
+            ("params missing", elicitationParams(metaOverrides: ["tool_params": nil])),
+            ("params null", elicitationParams(metaOverrides: ["tool_params": NSNull()])),
+            ("params string", elicitationParams(metaOverrides: ["tool_params": "x"])),
+            ("params array", elicitationParams(metaOverrides: ["tool_params": [1]])),
+        ]
+        for (name, params) in cases {
+            #expect(
+                CanvasAgentRequest.parse(method: elicitationMethod, params: params) == nil,
+                "\(name)")
+        }
+    }
+
+    @Test("A tool approval Rafu cannot show whole needs the terminal")
+    func elicitationTerminalOnly() throws {
+        let long = String(repeating: "x", count: 3_000)
+        let cases: [(String, [String: Any])] = [
+            ("over 2 KiB", elicitationParams(metaOverrides: ["tool_params": ["body": long]])),
+            (
+                "unknown meta key",
+                elicitationParams(metaOverrides: ["codex_sensitive_action": true])
+            ),
+            (
+                "zero-width character",
+                elicitationParams(metaOverrides: ["tool_params": ["a": "b\u{200B}c"]])
+            ),
+        ]
+        for (name, params) in cases {
+            let request = try #require(
+                CanvasAgentRequest.parse(method: elicitationMethod, params: params), "\(name)")
+            #expect(request.kind == .toolCall, "\(name)")
+            #expect(request.terminalOnly, "\(name)")
+            #expect(request.options.isEmpty, "\(name)")
+            for decision in [
+                CanvasAgentRequestDecision.accept, .decline, .cancel, .acceptForSession,
+            ] {
+                #expect(request.result(for: decision) == nil, "\(name)")
+            }
+        }
+    }
+
+    @Test("A persist value in the request changes nothing and is never sent back")
+    func elicitationPersistIsIgnored() throws {
+        for persist: Any in ["session", ["session", "always"], "always"] {
+            let request = try #require(
+                CanvasAgentRequest.parse(
+                    method: elicitationMethod,
+                    params: elicitationParams(metaOverrides: ["persist": persist])))
+            #expect(!request.terminalOnly)
+            #expect(request.options.map(\.id) == ["accept", "decline", "cancel"])
+            #expect(!request.permits(.acceptForSession))
+        }
+    }
+
+    @Test("A Codex tool approval answers with the exact elicitation results")
+    func elicitationResults() throws {
+        let request = try #require(
+            CanvasAgentRequest.parse(method: elicitationMethod, params: elicitationParams()))
+        #expect(jsonText(request.result(for: .accept)) == #"{"action":"accept","content":{}}"#)
+        #expect(jsonText(request.result(for: .decline)) == #"{"action":"decline"}"#)
+        #expect(jsonText(request.result(for: .cancel)) == #"{"action":"cancel"}"#)
+        #expect(request.result(for: .acceptForSession) == nil)
+        #expect(request.result(for: .answers([:])) == nil)
+        for decision in [CanvasAgentRequestDecision.accept, .decline, .cancel] {
+            #expect(request.result(for: decision)?["_meta"] == nil)
+        }
     }
 
     // MARK: Sanitizer limits
