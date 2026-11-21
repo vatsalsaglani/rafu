@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 import Security
 
 /// Per-provider enable state (usage-providers/W0-shim.md `UsageStores`).
@@ -342,6 +343,9 @@ nonisolated enum UsageOAuthConnectionIssue: Equatable, Sendable {
     case credentialsInvalid
     case credentialsExpired
     case credentialAccessDenied
+    /// The Keychain refused for a reason other than the person's denial.
+    /// Carries the raw `OSStatus` so Settings can show the real number.
+    case keychainError(Int32)
     case unsupportedProvider
     case cancelled
 }
@@ -359,7 +363,30 @@ nonisolated enum UsageOAuthCredentialLoadResult: Equatable, Sendable {
 nonisolated enum UsageClaudeKeychainReadResult: Equatable, Sendable {
     case credential(String)
     case unavailable
-    case accessDenied
+    /// The person denied (or cancelled) the Keychain prompt.
+    case denied
+    /// Any other Keychain failure, with its raw `OSStatus`.
+    case keychainError(OSStatus)
+
+    /// Maps the status of a failed or empty `SecItemCopyMatching` read.
+    /// `nil` means success: the caller then decodes the returned data.
+    /// Only an explicit user denial (-128 `errSecUserCanceled`, -25293
+    /// `errSecAuthFailed`) is `.denied`. Everything else (for example
+    /// -25308 interaction not allowed, -34018 missing entitlement, or a
+    /// -67xxx code-signing error) keeps its number, because the person
+    /// cannot fix those by choosing Allow.
+    static func classify(status: OSStatus) -> UsageClaudeKeychainReadResult? {
+        switch status {
+        case errSecSuccess:
+            nil
+        case errSecItemNotFound:
+            .unavailable
+        case errSecUserCanceled, errSecAuthFailed:
+            .denied
+        default:
+            .keychainError(status)
+        }
+    }
 }
 
 /// The persistent methods store only user-entered API keys/imported cookies
@@ -510,10 +537,12 @@ actor UsageCredentialStore {
                 setTransientExternalCredential(encoded, for: .claude)
             else { return nil }
             return encoded
-        case .accessDenied:
+        case .denied:
+            // Only a real denial stops later attempts. Other Keychain
+            // errors retry after `keychainRefreshInterval`.
             recordKeychainRefreshDenied(for: .claude)
             return nil
-        case .unavailable:
+        case .unavailable, .keychainError:
             return nil
         }
     }
@@ -537,6 +566,8 @@ actor UsageCredentialStore {
 /// Keychain, and only from this Connect path. Injected readers/loaders keep
 /// tests away from the user's home directory and Keychain.
 nonisolated struct UsageOAuthConnector: Sendable {
+    private static let keychainLog = Logger(
+        subsystem: "dev.vatsalsaglani.rafu", category: "usage")
     typealias CredentialFileReader = @Sendable (UsageProviderID) -> String?
     typealias ClaudeKeychainReader = @Sendable () -> UsageClaudeKeychainReadResult
     typealias CredentialLoader =
@@ -728,18 +759,27 @@ nonisolated struct UsageOAuthConnector: Sendable {
     }
 
     static func productionClaudeKeychainCredential() -> UsageClaudeKeychainReadResult {
-        var query: [String: Any] = [
+        // No `kSecAttrSynchronizable`: Claude Code writes a local login
+        // keychain item, and the "any" value also searches the
+        // data-protection keychain, which an app without keychain
+        // entitlements may not query.
+        let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: "Claude Code-credentials",
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne,
         ]
-        query[kSecAttrSynchronizable as String] = kSecAttrSynchronizableAny
 
         var result: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
-        if status == errSecItemNotFound { return .unavailable }
-        guard status == errSecSuccess else { return .accessDenied }
+        if let failure = UsageClaudeKeychainReadResult.classify(status: status) {
+            if status != errSecItemNotFound {
+                // The status number only: never the item, query or token.
+                Self.keychainLog.notice(
+                    "Claude Keychain read failed, status \(status, privacy: .public)")
+            }
+            return failure
+        }
         guard
             let data = result as? Data,
             !data.isEmpty, data.count <= UsageExternalCredentialParser.maximumSourceBytes
@@ -768,8 +808,10 @@ nonisolated struct UsageOAuthConnector: Sendable {
                     contents, for: .claude, now: now, cacheTransiently: true)
             case .unavailable:
                 return .failed(.credentialsUnavailable)
-            case .accessDenied:
+            case .denied:
                 return .failed(.credentialAccessDenied)
+            case .keychainError(let status):
+                return .failed(.keychainError(status))
             }
         case .codex:
             return classify(

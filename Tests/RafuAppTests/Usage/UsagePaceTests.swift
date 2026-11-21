@@ -510,7 +510,7 @@ func claudeKeychainDenialStopsRereads() async {
     let reads = PaceKeychainCounter()
     let denied: @Sendable () -> UsageClaudeKeychainReadResult = {
         reads.increment()
-        return .accessDenied
+        return .denied
     }
 
     #expect(

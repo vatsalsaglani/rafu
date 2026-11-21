@@ -108,7 +108,7 @@ nonisolated struct ConductorBundledSkillCatalog: Sendable {
     @MainActor
     static func bundled() throws -> ConductorBundledSkillCatalog {
         guard
-            let root = Bundle.module.url(
+            let root = Bundle.rafuResources.url(
                 forResource: resourceDirectory,
                 withExtension: nil)
         else {

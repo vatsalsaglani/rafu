@@ -19,7 +19,7 @@ nonisolated enum CanvasCommonIconPack {
     @MainActor
     static func load() -> CanvasIconPack {
         guard
-            let url = Bundle.module.url(
+            let url = Bundle.rafuResources.url(
                 forResource: "common", withExtension: "json", subdirectory: "DiagramPacks"),
             let data = try? Data(contentsOf: url),
             let pack = try? decode(data)

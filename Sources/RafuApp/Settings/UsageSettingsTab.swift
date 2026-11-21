@@ -1117,11 +1117,25 @@ private struct UsageOAuthConnectionStatus: View {
         case .failed(.credentialsExpired):
             "Connection failed: credentials are expired."
         case .failed(.credentialAccessDenied):
-            "Connection failed: credential access was denied."
+            UsageConnectionIssueText.credentialAccessDenied
+        case .failed(.keychainError(let status)):
+            UsageConnectionIssueText.keychainError(status)
         case .failed(.unsupportedProvider):
             "Connection failed: this provider is not supported."
         case .failed(.cancelled):
             "Connection cancelled."
         }
+    }
+}
+
+/// Settings text for the two Keychain failures. Kept apart from the view so
+/// tests can pin the words: a denial tells the person to choose Allow, any
+/// other Keychain failure shows the real status number.
+nonisolated enum UsageConnectionIssueText {
+    static let credentialAccessDenied =
+        "Connection failed: you denied Keychain access. Connect again and choose Allow."
+
+    static func keychainError(_ status: Int32) -> String {
+        "Connection failed: the Keychain returned error \(status). If you installed a new Rafu version, quit and reopen it, then connect again."
     }
 }

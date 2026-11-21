@@ -201,22 +201,29 @@ if [[ -d "$ROOT_DIR/Resources" ]]; then
   cp -R "$ROOT_DIR/Resources/." "$APP_RESOURCES/"
 fi
 
-# Older SwiftPM emits flat bundles whose accessor searches the app root.
-# Swift 6.4's Swift Build backend emits macOS bundles and searches Resources.
-# Preserve each generated bundle layout and include dependency resources.
+# SwiftPM resource bundles always go in Contents/Resources, for every
+# toolchain. A loose bundle at the .app root cannot be sealed by codesign
+# ("unsealed contents present in the bundle root"), and an unsealed app has an
+# invalid signature: macOS cannot keep a Keychain "Always Allow" grant for it
+# (docs/references/claude-keychain-usage-credential.md). Older SwiftPM emits a
+# flat bundle whose generated accessor looks only at the app root, so Rafu's own
+# code finds its bundle through `Bundle.rafuResources`
+# (Sources/RafuApp/Support/RafuResourceBundle.swift), which checks
+# Contents/Resources first. Swift 6.4's Swift Build backend emits a macOS
+# bundle (Contents/Resources inside it) whose accessor already searches
+# Contents/Resources. SwiftTerm's bundle holds only its optional Metal shader;
+# Rafu never enables that renderer, so nothing evaluates its accessor.
 RESOURCE_BUNDLE_NAME="Rafu_${GUI_PRODUCT}.bundle"
 for resource_bundle_name in "$RESOURCE_BUNDLE_NAME" "SwiftTerm_SwiftTerm.bundle"; do
   source_bundle="$BUILD_BIN_DIR/$resource_bundle_name"
-  if [[ -d "$source_bundle/Contents/Resources" ]]; then
+  if [[ -d "$source_bundle" ]]; then
     cp -R "$source_bundle" "$APP_RESOURCES/"
-  elif [[ -d "$source_bundle" ]]; then
-    cp -R "$source_bundle" "$APP_BUNDLE/"
   fi
 done
 if [[ -d "$APP_RESOURCES/$RESOURCE_BUNDLE_NAME/Contents/Resources" ]]; then
   GRAMMAR_RESOURCE_ROOT="$APP_RESOURCES/$RESOURCE_BUNDLE_NAME/Contents/Resources"
 else
-  GRAMMAR_RESOURCE_ROOT="$APP_BUNDLE/$RESOURCE_BUNDLE_NAME"
+  GRAMMAR_RESOURCE_ROOT="$APP_RESOURCES/$RESOURCE_BUNDLE_NAME"
 fi
 
 "$ROOT_DIR/script/generate_app_icon.sh" "$APP_ICON" "$SEAM_COLOR"
@@ -361,22 +368,18 @@ cat >"$INFO_PLIST" <<PLIST
 </plist>
 PLIST
 
-# Best-effort sign the staged bundle (ad-hoc unless RAFU_SIGN_IDENTITY is set). Without a bundle identity,
+# Sign the staged bundle (ad-hoc unless RAFU_SIGN_IDENTITY is set). Without a bundle identity,
 # macOS's `UNUserNotificationCenter.current()` (terminal-manager.md T-E's
 # attention notifications) is known to fail or trap
 # ("bundleProxyForCurrentProcess is nil") against an unsigned app. `--sign -`
 # needs no Developer ID/keychain entry, so this stays CI/local-safe.
 #
-# NOT fatal on failure: with older SwiftPM, the vendored tree-sitter resource bundle
-# ("$RESOURCE_BUNDLE_NAME") sits at the .app TOP LEVEL, beside
-# Contents (see Sources/RafuApp/Resources/Grammars/README.md) — SwiftPM's
-# flat resource-bundle layout requires this for `Bundle.module` to resolve
-# it, both under `swift test`/`swift run` and here. `codesign` treats a
-# loose top-level directory as "unsealed contents present in the bundle
-# root" and exits non-zero even under `--force`/`--deep`; this is a known,
-# accepted limitation, not a build failure — every other verification step
-# below (build, resources, launch) must still pass regardless of whether
-# this signing step fully seals the resource bundle.
+# The result MUST verify, for every variant. The release app (APP_NAME "Rafu")
+# once shipped with an invalid signature because this step ended in `|| true`:
+# resource bundles at the .app root made codesign fail and nothing noticed;
+# that app then showed "credential access was denied" for Claude usage. Resource bundles
+# now sit in Contents/Resources (see above), so signing seals the whole
+# bundle, and a failure here stops the script with a clear message.
 # Nested code is signed first so the bundle signature can seal it.
 sign_item() {
   # `${arr[@]+...}` keeps an empty array safe under `set -u` on bash 3.2.
@@ -388,17 +391,15 @@ sign_item --entitlements "$WIDGET_ENTITLEMENTS" "$WIDGET_APPEX"
 if [[ -d "$APP_HELPERS/MediaRemoteAdapter.framework" ]]; then
   sign_item "$APP_HELPERS/MediaRemoteAdapter.framework"
 fi
-if [[ -d "$APP_BUNDLE/$RESOURCE_BUNDLE_NAME" || -d "$APP_BUNDLE/SwiftTerm_SwiftTerm.bundle" ]]; then
-  sign_item "$APP_BUNDLE" || true
-else
-  sign_item "$APP_BUNDLE"
-  codesign --verify --deep --strict "$APP_BUNDLE"
+sign_item "$APP_BUNDLE"
+if ! codesign --verify --deep --strict "$APP_BUNDLE"; then
+  echo "error: $APP_BUNDLE does not pass 'codesign --verify --deep --strict'." >&2
+  echo "Look for loose files at the .app root (resource bundles belong in Contents/Resources)." >&2
+  exit 1
 fi
 if [[ "$SIGN_IDENTITY" != "-" ]]; then
-  # A real identity was requested, so a bundle that does not verify is a
-  # failure, not the tolerated ad-hoc limitation above.
+  # A real identity was requested: the widget extension must verify too.
   codesign --verify --strict "$WIDGET_APPEX"
-  codesign --verify --deep --strict "$APP_BUNDLE"
   echo "Signed $APP_BUNDLE and its widget extension with: $SIGN_IDENTITY" >&2
 fi
 
@@ -448,6 +449,11 @@ test -f "$APP_RESOURCES/Themes/github-light.json"
 test -f "$APP_RESOURCES/Themes/github-dark.json"
 # Verify the grammar in the resource layout emitted by the active backend.
 test -d "$GRAMMAR_RESOURCE_ROOT"
+# No loose resource bundle may sit at the .app root: codesign cannot seal it.
+if compgen -G "$APP_BUNDLE/*.bundle" >/dev/null; then
+  echo "error: a resource bundle sits at the $APP_BUNDLE root; it belongs in Contents/Resources." >&2
+  exit 1
+fi
 test -f "$GRAMMAR_RESOURCE_ROOT/Grammars/Swift/highlights.scm"
 test -f "$APP_RESOURCES/AppIcon/rafu-icon-seam.svg"
 test -f "$APP_RESOURCES/FileIcons/claude.svg"

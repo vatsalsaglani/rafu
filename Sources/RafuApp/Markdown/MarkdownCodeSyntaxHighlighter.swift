@@ -130,7 +130,7 @@ private enum FenceHighlightQueryCache {
             return cached
         }
         guard
-            let url = Bundle.module.url(
+            let url = Bundle.rafuResources.url(
                 forResource: "highlights", withExtension: "scm",
                 subdirectory: "Grammars/\(id.configurationName)"),
             let query = try? Query(language: id.language, url: url)

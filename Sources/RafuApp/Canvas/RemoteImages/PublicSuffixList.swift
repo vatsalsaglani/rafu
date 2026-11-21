@@ -99,7 +99,7 @@ nonisolated enum PublicSuffixResource {
     @concurrent
     static func loadBundled() async -> PublicSuffixList {
         let url = await MainActor.run {
-            Bundle.module.url(
+            Bundle.rafuResources.url(
                 forResource: "public_suffix_list", withExtension: "dat",
                 subdirectory: "PublicSuffix")
         }

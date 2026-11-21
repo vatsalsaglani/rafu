@@ -54,7 +54,7 @@ swift test
 
 # Staged app verification
 ./script/build_and_run.sh --verify
-# Asserts Rafu_RafuApp.bundle present at .app top level
+# Asserts the grammar queries are present in Contents/Resources/Rafu_RafuApp.bundle
 # App launches, queries resolve, no user-visible parsing errors
 ```
 
