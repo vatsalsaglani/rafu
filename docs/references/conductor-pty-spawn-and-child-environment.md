@@ -191,6 +191,19 @@ passes the cap. The poll loop now only enforces the deadline.
 handler to `nil` does not wait for a handler that is running, and
 `availableData` raises an Objective-C exception on `EAGAIN`.
 
+**Ensemble shells inherit the app environment (2026-11-21).** An Ensemble
+terminal passes the whole app environment to its shell
+(`TerminalChildEnvironment.scrubbed(baseEnvironment)` in
+`CanvasTerminalBootstrap`). A Terminal Group terminal passes
+`environment: nil`, so its login shell builds a clean `PATH`. When Rafu was
+started from another Rafu terminal, the app holds that terminal's
+`rafu-canvas-shell-<UUID>` wrapper folder in `PATH`. `scrubbed` therefore
+removes those `PATH` entries and the inherited `RAFU_CANVAS_*` keys (and
+`MCP_PROTOCOL_NEGOTIATION`); the bootstrap sets fresh values after the scrub.
+The `environmentOnly` strategy must prepend to the scrubbed `PATH`, not to the
+raw one. See `canvas-live-sessions.md`, "Launcher loop when Rafu inherits
+another terminal's PATH".
+
 ## Why it matters
 
 C1's entire mission is spawning through the `TerminalProcessSpec` seam, and

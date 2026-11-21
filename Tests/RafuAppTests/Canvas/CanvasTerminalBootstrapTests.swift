@@ -1,4 +1,5 @@
 import Foundation
+import RafuCore
 import Testing
 
 @testable import RafuApp
@@ -134,6 +135,54 @@ struct CanvasTerminalBootstrapTests {
             #expect(FileManager.default.isExecutableFile(atPath: url.path))
             let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
             #expect((attributes[.posixPermissions] as? Int) == 0o700)
+        }
+    }
+
+    @Test func fishBootstrapDropsAnInheritedWrapperFolder() async throws {
+        let inherited = "/var/folders/ab/T/rafu-canvas-shell-AAAA"
+        let launch = try await CanvasTerminalBootstrap.prepare(
+            shellPath: "/opt/homebrew/bin/fish", loginArguments: ["-l"],
+            token: "fixture-token", cliURL: URL(fileURLWithPath: "/bin/sh"),
+            socketURL: URL(fileURLWithPath: "/tmp/fixture.sock"),
+            baseEnvironment: [
+                "HOME": "/fixture/home", "PATH": "\(inherited):/usr/bin:/bin",
+                "RAFU_CANVAS_WRAPPER_DIR": inherited, "RAFU_CANVAS_BRIDGE_CLI": "/old/rafu",
+                "MCP_PROTOCOL_NEGOTIATION": "legacy",
+            ])
+        defer { try? FileManager.default.removeItem(at: launch.directory) }
+        let environment = Self.dictionary(launch.environment)
+        #expect(environment["PATH"] == "/usr/bin:/bin")
+        #expect(environment["RAFU_CANVAS_WRAPPER_DIR"] == launch.directory.path)
+        #expect(environment["RAFU_CANVAS_BRIDGE_CLI"] == "/bin/sh")
+        #expect(environment["MCP_PROTOCOL_NEGOTIATION"] == nil)
+    }
+
+    @Test func environmentOnlyBootstrapUsesTheScrubbedPath() async throws {
+        let inherited = "/var/folders/ab/T/rafu-canvas-shell-AAAA"
+        let launch = try await CanvasTerminalBootstrap.prepare(
+            shellPath: "/opt/homebrew/bin/elvish", loginArguments: ["-l"],
+            token: "fixture-token", cliURL: URL(fileURLWithPath: "/bin/sh"),
+            socketURL: URL(fileURLWithPath: "/tmp/fixture.sock"),
+            baseEnvironment: ["HOME": "/fixture/home", "PATH": "\(inherited):/usr/bin:/bin"])
+        defer { try? FileManager.default.removeItem(at: launch.directory) }
+        let environment = Self.dictionary(launch.environment)
+        #expect(environment["PATH"] == "\(launch.directory.path):/usr/bin:/bin")
+        #expect(!(environment["PATH"] ?? "").contains(inherited))
+    }
+
+    @Test func wrapperFileMatchesTheSharedScript() async throws {
+        let launch = try await CanvasTerminalBootstrap.prepare(
+            shellPath: "/bin/zsh", loginArguments: ["-l"], token: "fixture-token",
+            cliURL: URL(fileURLWithPath: "/bin/sh"),
+            socketURL: URL(fileURLWithPath: "/tmp/fixture.sock"),
+            baseEnvironment: ["HOME": "/fixture/home", "PATH": "/usr/bin:/bin"])
+        defer { try? FileManager.default.removeItem(at: launch.directory) }
+        #expect(
+            launch.directory.lastPathComponent.hasPrefix(CanvasBridgeLaunch.wrapperDirectoryPrefix))
+        for provider in ["claude", "codex"] {
+            let url = launch.directory.appendingPathComponent(provider)
+            let text = try String(contentsOf: url, encoding: .utf8)
+            #expect(text == CanvasBridgeLaunch.wrapperScript(provider: provider) + "\n")
         }
     }
 

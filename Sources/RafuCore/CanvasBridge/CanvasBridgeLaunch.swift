@@ -15,6 +15,38 @@ public nonisolated enum CanvasBridgeLaunch {
         case executableNotFound
     }
 
+    /// Every Rafu terminal puts its private wrapper folder on `PATH`. The folder name starts
+    /// with this prefix, so another terminal's folder can be recognized by name.
+    public static let wrapperDirectoryPrefix = "rafu-canvas-shell-"
+
+    /// Names the process that started this launcher. `execve` keeps the pid, so a second
+    /// entry in the same pid is a loop through a wrapper, never a nested agent start.
+    public static let launchPIDKey = "RAFU_CANVAS_LAUNCH_PID"
+
+    /// The exact text of the `claude`/`codex` wrapper in a terminal's private folder.
+    /// The terminal bootstrap writes it and `resolve` recognizes it: one source of truth.
+    public static func wrapperScript(provider: String) -> String {
+        "#!/bin/sh\nexec \"$RAFU_CANVAS_BRIDGE_CLI\" _canvas-agent \(provider) \"$@\""
+    }
+
+    /// True when `environment` shows that this very process already ran the launcher.
+    static func isReentry(environment: [String: String], pid: Int32) -> Bool {
+        environment[launchPIDKey] == String(pid)
+    }
+
+    /// True when the file is a Rafu wrapper, whatever folder or name holds it.
+    /// Reads at most 256 bytes.
+    static func isRafuWrapper(_ url: URL) -> Bool {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return false }
+        defer { try? handle.close() }
+        guard let data = try? handle.read(upToCount: 256) else { return false }
+        let text = String(decoding: data, as: UTF8.self)
+        return ["claude", "codex"].contains { provider in
+            let script = wrapperScript(provider: provider)
+            return text == script || text == script + "\n"
+        }
+    }
+
     public static func plan(
         provider: String, arguments: [String], environment: [String: String]
     ) throws -> CanvasBridgeAgentLaunch {
@@ -24,6 +56,7 @@ public nonisolated enum CanvasBridgeLaunch {
         let executable = try resolve(provider: provider, environment: environment)
         var launch = CanvasBridgeAgentLaunch(
             executable: executable, arguments: arguments, environment: environment)
+        launch.environment[launchPIDKey] = String(getpid())
         guard shouldAttach(provider: provider, arguments: arguments) else { return launch }
         guard let token = environment["RAFU_CANVAS_TOKEN"], !token.isEmpty,
             let cli = environment["RAFU_CANVAS_BRIDGE_CLI"], cli.hasPrefix("/"),
@@ -68,6 +101,14 @@ public nonisolated enum CanvasBridgeLaunch {
         provider: String, arguments: [String],
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> Int32 {
+        if isReentry(environment: environment, pid: getpid()) {
+            try? FileHandle.standardError.write(
+                contentsOf: Data(
+                    ("Rafu: The \(provider) command leads back to Rafu's launcher. "
+                        + "Open a new terminal; if this repeats, remove old "
+                        + "rafu-canvas-shell folders from PATH.\n").utf8))
+            return 127
+        }
         do {
             let launch = try plan(
                 provider: provider, arguments: arguments, environment: environment)
@@ -194,10 +235,13 @@ public nonisolated enum CanvasBridgeLaunch {
         {
             let directory = URL(fileURLWithPath: entry.isEmpty ? "." : String(entry))
                 .resolvingSymlinksInPath().standardizedFileURL
-            guard directory != wrapper else { continue }
+            guard directory != wrapper,
+                !directory.lastPathComponent.hasPrefix(wrapperDirectoryPrefix)
+            else { continue }
             let candidate = directory.appendingPathComponent(provider).resolvingSymlinksInPath()
             guard candidate.deletingLastPathComponent() != wrapper,
-                FileManager.default.isExecutableFile(atPath: candidate.path)
+                FileManager.default.isExecutableFile(atPath: candidate.path),
+                !isRafuWrapper(candidate)
             else { continue }
             return candidate.path
         }
