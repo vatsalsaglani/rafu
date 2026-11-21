@@ -235,6 +235,86 @@ struct CanvasAgentRequestTests {
         #expect(codex?.terminalOnly == false)
     }
 
+    // MARK: MCP tool call
+
+    private static let toolReason =
+        "Atlassian MCP (claude.ai): atlassianUserInfo\n"
+        + "mcp__claude_ai_Atlassian_MCP__atlassianUserInfo"
+
+    @Test("A tool call offers Allow, Deny and Deny and stop, and never a session allow")
+    func toolCallOptions() {
+        // Also when the request says a session allow is offered.
+        for offers in [false, true] {
+            let request = CanvasAgentRequest(
+                kind: .toolCall, command: "{}", reason: Self.toolReason,
+                offersSessionAllow: offers)
+            #expect(!request.terminalOnly)
+            #expect(request.options.map(\.label) == ["Allow", "Deny", "Deny and stop"])
+            #expect(request.options.map(\.id) == ["accept", "decline", "cancel"])
+            #expect(request.permits(.accept))
+            #expect(request.permits(.decline))
+            #expect(request.permits(.cancel))
+            #expect(!request.permits(.acceptForSession))
+            #expect(!request.permits(.answers([:])))
+            #expect(!request.isHumanCheckpoint)
+        }
+    }
+
+    @Test("The Codex mapping never answers a tool call")
+    func toolCallHasNoCodexResult() {
+        let request = CanvasAgentRequest(kind: .toolCall, command: "{}", reason: Self.toolReason)
+        for decision in [
+            CanvasAgentRequestDecision.accept, .acceptForSession, .decline, .cancel,
+        ] {
+            #expect(request.result(for: decision) == nil)
+        }
+        for method in [commandMethod, fileChangeMethod, permissionsMethod, userInputMethod] {
+            #expect(CanvasAgentRequest.parse(method: method, params: [:])?.kind != .toolCall)
+        }
+        #expect(
+            CanvasAgentRequest.parse(method: "mcpServer/elicitation/request", params: [:]) == nil)
+    }
+
+    @Test("A tool call with no arguments, no identity or a changed identity is terminal-only")
+    func toolCallNeedsItsParts() {
+        let noArguments = CanvasAgentRequest(kind: .toolCall, reason: Self.toolReason)
+        #expect(noArguments.terminalOnly && noArguments.options.isEmpty)
+        let noReason = CanvasAgentRequest(kind: .toolCall, command: "{}")
+        #expect(noReason.terminalOnly && noReason.options.isEmpty)
+        let emptyReason = CanvasAgentRequest(kind: .toolCall, command: "{}", reason: "")
+        #expect(emptyReason.terminalOnly)
+        let changed = CanvasAgentRequest(
+            kind: .toolCall, command: "{}", reason: "Tool\u{202E}\nmcp__a__b")
+        #expect(changed.terminalOnly)
+        let cutArguments = CanvasAgentRequest(
+            kind: .toolCall,
+            command: String(repeating: "a", count: CanvasAgentRequest.Limits.commandBytes + 1),
+            reason: Self.toolReason)
+        #expect(cutArguments.terminalOnly && !cutArguments.permits(.accept))
+        let hidden = CanvasAgentRequest(
+            kind: .toolCall, command: "{\n\n\n\n}", reason: Self.toolReason)
+        #expect(hidden.terminalOnly)
+        // Only a command or a tool call carries a command text.
+        #expect(CanvasAgentRequest(kind: .fileChange, command: "x").command == nil)
+    }
+
+    @Test("A tool call survives a JSON round trip; an unsanitized one is rejected")
+    func toolCallCodable() throws {
+        let request = CanvasAgentRequest(
+            kind: .toolCall, command: "{\n  \"a\" : 1\n}", cwd: "/repo", reason: Self.toolReason,
+            offersSessionAllow: false)
+        #expect(try roundTrip(request) == request)
+        let object = try #require(
+            try JSONSerialization.jsonObject(with: JSONEncoder().encode(request))
+                as? [String: Any])
+        var bad = object
+        bad["reason"] = "Tool\u{202E}\nmcp__a__b"
+        let data = try JSONSerialization.data(withJSONObject: bad)
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(CanvasAgentRequest.self, from: data)
+        }
+    }
+
     @Test("The patch notification maps add, delete, update and move")
     func patchUpdatedMapping() throws {
         let changes = try #require(

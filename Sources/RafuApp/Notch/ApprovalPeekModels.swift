@@ -132,6 +132,9 @@ nonisolated enum ApprovalPeekFit {
     static let maxBodyLines = 10
     static let maxFolderColumns = 88
     static let maxPermissionLines = 4
+    /// The same bound for the two identity lines of a tool call (the friendly
+    /// server and tool, then the raw name).
+    static let maxToolIdentityLines = 6
 
     /// Display columns: an ASCII character counts 1, a tab counts 8, and any
     /// other scalar counts 2 (wide characters and marks are over-counted, on
@@ -188,6 +191,11 @@ nonisolated enum ApprovalPeekFit {
     static func fits(_ request: CanvasAgentRequest) -> Bool {
         if let command = request.command, !commandFits(command) { return false }
         if let text = ApprovalPeekText.fileChangeText(request), !fileChangeFits(text) {
+            return false
+        }
+        if request.kind == .toolCall, let reason = request.reason,
+            wrappedLines(reason) > maxToolIdentityLines
+        {
             return false
         }
         if let cwd = request.cwd, !folderFits(cwd) { return false }
@@ -436,6 +444,13 @@ nonisolated enum ApprovalPeekText {
                 return "\(agent) needs approval: Run command. Open the terminal to answer."
             }
             return "\(agent) needs approval: \(command)"
+        case .toolCall:
+            guard !request.terminalOnly, let reason = request.reason,
+                let identity = AgentPermissionRequestSummary.toolIdentity(fromReason: reason)
+            else {
+                return "\(agent) needs approval: Use MCP tool. Open the terminal to answer."
+            }
+            return "\(agent) needs approval: Use tool \(identity.tool) of \(identity.server)"
         }
     }
 
@@ -467,6 +482,15 @@ nonisolated enum ApprovalPeekText {
     /// What VoiceOver reads for the box: all of it, with the path and the
     /// kind of body ("New content" or "Diff").
     static func spokenBox(agent: String, request: CanvasAgentRequest) -> String? {
+        if request.kind == .toolCall, let arguments = request.command {
+            // The raw name is part of what is read: it is the real target.
+            guard let reason = request.reason,
+                let identity = AgentPermissionRequestSummary.toolIdentity(fromReason: reason)
+            else { return "\(agent) asks to use an MCP tool with arguments \(arguments)" }
+            return
+                "\(agent) asks to use tool \(identity.tool) of \(identity.server), "
+                + "named \(identity.name), with arguments \(arguments)"
+        }
         if let command = request.command { return "\(agent) asks to run \(command)" }
         guard request.kind == .fileChange, !request.fileChanges.isEmpty else { return nil }
         return request.fileChanges.map { change in

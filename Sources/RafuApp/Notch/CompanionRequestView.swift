@@ -41,6 +41,7 @@ struct CompanionRequestView: View {
             Text(presentation.title)
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(theme.palette.warning)
+            if request.kind == .toolCall { CompanionToolCallHeader(request: request) }
             if let text = ApprovalPeekText.boxText(request) {
                 requestBox(text)
                     .accessibilityLabel(
@@ -169,7 +170,10 @@ struct CompanionRequestDetails: View {
         VStack(alignment: .leading, spacing: 2) {
             if let cwd = request.cwd { Text(verbatim: "In \(cwd)") }
             if let root = request.grantRoot { Text(verbatim: "Write access to \(root)") }
-            if showsReason, let reason = request.reason { Text(verbatim: reason) }
+            // A tool call shows its reason as the tool header instead.
+            if showsReason, request.kind != .toolCall, let reason = request.reason {
+                Text(verbatim: reason)
+            }
             ForEach(request.permissions.indices, id: \.self) { index in
                 Text(verbatim: request.permissions[index])
             }
@@ -177,6 +181,35 @@ struct CompanionRequestDetails: View {
         .font(.system(size: 10))
         .foregroundStyle(ink.muted)
         .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+/// The tool a tool-call request asks to use: the friendly server and tool,
+/// then the raw tool name, which is the real target. The text came from the
+/// agent, so it shows verbatim.
+struct CompanionToolCallHeader: View {
+    let request: CanvasAgentRequest
+    @Environment(\.rafuTheme) private var theme
+
+    var body: some View {
+        let ink = NotchInk(theme: theme)
+        let lines = (request.reason ?? "").split(
+            separator: "\n", maxSplits: 1, omittingEmptySubsequences: false)
+        VStack(alignment: .leading, spacing: 2) {
+            if let first = lines.first {
+                Text(verbatim: String(first))
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(ink.primary)
+            }
+            if lines.count > 1 {
+                Text(verbatim: String(lines[1]))
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(ink.muted)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .fixedSize(horizontal: false, vertical: true)
+        .accessibilityElement(children: .combine)
     }
 }
 

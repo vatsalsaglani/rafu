@@ -104,6 +104,63 @@ struct ClaudePermissionAnswerBridgeTests {
                 == AgentPermissionAnswer(eventID: hook.id, verdict: .deny, interrupt: true))
     }
 
+    @Test("An MCP tool request becomes a tool call request keyed by the event id")
+    func mcpToolCall() throws {
+        let name = "mcp__claude_ai_Atlassian_MCP__atlassianUserInfo"
+        let hook = try event(tool: name, input: [:])
+        let request = try #require(ClaudePermissionAnswerBridge.request(for: hook))
+        #expect(request.key == hook.id)
+        #expect(request.kind == .toolCall)
+        #expect(request.command == "{}")
+        #expect(request.reason == "Atlassian MCP (claude.ai): atlassianUserInfo\n" + name)
+        #expect(request.cwd == "/Users/me/repo")
+        #expect(!request.terminalOnly)
+        #expect(!request.offersSessionAllow)
+        #expect(request.receivedAt == hook.time)
+        #expect(request.options.map(\.label) == ["Allow", "Deny", "Deny and stop"])
+        #expect(!request.permits(.acceptForSession))
+    }
+
+    @Test("An MCP tool request whose arguments do not fit needs the terminal")
+    func mcpToolCallIncomplete() throws {
+        let long = String(repeating: "x", count: CanvasAgentRequest.Limits.commandBytes)
+        let request = try #require(
+            ClaudePermissionAnswerBridge.request(
+                for: try event(tool: "mcp__srv__tool", input: ["q": long])))
+        #expect(request.kind == .toolCall)
+        #expect(request.terminalOnly)
+        #expect(request.options.isEmpty)
+        #expect(!request.permits(.accept))
+        let bidi = try #require(
+            ClaudePermissionAnswerBridge.request(
+                for: try event(tool: "mcp__srv__tool", input: ["q": "a\u{202E}b"])))
+        #expect(bidi.terminalOnly)
+    }
+
+    @Test("A tool Rafu does not summarize, or a bad MCP name, is not answerable")
+    func otherToolsAreNotAnswerable() throws {
+        let fetch = try event(tool: "WebFetch", input: ["url": "https://example.com"])
+        #expect(!ClaudePermissionAnswerBridge.isAnswerable(fetch))
+        #expect(ClaudePermissionAnswerBridge.request(for: fetch) == nil)
+        let bad = try event(tool: "mcp__srv__bad name", input: [:])
+        #expect(ClaudePermissionAnswerBridge.request(for: bad) == nil)
+    }
+
+    @Test("Allow, Deny and Deny and stop on a tool call give the same answers as for Bash")
+    func mcpToolCallDecisions() throws {
+        let hook = try event(tool: "mcp__srv__tool", input: [:])
+        let request = try #require(ClaudePermissionAnswerBridge.request(for: hook))
+        func answer(_ decision: CanvasAgentRequestDecision) -> AgentPermissionAnswer? {
+            #expect(request.permits(decision))
+            return ClaudePermissionAnswerBridge.answer(for: decision, eventID: hook.id)
+        }
+        #expect(answer(.accept) == AgentPermissionAnswer(eventID: hook.id, verdict: .allow))
+        #expect(answer(.decline) == AgentPermissionAnswer(eventID: hook.id, verdict: .deny))
+        #expect(
+            answer(.cancel)
+                == AgentPermissionAnswer(eventID: hook.id, verdict: .deny, interrupt: true))
+    }
+
     @Test("A command or path that was cut or changed needs the terminal")
     func incomplete() throws {
         let long = String(repeating: "x", count: CanvasAgentRequest.Limits.commandBytes + 1)
