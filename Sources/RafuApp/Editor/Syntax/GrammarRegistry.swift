@@ -233,7 +233,7 @@ nonisolated struct MarkdownInlineInjection: Sendable {
 @MainActor
 private enum GrammarQueryResources {
     static func highlightsURL(forName name: String) -> URL? {
-        Bundle.module.url(
+        Bundle.rafuResources.url(
             forResource: "highlights", withExtension: "scm",
             subdirectory: "Grammars/\(name)")
     }
@@ -243,7 +243,7 @@ private enum GrammarQueryResources {
     /// TypeScript/TSX; Bash/Dockerfile added in the symbol-coverage lane's
     /// increment A; TOML/YAML added in increment B).
     static func tagsURL(forName name: String) -> URL? {
-        Bundle.module.url(
+        Bundle.rafuResources.url(
             forResource: "tags", withExtension: "scm",
             subdirectory: "Grammars/\(name)")
     }

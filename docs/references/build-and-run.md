@@ -257,8 +257,9 @@ Lightning state.
   `Rafu_RafuApp.bundle/Contents/Resources/Grammars`, not the older flat
   `Rafu_RafuApp.bundle/Grammars` path. Its generated accessor searches
   `Bundle.main.resourceURL`. The canonical script now stages structured
-  bundles in `Contents/Resources`, retains app-root staging for flat bundles,
-  and includes `SwiftTerm_SwiftTerm.bundle`. Its grammar check follows the
+  bundles in `Contents/Resources` and includes `SwiftTerm_SwiftTerm.bundle`.
+  (App-root staging for flat bundles was removed on 2026-11-21; see "The
+  release bundle must verify".) Its grammar check follows the
   emitted layout. Reproduce with a cold local build and inspect the generated
   `resource_bundle_accessor.swift` before changing bundle placement.
 
@@ -308,8 +309,8 @@ licence in `Helpers` made `codesign --deep` treat plain text as nested code and
 reject the app. The launcher had ignored that error and still reported success.
 Nested helper signing errors now fail the launch script. With structured SwiftPM
 resource bundles, outer signing and `codesign --verify --deep --strict` must also
-pass. The older flat SwiftPM bundle-at-app-root compatibility case remains an
-explicit exception; it is not a distribution signing path.
+pass. The older flat SwiftPM bundle-at-app-root case was an accepted exception
+here. That exception is removed (see "The release bundle must verify" below).
 
 Verify with `./script/build_and_run.sh --verify` and
 `codesign --verify --deep --strict 'dist/Rafu Lightning.app'`.
@@ -369,3 +370,48 @@ the helper. After stopping a worktree's Lightning app, also find and stop that
 Lightning's `mediaremote-adapter.pl` process (match its full path under the
 worktree's `dist/Rafu Lightning.app`, never a bare name that could match the
 release app's helper). Cause of the orphaning was not investigated.
+
+## The release bundle must verify (2026-11-21)
+
+- **Applies to:** `script/build_and_run.sh` for both variants, the release
+  workflow (`.github/workflows/release.yml`, `RAFU_APP_NAME=Rafu
+  ./script/build_and_run.sh --package`), and `Bundle.rafuResources`
+  (`Sources/RafuApp/Support/RafuResourceBundle.swift`).
+- **Last verified environment:** Swift 6.4.2, macOS 27.2, Darwin 27.2.0,
+  2026-11-21. The CI toolchain and the old SwiftPM layout were NOT run here;
+  only the next CI run can confirm them.
+- **What was wrong:** the installed release app, v0.1.24-beta, failed
+  `codesign --verify --strict` with "code has no resources but signature
+  indicates they must be present". Its resource bundles
+  (`Rafu_RafuApp.bundle`, `SwiftTerm_SwiftTerm.bundle`) sat at the `.app` root.
+  On the older SwiftPM of the CI runner, the bundles are flat and their
+  generated accessor looks only at the `.app` root, and the script copied them
+  there. `codesign` cannot seal content at the bundle root, and a trailing
+  `|| true` hid the failure.
+- **Rule:** the resource bundles go in `Contents/Resources` for every
+  toolchain, the app is signed, and `codesign --verify --deep --strict` must
+  pass or the script exits 1 (both variants; no `|| true`). The script also
+  fails if any `*.bundle` sits at the `.app` root.
+- **How the old accessor still works:** Rafu's code no longer calls
+  `Bundle.module`. It calls `Bundle.rafuResources`, which checks
+  `Contents/Resources`, then the `.app` root, then `Bundle.module` (the last
+  only for `swift test` and `swift run`). The old accessor traps when it cannot
+  find its bundle, so nothing may evaluate `Bundle.module` in a packaged app.
+  SwiftTerm's `Bundle.module` is read only by its optional Metal renderer
+  (`MetalTerminalRenderer.candidateBundles`). Rafu never turns that renderer
+  on (`useMetalRenderer` defaults to `false`), so SwiftTerm's bundle is copied
+  but unused. If Rafu ever enables the Metal renderer on an old toolchain,
+  re-check this.
+- **Why not a symlink or another option:** on a toy `.app` (2026-11-21),
+  `codesign --force --sign -` failed with "unsealed contents present in the
+  bundle root" for BOTH a real directory and a symlink to
+  `Contents/Resources/X.bundle` at the root. Only the `Contents/Resources`
+  layout signed and verified. Selecting a newer Xcode in the workflows needs a
+  runner image that has one; that cannot be checked from a laptop.
+- **Verify (local, non-launching):**
+  `RAFU_APP_NAME="Rafu Lightning" ./script/build_and_run.sh --stage`, then
+  `codesign --verify --deep --strict` on the staged bundle (the script does it).
+  Never build or launch the release variant locally. After a release run:
+  `codesign --verify --deep --strict --verbose=2 Rafu.app` on the unzipped
+  asset, and `ls Rafu.app` must show only `Contents`.
+- **Related:** [`claude-keychain-usage-credential.md`](claude-keychain-usage-credential.md).

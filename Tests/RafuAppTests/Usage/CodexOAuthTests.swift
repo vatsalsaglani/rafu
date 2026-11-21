@@ -203,7 +203,7 @@ func codexConnectorNeverReadsClaudeKeychain(condition: CodexFileCondition) async
         credentialFileReader: { id in id == .codex ? condition.contents(now: now) : nil },
         claudeKeychainReader: {
             keychainReads.increment()
-            return .accessDenied
+            return .denied
         },
         credentialStore: credentialStore,
         consentStore: consent)

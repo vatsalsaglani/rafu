@@ -149,7 +149,7 @@ swift package resolve
 1. Each grammar's `highlights.scm` is copied (MIT licensed) into `Sources/RafuApp/Resources/Grammars/<Name>/` alongside its `README.md` provenance note.
 2. `Package.swift` RafuApp target declares `resources: [.copy("Resources/Grammars")]`, emitting a Swift resource accessor `Rafu_RafuApp.bundle` (the product bundle name).
 3. At runtime, `Bundle.module.url(forResource:"highlights",withExtension:"scm",subdirectory:"Grammars/<Name>")` resolves the vendored query; this URL is passed to `Query(language:url:)` to load the compiled highlight query.
-4. The `script/build_and_run.sh` staging script copies `$(swift build --show-bin-path)/Rafu_RafuApp.bundle` to the `.app` **top level** (sibling of `Contents`, not nested in `Contents/Resources`) and asserts its existence with `test -d/-f` checks. This placement matches where `Bundle.main.bundleURL` resolves via the app's executable context.
+4. The `script/build_and_run.sh` staging script copies `$(swift build --show-bin-path)/Rafu_RafuApp.bundle` into `Contents/Resources` (since 2026-11-21; it used to go to the `.app` top level, which `codesign` cannot seal) and asserts its existence with `test -d/-f` checks. Rafu's code reads it through `Bundle.rafuResources`, which checks `Contents/Resources`, then the app root, then `Bundle.module`; see [`build-and-run.md`](build-and-run.md), "The release bundle must verify".
 
 **UTF-16 byte offset fact:** SwiftTreeSitter parses in UTF-16. Query results (`NamedRange.range`, `Node.range`) return UTF-16 NSRanges directly. Byte offset conversion is `byte_offset = utf16_code_unit_offset × 2`; the classic UTF-8 byte-offset defect does not apply here.
 

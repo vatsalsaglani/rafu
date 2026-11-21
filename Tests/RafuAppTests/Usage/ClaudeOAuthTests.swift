@@ -1,5 +1,6 @@
 import Foundation
 import RafuCore
+import Security
 import Synchronization
 import Testing
 
@@ -248,7 +249,7 @@ func claudeConnectorRedactsKeychainDenial() async {
     let consent = UsageNetworkConsentStore(suiteName: suite)
     let connector = UsageOAuthConnector(
         credentialFileReader: { _ in nil },
-        claudeKeychainReader: { .accessDenied },
+        claudeKeychainReader: { .denied },
         credentialStore: UsageCredentialStore(
             servicePrefix: "test.claude.\(UUID().uuidString)"),
         consentStore: consent)
@@ -282,6 +283,84 @@ func claudeDisconnectPreservesEnablement() async {
     #expect(!consent.hasConsent(for: .claude))
     #expect(await credentialStore.transientExternalCredential(for: .claude) == nil)
     #expect(enable.isEnabled(.claude, default: true))
+}
+
+// MARK: Keychain status mapping
+
+@Test("Keychain statuses classify as user denial, not found, or a numbered error")
+func keychainStatusClassification() {
+    typealias Result = UsageClaudeKeychainReadResult
+    #expect(Result.classify(status: errSecSuccess) == nil)
+    #expect(Result.classify(status: errSecItemNotFound) == .unavailable)
+    #expect(Result.classify(status: -128) == .denied)
+    #expect(Result.classify(status: -25_293) == .denied)
+    #expect(Result.classify(status: -25_308) == .keychainError(-25_308))
+    #expect(Result.classify(status: -34_018) == .keychainError(-34_018))
+    #expect(Result.classify(status: -67_061) == .keychainError(-67_061))
+}
+
+@Test("Claude Connect reports a user Keychain denial as the denied issue")
+func keychainUserDenialMapsToAccessDenied() async {
+    let suite = TestDefaultsSuite.name("ClaudeConnectorTests")
+    defer { TestDefaultsSuite.remove(suite) }
+    let consent = UsageNetworkConsentStore(suiteName: suite)
+    let connector = UsageOAuthConnector(
+        credentialFileReader: { _ in nil },
+        claudeKeychainReader: { .denied },
+        credentialStore: UsageCredentialStore(
+            servicePrefix: "test.claude.\(UUID().uuidString)"),
+        consentStore: consent)
+
+    #expect(await connector.connect(.claude) == .failed(.credentialAccessDenied))
+    #expect(!consent.hasConsent(for: .claude))
+}
+
+@Test("Claude Connect keeps the real status of any other Keychain failure")
+func keychainOtherStatusMapsToKeychainErrorWithStatus() async {
+    let suite = TestDefaultsSuite.name("ClaudeConnectorTests")
+    defer { TestDefaultsSuite.remove(suite) }
+    let consent = UsageNetworkConsentStore(suiteName: suite)
+    let connector = UsageOAuthConnector(
+        credentialFileReader: { _ in nil },
+        claudeKeychainReader: { .keychainError(-67_062) },
+        credentialStore: UsageCredentialStore(
+            servicePrefix: "test.claude.\(UUID().uuidString)"),
+        consentStore: consent)
+
+    #expect(await connector.connect(.claude) == .failed(.keychainError(-67_062)))
+    #expect(!consent.hasConsent(for: .claude))
+}
+
+@Test("A refresh read stops for good only after a user denial; other errors retry later")
+func refreshLatchesOnlyOnUserDenial() async {
+    let now = Date(timeIntervalSince1970: 1_800_000_000)
+    let later = now.addingTimeInterval(UsageCredentialStore.keychainRefreshInterval + 1)
+
+    let errorStore = UsageCredentialStore(servicePrefix: "test.claude.\(UUID().uuidString)")
+    let errorReads = ClaudeSynchronousCounter()
+    let failing: @Sendable () -> UsageClaudeKeychainReadResult = {
+        errorReads.increment()
+        return .keychainError(-34_018)
+    }
+    #expect(
+        await errorStore.refreshClaudeKeychainCredential(now: now, keychainReader: failing) == nil)
+    #expect(
+        await errorStore.refreshClaudeKeychainCredential(now: later, keychainReader: failing) == nil
+    )
+    #expect(errorReads.count == 2)
+
+    let deniedStore = UsageCredentialStore(servicePrefix: "test.claude.\(UUID().uuidString)")
+    let deniedReads = ClaudeSynchronousCounter()
+    let denied: @Sendable () -> UsageClaudeKeychainReadResult = {
+        deniedReads.increment()
+        return .denied
+    }
+    #expect(
+        await deniedStore.refreshClaudeKeychainCredential(now: now, keychainReader: denied) == nil)
+    #expect(
+        await deniedStore.refreshClaudeKeychainCredential(now: later, keychainReader: denied) == nil
+    )
+    #expect(deniedReads.count == 1)
 }
 
 @Test("Claude OAuth accepts inactive-shaped limits and keeps one window per scoped model")
