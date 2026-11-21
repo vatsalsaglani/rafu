@@ -542,6 +542,145 @@ struct CanvasCodexApprovalTests {
         for key in keys { #expect(harness.proxy.inject(key: key, decision: .accept) == .unknown) }
     }
 
+    // MARK: MCP tool approval elicitation
+
+    private static let elicitation = "mcpServer/elicitation/request"
+
+    /// The params of a Codex tool approval. The `_meta` keys are INFERRED from
+    /// the Codex binary, not captured live.
+    private static func toolApprovalParams(
+        mode: String = "form",
+        schema: [String: Any] = ["type": "object", "properties": [String: Any]()],
+        meta: Any = [
+            "codex_approval_kind": "mcp_tool_call", "persist": ["session", "always"],
+            "tool_name": "getJiraIssue", "tool_params": ["issueKey": "ABC-1"],
+        ] as [String: Any]
+    ) -> [String: Any] {
+        [
+            "serverName": "atlassian", "environmentId": NSNull(), "mode": mode,
+            "message": "Allow the atlassian MCP server to run tool \"getJiraIssue\"?",
+            "requestedSchema": schema, "_meta": meta,
+        ]
+    }
+
+    @Test(arguments: [
+        (CanvasAgentRequestDecision.accept, #"{"action":"accept","content":{}}"#),
+        (CanvasAgentRequestDecision.decline, #"{"action":"decline"}"#),
+        (CanvasAgentRequestDecision.cancel, #"{"action":"cancel"}"#),
+    ])
+    func aToolApprovalOpensAndAnInjectedAnswerReachesTheServer(
+        decision: CanvasAgentRequestDecision, expected: String
+    ) throws {
+        let harness = try Harness()
+        defer { harness.tearDown() }
+        let tui = try harness.tui()
+        defer { tui.close() }
+        tui.serverSends([
+            harness.approvalFrame(
+                id: 41, method: Self.elicitation, params: Self.toolApprovalParams())
+        ])
+        let request = try #require(harness.hooks.awaitRequest())
+        #expect(request.kind == .toolCall)
+        #expect(!request.terminalOnly)
+        #expect(request.reason == "atlassian: getJiraIssue\nmcp__atlassian__getJiraIssue")
+        // The TUI still gets its own prompt.
+        #expect(tui.received { $0["method"] as? String == Self.elicitation } != nil)
+        #expect(harness.proxy.inject(key: request.key, decision: decision) == .sent)
+        let answers = harness.serverMessages(upToEcho: tui).filter(Self.isAnswer)
+        #expect(answers.count == 1)
+        #expect(Self.jsonText(answers.first?["id"]) == "41")
+        #expect(Self.jsonText(answers.first?["result"]) == expected)
+    }
+
+    @Test func aSessionAnswerToAToolApprovalIsRefusedAndTheEntryStays() throws {
+        let harness = try Harness()
+        defer { harness.tearDown() }
+        let tui = try harness.tui()
+        defer { tui.close() }
+        tui.serverSends([
+            harness.approvalFrame(
+                id: 42, method: Self.elicitation, params: Self.toolApprovalParams())
+        ])
+        let request = try #require(harness.hooks.awaitRequest())
+        #expect(harness.proxy.inject(key: request.key, decision: .acceptForSession) == .refused)
+        #expect(harness.proxy.inject(key: request.key, decision: .answers([:])) == .refused)
+        #expect(harness.proxy.inject(key: request.key, decision: .accept) == .sent)
+    }
+
+    @Test func otherElicitationsAreForwardedAndNotAnnounced() throws {
+        let harness = try Harness()
+        defer { harness.tearDown() }
+        let tui = try harness.tui()
+        defer { tui.close() }
+        let form = Self.toolApprovalParams(
+            schema: [
+                "type": "object", "properties": ["email": ["type": "string"]],
+                "required": ["email"],
+            ], meta: NSNull())
+        var url = Self.toolApprovalParams(mode: "url")
+        url["url"] = "https://example.com"
+        url["elicitationId"] = "e1"
+        url["message"] = "Sign in"
+        tui.serverSends([
+            harness.approvalFrame(id: 43, method: Self.elicitation, params: form),
+            harness.approvalFrame(id: 44, method: Self.elicitation, params: url),
+        ])
+        #expect(tui.received { Self.jsonText($0["id"]) == "43" } != nil)
+        #expect(tui.received { Self.jsonText($0["id"]) == "44" } != nil)
+        #expect(tui.barrier())
+        #expect(harness.hooks.requests.withLock { $0.isEmpty })
+    }
+
+    @Test func aToolApprovalForAnotherThreadIsNotAnnounced() throws {
+        let harness = try Harness()
+        defer { harness.tearDown() }
+        let tui = try harness.tui()
+        defer { tui.close() }
+        tui.serverSends([
+            harness.approvalFrame(
+                id: 45, method: Self.elicitation, params: Self.toolApprovalParams(),
+                thread: "another")
+        ])
+        #expect(tui.received { Self.jsonText($0["id"]) == "45" } != nil)
+        #expect(tui.barrier())
+        #expect(harness.hooks.requests.withLock { $0.isEmpty })
+    }
+
+    @Test func aResolvedNotificationClearsAToolApproval() throws {
+        let harness = try Harness()
+        defer { harness.tearDown() }
+        let tui = try harness.tui()
+        defer { tui.close() }
+        tui.serverSends([
+            harness.approvalFrame(
+                id: 46, method: Self.elicitation, params: Self.toolApprovalParams())
+        ])
+        let request = try #require(harness.hooks.awaitRequest())
+        tui.serverSends([
+            [
+                "method": "serverRequest/resolved",
+                "params": ["threadId": harness.thread, "requestId": 46],
+            ]
+        ])
+        #expect(harness.hooks.awaitClear() == request.key)
+        #expect(harness.proxy.inject(key: request.key, decision: .accept) == .unknown)
+    }
+
+    @Test func aTerminalAnswerClearsAToolApproval() throws {
+        let harness = try Harness()
+        defer { harness.tearDown() }
+        let tui = try harness.tui()
+        defer { tui.close() }
+        tui.serverSends([
+            harness.approvalFrame(
+                id: 47, method: Self.elicitation, params: Self.toolApprovalParams())
+        ])
+        let request = try #require(harness.hooks.awaitRequest())
+        tui.send(["id": 47, "result": ["action": "decline"]])
+        #expect(harness.hooks.awaitClear() == request.key)
+        #expect(harness.proxy.inject(key: request.key, decision: .accept) == .unknown)
+    }
+
     private static func patchFrame(
         _ harness: Harness, item: String, diff: String = "@@ -1 +1 @@\n-a\n+b",
         kind: [String: Any] = ["type": "update", "move_path": NSNull()]

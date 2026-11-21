@@ -21,7 +21,8 @@ public nonisolated struct CanvasAgentRequest: Codable, Hashable, Sendable {
         case permissions
         /// Answer multiple-choice questions (`item/tool/requestUserInput`).
         case userInput
-        /// Use a tool of an MCP server (Claude Code hook only). `command`
+        /// Use a tool of an MCP server: a Claude Code hook request, or a Codex
+        /// `mcpServer/elicitation/request` that asks to run a tool. `command`
         /// holds the arguments as JSON text and `reason` the tool identity
         /// (see `AgentPermissionRequestSummary.toolReason(name:)`).
         case toolCall
@@ -328,7 +329,8 @@ public nonisolated struct CanvasAgentRequest: Codable, Hashable, Sendable {
             ]
         case .toolCall:
             // No session answer, also when `offersSessionAllow` is true: a
-            // Claude Code hook has no such answer for a tool.
+            // Claude Code hook has no such answer for a tool, and Rafu never
+            // sends the Codex `persist` value.
             return [
                 Option(decision: .accept, label: "Allow"),
                 Option(decision: .decline, label: "Deny"),
@@ -641,9 +643,63 @@ extension CanvasAgentRequest {
                 key: key, kind: .userInput, questions: questions,
                 terminalOnly: !complete || questions.count != raw.count,
                 receivedAt: receivedAt)
+        case "mcpServer/elicitation/request":
+            return toolCallRequest(fromElicitation: params, key: key, receivedAt: receivedAt)
         default:
             return nil
         }
+    }
+
+    /// The `_meta` keys of a Codex tool approval that Rafu knows. A key outside
+    /// this set may mean the request asks for more than the card shows, so the
+    /// row then offers "Open terminal" only.
+    /// INFERRED from strings in the Codex 0.171.0 binary, not seen on a live
+    /// request: a live capture may add a harmless key here.
+    private static let knownToolApprovalMetaKeys: Set<String> = [
+        "codex_approval_kind", "persist", "tool_name", "tool_params", "tool_params_display",
+        "tool_title", "tool_description", "source", "connector_id", "connector_name",
+        "connector_description", "codex_request_type",
+    ]
+
+    /// A Codex `mcpServer/elicitation/request` is a tool approval only when
+    /// every check below holds; any other shape gives nil (no row, the terminal
+    /// answers, as before). The schema of the request (mode, `requestedSchema`,
+    /// `serverName`) is verified from the generated Codex schema. The `_meta`
+    /// keys (`codex_approval_kind` = `mcp_tool_call`, `tool_name`,
+    /// `tool_params`) are INFERRED from binary strings and not yet seen live,
+    /// so a mismatch must stay safe: nil. `params.message` and the display
+    /// fields are free text from Codex and are never read.
+    private static func toolCallRequest(
+        fromElicitation params: [String: Any], key: UUID, receivedAt: Date
+    ) -> CanvasAgentRequest? {
+        // A form that asks for no data. A property means the user must type
+        // something, which Rafu cannot do.
+        guard params["mode"] as? String == "form",
+            let schema = params["requestedSchema"] as? [String: Any]
+        else { return nil }
+        if let properties = schema["properties"], !(properties is NSNull) {
+            guard let object = properties as? [String: Any], object.isEmpty else { return nil }
+        }
+        guard let meta = params["_meta"] as? [String: Any],
+            meta["codex_approval_kind"] as? String == "mcp_tool_call",
+            let server = params["serverName"] as? String, !server.isEmpty,
+            !server.contains("__"),
+            let tool = meta["tool_name"] as? String, !tool.isEmpty,
+            // Rafu must not let the user approve arguments it did not show.
+            let arguments = meta["tool_params"] as? [String: Any]
+        else { return nil }
+        let name = "mcp__\(server)__\(tool)"
+        // The built name must split back into the same server and tool.
+        guard let parts = AgentPermissionRequestSummary.mcpParts(of: name),
+            parts.server == server, parts.tool == tool,
+            let summary = AgentPermissionRequestSummary(toolName: name, toolInput: arguments),
+            let call = summary.toolCall
+        else { return nil }
+        let hasUnknownMeta = !Set(meta.keys).isSubset(of: knownToolApprovalMetaKeys)
+        return CanvasAgentRequest(
+            key: key, kind: .toolCall, command: call.arguments, reason: call.reasonLine,
+            terminalOnly: !summary.isComplete || hasUnknownMeta, offersSessionAllow: false,
+            receivedAt: receivedAt)
     }
 
     /// The changes of a Codex `item/fileChange/patchUpdated` notification
@@ -713,10 +769,16 @@ extension CanvasAgentRequest {
             ]
         case (.command, _), (.fileChange, _):
             return ["decision": decision.name]
-        case (.toolCall, _):
-            // Only the Claude Code hook answers a tool call. The Codex proxy
-            // never builds this kind, so it must never answer it.
-            return nil
+        case (.toolCall, .accept):
+            // Codex elicitation answer. The form has no property, so the
+            // accepted content is the empty object. Never `_meta`: Rafu must
+            // not send `persist` (remember for the session or for always).
+            // Shape INFERRED from the schema; not yet run live.
+            return ["action": "accept", "content": [String: Any]()]
+        case (.toolCall, .decline):
+            return ["action": "decline"]
+        case (.toolCall, .cancel):
+            return ["action": "cancel"]
         default:
             return nil
         }
