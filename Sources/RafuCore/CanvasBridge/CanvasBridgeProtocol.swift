@@ -83,10 +83,16 @@ public nonisolated struct CanvasBridgePeer: Codable, Hashable, Sendable {
     public var mention: String?
     /// Message-link state, distinct from whether delivery is currently permitted.
     public var linkState: String?
+    /// How many messages wait for this peer to take them. A count, never a body.
+    public var pending: Int?
+    /// "expired" or "failed" when the last message to this peer was dropped or
+    /// refused; cleared by the next message the peer takes.
+    public var lastDelivery: String?
 
     public init(
         id: String, title: String, kind: String, connected: Bool, provider: String? = nil,
-        mention: String? = nil, linkState: String? = nil
+        mention: String? = nil, linkState: String? = nil, pending: Int? = nil,
+        lastDelivery: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -95,6 +101,8 @@ public nonisolated struct CanvasBridgePeer: Codable, Hashable, Sendable {
         self.provider = provider
         self.mention = mention
         self.linkState = linkState
+        self.pending = pending
+        self.lastDelivery = lastDelivery
     }
 
     /// A display-name alias, not an identity. Duplicate aliases require an explicit peer ID.
@@ -124,10 +132,55 @@ public nonisolated struct CanvasBridgeMessage: Codable, Hashable, Sendable {
     public var id: String
     public var source: String
     public var text: String
+    /// The sender's @mention and a bounded title, so the receiver can answer.
+    /// Optional: an older peer sends neither.
+    public var sourceMention: String?
+    public var sourceTitle: String?
 
-    public init(id: String, source: String, text: String) {
+    public init(
+        id: String, source: String, text: String, sourceMention: String? = nil,
+        sourceTitle: String? = nil
+    ) {
         self.id = id
         self.source = source
         self.text = text
+        self.sourceMention = sourceMention
+        self.sourceTitle = sourceTitle
+    }
+
+    /// The sender mention when it is a plain `@handle` of at most 64 bytes.
+    /// Anything else is dropped, never repaired: the first line of a received
+    /// message is Rafu's own text and must not carry text a peer controls.
+    public var safeSourceMention: String? {
+        guard let mention = sourceMention, mention.utf8.count <= 64, mention.utf8.count > 1,
+            mention.hasPrefix("@")
+        else { return nil }
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-"))
+        return mention.dropFirst().unicodeScalars.allSatisfy { allowed.contains($0) }
+            ? mention : nil
+    }
+
+    /// The peer id when it is a UUID, which is what Rafu always sends.
+    private var safeSourceID: String? {
+        UUID(uuidString: source) == nil ? nil : source
+    }
+
+    /// The text the receiving agent sees: a Rafu-written first line that names the
+    /// sender and says how to answer, then the sender's text unchanged.
+    public var framedText: String {
+        let line: String
+        switch (safeSourceMention, safeSourceID) {
+        case (let mention?, let id?):
+            line =
+                "Ensemble message from \(mention) (peer id \(id)). Reply with send_message to that mention or peer id."
+        case (nil, let id?):
+            line =
+                "Ensemble message from peer id \(id). Reply with send_message to that peer id."
+        case (let mention?, nil):
+            line = "Ensemble message from \(mention). Reply with send_message to that mention."
+        case (nil, nil):
+            line = "Ensemble message from a connected peer. Use list_connections to find it."
+        }
+        return line + "\n" + text
     }
 }

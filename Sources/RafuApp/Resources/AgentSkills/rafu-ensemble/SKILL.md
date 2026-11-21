@@ -86,11 +86,19 @@ logged under "Agents" in the Ensemble bar, and undoable by the user.
 5. Send work: `send_message {"destination": "<node id or @mention>", "text": "..."}`
    (the new peer's `mention` is in the `terminal_create` result). The result
    has `delivered: true` when Rafu queued it; the peer may not have read it
-   yet. `delivered: false` means Rafu holds it until the peer, which is still
-   starting, connects. A paused link or a peer that is not connected is an
-   error that says so.
+   yet. `delivered: false` means Rafu holds it (the result says why: the peer
+   is not connected yet, its agent cannot take messages yet, or it refused
+   while it starts) and sends it later; do not send it again. A held message
+   that waits 5 minutes is dropped and the link shows Failed; `list_connections`
+   then shows `lastDelivery: expired` (and `pending` counts held messages). A
+   paused link or a peer that is not connected is an error that says so.
+   A message to an idle Codex is queued, but Codex reads it only when it next
+   runs: if the result says so, wake it with `terminal_send`.
 6. Read replies: Claude Code receives channel messages automatically; also
-   call `receive_messages`.
+   call `receive_messages`. **To answer a message**, call `send_message` with
+   the sender's `@mention` or peer ID. Every received message starts with
+   "Ensemble message from @name (peer id ...)": use that. `list_connections`
+   shows the same peer. Do not tell the user that you cannot reply.
 
 `terminal_send` uses a Live message link when one exists. Without one, Rafu
 types only into terminals **you** created: `text` when an agent is connected in

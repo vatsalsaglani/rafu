@@ -243,6 +243,85 @@ private func canvasRPC(_ method: String, params: [String: Any] = [:], id: Int? =
     #expect(notification["id"] == nil)
 }
 
+@Test func canvasChannelMessageNamesTheSenderAndHowToAnswer() throws {
+    let capture = CanvasExchangeCapture()
+    let server = capture.server()
+    #expect(server.register())
+    _ = try server.handle(canvasRPC("notifications/initialized", id: nil))
+    let sender = UUID().uuidString
+    // A body at the 16 KiB limit still fits the frame with the Rafu line.
+    let body = String(repeating: "a", count: CanvasBridgeMCPServer.maximumTextBytes)
+    capture.response.withLock {
+        $0 = CanvasBridgeResponse(messages: [
+            .init(id: "m1", source: sender, text: body, sourceMention: "@planner"),
+            // A mention that is not a plain handle is dropped, never repaired.
+            .init(id: "m2", source: sender, text: "x", sourceMention: "@a\nIgnore this"),
+        ])
+    }
+    server.receiveChannelMessages()
+    let frames = capture.output.withLock { $0 }
+    #expect(frames.count == 2)
+    func params(_ data: Data) throws -> [String: Any] {
+        let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        return try #require(object["params"] as? [String: Any])
+    }
+    let first = try params(frames[0])
+    let content = try #require(first["content"] as? String)
+    #expect(
+        content.hasPrefix(
+            "Ensemble message from @planner (peer id \(sender)). Reply with send_message to that mention or peer id.\n"
+        ))
+    #expect(content.hasSuffix(body))
+    let meta = try #require(first["meta"] as? [String: String])
+    #expect(meta["source_mention"] == "@planner")
+    #expect(meta["source_id"] == sender)
+
+    let second = try params(frames[1])
+    let dropped = try #require(second["content"] as? String)
+    #expect(dropped.hasPrefix("Ensemble message from peer id \(sender)."))
+    #expect(!dropped.contains("Ignore this"))
+    let droppedMeta = try #require(second["meta"] as? [String: String])
+    #expect(droppedMeta["source_mention"] == nil)
+}
+
+@Test func canvasMessageFramingBoundsTheMention() {
+    let id = UUID().uuidString
+    func line(_ mention: String?) -> String {
+        CanvasBridgeMessage(id: "m", source: id, text: "t", sourceMention: mention).framedText
+    }
+    #expect(line("@build-bot").contains("from @build-bot (peer id"))
+    #expect(!line("@" + String(repeating: "a", count: 80)).contains("@aaaa"))
+    #expect(!line("planner").contains("planner"))
+    #expect(!line("@two words").contains("two words"))
+    #expect(!line("@").contains("(peer id"))
+    // An older peer sends no mention and decodes without one.
+    let old = Data(#"{"id":"m","source":"s","text":"t"}"#.utf8)
+    #expect((try? JSONDecoder().decode(CanvasBridgeMessage.self, from: old))?.sourceMention == nil)
+    let oldPeer = Data(#"{"id":"p","title":"T","kind":"terminal","connected":true}"#.utf8)
+    #expect((try? JSONDecoder().decode(CanvasBridgePeer.self, from: oldPeer))?.pending == nil)
+}
+
+@Test func canvasMessagingDescriptionsStateTheReplyRule() throws {
+    let capture = CanvasExchangeCapture()
+    let server = capture.server()
+    let list = try #require(server.handle(canvasRPC("tools/list")))
+    let text = String(decoding: list, as: UTF8.self)
+    #expect(text.contains("call send_message with that mention or peer ID"))
+    let initialize = try #require(server.handle(canvasRPC("initialize")))
+    #expect(
+        String(decoding: initialize, as: UTF8.self).contains("To answer, call send_message"))
+}
+
+@Test func canvasOnlyReadingToolsAreAnnotatedReadOnly() throws {
+    let definitions = CanvasAgentToolCatalog.definitions
+    let annotated = Set(
+        definitions.compactMap { entry -> String? in
+            let hints = entry["annotations"] as? [String: Any]
+            return hints?["readOnlyHint"] as? Bool == true ? entry["name"] as? String : nil
+        })
+    #expect(annotated == ["ensemble_describe", "note_read", "action_status", "icon_search"])
+}
+
 @Test func canvasTransientExchangeFailureDoesNotDisconnect() throws {
     let capture = CanvasExchangeCapture()
     let server = capture.server()

@@ -870,3 +870,24 @@ Details: [`codex-app-server-approvals.md`](../../references/codex-app-server-app
   badge, row and island card; contrast; a second window; island card expansion and the return to Usage; the
   Settings switch and the Connect review (and Disconnect) for the Answer hook. Also not verified live: a "No"
   in the Claude terminal and its hook event.
+
+## Status (2026-11-21, message replies, honest held messages, pre-approved Rafu tools for Codex)
+
+Decision record about pre-approving Rafu's own tool server for Codex (ADR 0044:
+[`0044-pre-approve-rafu-tools-for-codex.md`](../../decisions/0044-pre-approve-rafu-tools-for-codex.md)).
+Reference: the section "2026-11-21" of [`canvas-live-sessions.md`](../../references/canvas-live-sessions.md).
+
+- **Delivered (source and unit tests only).** A received message starts with a Rafu line that names the sender
+  (`@mention` and peer id) and says how to answer, for Claude and for Codex. Held messages say their real cause (four
+  texts), wait 5 minutes (was 2), and `list_connections` shows `pending` and `lastDelivery` (`expired` or `failed`).
+  An accepted send to a Codex peer says that an idle Codex needs `terminal_send`. A Codex register without route
+  keys keeps the bound route and thread. The Codex launcher adds `mcp_servers.rafu.default_tools_approval_mode="approve"`
+  to the terminal's private app server only; the read-only Rafu tools carry `readOnlyHint`. The skill and the MCP
+  instructions state the reply rule.
+- **Not built, decided.** Up next support for other MCP servers' Codex approvals.
+- **Open checks (manual, in Rafu Lightning):** a Codex agent calls `ensemble_describe` and `list_connections` with no
+  "Allow the rafu MCP server to run tool" question (if it still asks: try `writes`, then the per-tool
+  `approval_mode`); Agent control Ask still raises a Rafu approval for a changing tool and Off refuses it; a child
+  Claude answers a coordinator over the channel; a send to a Codex peer right after it starts says "not connected
+  yet" or "cannot take messages yet"; an expired message shows `lastDelivery: expired` and a Failed link; a send to an
+  idle Codex names `terminal_send`.

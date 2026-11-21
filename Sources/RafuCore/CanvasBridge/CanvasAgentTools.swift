@@ -1316,9 +1316,19 @@ public nonisolated enum CanvasAgentToolCatalog {
     public static var definitions: [[String: Any]] {
         CanvasAgentTool.allCases.map { tool in
             let (description, inputSchema) = definition(for: tool)
-            return ["name": tool.rawValue, "description": description, "inputSchema": inputSchema]
+            var entry: [String: Any] = [
+                "name": tool.rawValue, "description": description, "inputSchema": inputSchema,
+            ]
+            if readOnlyTools.contains(tool) { entry["annotations"] = ["readOnlyHint": true] }
+            return entry
         }
     }
+
+    /// Tools that never change the Ensemble or anything outside it. A tool that
+    /// changes anything must not be listed here.
+    private static let readOnlyTools: Set<CanvasAgentTool> = [
+        .ensembleDescribe, .noteRead, .actionStatus, .iconSearch,
+    ]
 
     private static func definition(for tool: CanvasAgentTool) -> (String, [String: Any]) {
         let textLimit = CanvasAgentToolCall.maximumTextBytes

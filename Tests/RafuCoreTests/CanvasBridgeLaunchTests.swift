@@ -57,6 +57,25 @@ struct CanvasBridgeLaunchTests {
                 "mcp_servers.rafu.env.RAFU_CANVAS_SOCKET=\"/private/test.sock\""))
     }
 
+    @Test func codexLaunchPreApprovesOnlyRafusOwnToolServer() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let arguments = ["--model", "model name", "a prompt"]
+        let launch = try CanvasBridgeLaunch.plan(
+            provider: "codex", arguments: arguments, environment: fixture.environment)
+        let pair = "mcp_servers.rafu.default_tools_approval_mode=\"approve\""
+        #expect(launch.arguments.contains(pair))
+        // Every override is for the rafu server only; no other server and no global setting.
+        let overrides = launch.arguments.filter { $0.hasPrefix("mcp_servers.") }
+        #expect(overrides.allSatisfy { $0.hasPrefix("mcp_servers.rafu.") })
+        #expect(!launch.arguments.contains(where: { $0.hasPrefix("approval_policy") }))
+        // The injected prefix ends where the user's arguments begin, as `run` splits it.
+        let injected = Array(launch.arguments.dropLast(arguments.count))
+        #expect(injected.contains(pair))
+        #expect(!injected.contains("--model"))
+        #expect(Array(launch.arguments.suffix(arguments.count)) == arguments)
+    }
+
     @Test func claudeConfigIsPrivateAndContainsExplicitEnvironment() throws {
         let fixture = try Fixture()
         defer { fixture.remove() }
