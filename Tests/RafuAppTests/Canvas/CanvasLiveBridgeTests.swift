@@ -1658,6 +1658,8 @@ struct CanvasHeldMessageTests {
             fixture.request(0, "send", destination: 1, text: "work"))
         #expect(sent.toolResult?.delivered == true)
         #expect(sent.toolResult?.message?.contains("terminal_send") == true)
+        // A busy Codex takes the message when its current turn ends.
+        #expect(sent.toolResult?.message?.contains("when its current turn ends") == true)
         // The text Codex receives names the sender and how to answer.
         let received = try #require(fixture.codex.sent.first?.text)
         #expect(received.hasPrefix("Ensemble message from @terminal-0 (peer id "))
@@ -1670,6 +1672,7 @@ struct CanvasHeldMessageTests {
         let plain = await claude.bridge.handle(
             claude.request(0, "send", destination: 1, text: "work"))
         #expect(plain.toolResult?.message?.contains("terminal_send") == false)
+        #expect(plain.toolResult?.message?.contains("Codex") == false)
     }
 
     @Test("A Codex client that sends no route keys keeps the bound route and thread")

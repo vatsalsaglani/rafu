@@ -546,6 +546,108 @@ private func canvasRPC(_ method: String, params: [String: Any] = [:], id: Int? =
     #expect(names.isSuperset(of: Set(CanvasAgentTool.allCases.map(\.rawValue))))
 }
 
+private func canvasInitializeInstructions(provider: String) throws -> String {
+    let server = CanvasExchangeCapture().server(provider: provider)
+    let data = try #require(server.handle(canvasRPC("initialize")))
+    let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+    let result = try #require(object["result"] as? [String: Any])
+    return try #require(result["instructions"] as? String)
+}
+
+private func canvasToolDescription(provider: String, _ name: String) throws -> String {
+    let server = CanvasExchangeCapture().server(provider: provider)
+    let data = try #require(server.handle(canvasRPC("tools/list")))
+    let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+    let result = try #require(object["result"] as? [String: Any])
+    let tools = try #require(result["tools"] as? [[String: Any]])
+    let tool = try #require(tools.first { $0["name"] as? String == name })
+    return try #require(tool["description"] as? String)
+}
+
+private func canvasToolText(_ reply: Data) throws -> (text: String, failed: Bool) {
+    let object = try #require(JSONSerialization.jsonObject(with: reply) as? [String: Any])
+    let result = try #require(object["result"] as? [String: Any])
+    let content = try #require(result["content"] as? [[String: Any]])
+    return (
+        try #require(content.first?["text"] as? String), result["isError"] as? Bool ?? false
+    )
+}
+
+@Test func canvasCodexReceiveMessagesAnswersWithTheFixedNoInboxNote() throws {
+    let capture = CanvasExchangeCapture()
+    // Even if the app returned a message, Codex never sees a list: the queued
+    // turn is its only delivery path.
+    capture.responses.withLock {
+        $0["receive"] = CanvasBridgeResponse(messages: [
+            .init(id: "m1", source: UUID().uuidString, text: "secret peer text")
+        ])
+    }
+    let server = capture.server(provider: "codex")
+    #expect(server.register())
+    let reply = try #require(
+        server.handle(canvasRPC("tools/call", params: ["name": "receive_messages"])))
+    let answer = try canvasToolText(reply)
+    #expect(answer.failed == false)
+    #expect(answer.text == CanvasBridgeMCPServer.codexInboxNote)
+    #expect(answer.text.contains("end your turn"))
+    #expect(answer.text.contains("Do not sleep"))
+    #expect(!answer.text.contains("secret peer text"))
+    // The call is still the heartbeat that retries held messages.
+    #expect(capture.operations().contains("receive"))
+}
+
+@Test func canvasCodexReceiveMessagesKeepsTheErrorPath() throws {
+    let capture = CanvasExchangeCapture()
+    capture.responses.withLock { $0["receive"] = CanvasBridgeResponse(error: "Not registered.") }
+    let server = capture.server(provider: "codex")
+    #expect(server.register())
+    let reply = try #require(
+        server.handle(canvasRPC("tools/call", params: ["name": "receive_messages"])))
+    let answer = try canvasToolText(reply)
+    #expect(answer.failed)
+    #expect(answer.text != CanvasBridgeMCPServer.codexInboxNote)
+}
+
+@Test func canvasClaudeReceiveMessagesStillReturnsTheMessageList() throws {
+    let capture = CanvasExchangeCapture()
+    capture.responses.withLock {
+        $0["receive"] = CanvasBridgeResponse(messages: [
+            .init(id: "m1", source: UUID().uuidString, text: "hello claude")
+        ])
+    }
+    let server = capture.server()
+    #expect(server.register())
+    let reply = try #require(
+        server.handle(canvasRPC("tools/call", params: ["name": "receive_messages"])))
+    let answer = try canvasToolText(reply)
+    #expect(answer.failed == false)
+    #expect(answer.text.contains("hello claude"))
+    #expect(!answer.text.contains("No inbox for Codex"))
+}
+
+@Test func canvasInstructionsTeachCodexToWaitByEndingItsTurn() throws {
+    let codex = try canvasInitializeInstructions(provider: "codex")
+    #expect(codex.contains("end your turn"))
+    #expect(codex.contains("never poll receive_messages"))
+    #expect(!codex.contains("Use receive_messages to read pending messages"))
+    let claude = try canvasInitializeInstructions(provider: "claude")
+    #expect(claude.contains("channel events"))
+    #expect(!claude.contains("Use receive_messages to read pending messages"))
+    for text in [codex, claude] {
+        #expect(text.contains("takes a message when its current turn ends"))
+        #expect(text.contains("do not tell a peer to wait or poll"))
+        #expect(text.utf8.count < 4_000)
+    }
+}
+
+@Test func canvasMessagingToolDescriptionsStateHowCodexReceives() throws {
+    let receive = try canvasToolDescription(provider: "codex", "receive_messages")
+    #expect(receive.contains("Claude Code only"))
+    #expect(receive.contains("Codex: do not call this"))
+    let send = try canvasToolDescription(provider: "codex", "send_message")
+    #expect(send.contains("A Codex peer reads it when its current turn ends."))
+}
+
 @Test func canvasOrchestrationToolForwardsAValidatedCall() throws {
     let capture = CanvasExchangeCapture()
     let server = capture.server()

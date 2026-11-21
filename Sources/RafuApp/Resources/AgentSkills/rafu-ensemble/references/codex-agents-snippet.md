@@ -27,4 +27,6 @@ but one runs in that node, link it and set the link live. Keep a Mermaid
 diagram under 8000 x 8000 pt; split bigger ones. Use notes (`note_create`, `note_write`) as shared memory,
 `diagram_build`/`mermaid_set` for diagrams, and `export` for PNG/PDF/GIF files. Commands are argument arrays,
 never shell strings. Never retry an action the user denied.
+Messages from peers arrive as new turns. To wait for one, end your turn.
+Never sleep or poll `receive_messages`.
 ```

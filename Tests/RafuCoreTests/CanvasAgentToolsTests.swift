@@ -551,3 +551,13 @@ private let nodeB = "7F9619FF-8B86-D011-B42D-00C04FC964FF"
     #expect(try description("terminal_send").contains("link_set_state"))
     #expect(try description("mermaid_set").contains("8000 by 8000"))
 }
+
+@Test func terminalCreatePromptDescriptionForbidsWaitAndPollInstructions() throws {
+    let entry = try #require(
+        CanvasAgentToolCatalog.definitions.first { $0["name"] as? String == "terminal_create" })
+    let schema = try #require(entry["inputSchema"] as? [String: Any])
+    let properties = try #require(schema["properties"] as? [String: Any])
+    let prompt = try #require(properties["prompt"] as? [String: Any])
+    let text = try #require(prompt["description"] as? String)
+    #expect(text.contains("Do not tell the agent to wait or poll for messages"))
+}

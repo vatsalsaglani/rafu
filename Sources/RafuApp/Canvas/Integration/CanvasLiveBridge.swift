@@ -896,9 +896,11 @@ final class CanvasLiveBridge {
         if endpoints.values.contains(where: {
             $0.controller?.id == route.target && $0.provider == "codex"
         }) {
-            // Codex's queue command does not start a turn for an idle agent.
+            // `codex queue` holds the message until the current turn ends. Whether it
+            // also starts a turn for an agent that is already idle is not proven, so
+            // the text covers both cases.
             text +=
-                " Codex reads a queued message when it next runs. If it waits at its prompt, start it with terminal_send."
+                " Codex takes it as a new turn when its current turn ends. If Codex waits idle at its prompt and does not start, start it with terminal_send."
         }
         var delivery = CanvasAgentToolResult(message: text)
         delivery.delivered = true

@@ -1438,7 +1438,7 @@ public nonisolated enum CanvasAgentToolCatalog {
                             ]),
                         "prompt": property(
                             "string",
-                            "First task for claude or codex, typed as one argument of the launch line: at most \(CanvasAgentToolCall.maximumCommandArgumentBytes) bytes, newlines become spaces. For a longer brief write a file or a note and pass a one-line prompt that names the path or note title and what to do with it.",
+                            "First task for claude or codex, typed as one argument of the launch line: at most \(CanvasAgentToolCall.maximumCommandArgumentBytes) bytes, newlines become spaces. For a longer brief write a file or a note and pass a one-line prompt that names the path or note title and what to do with it. Do not tell the agent to wait or poll for messages; a message starts its next turn.",
                             ["maxLength": CanvasAgentToolCall.maximumCommandArgumentBytes]),
                         "model": property(
                             "string",
