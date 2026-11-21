@@ -82,10 +82,21 @@ when the board is zoomed out) so the node shows; the result says so. Results
 never repeat the typed line.
 
 `send_message` returns `delivered: true` when Rafu queued the message. It does
-not mean the peer read it. `delivered: false` means the peer is still starting:
-Rafu holds the message (at most 8 per peer, 2 minutes) and sends it when the
-peer connects, so do not send it again. Wait until `list_connections` shows a
-started peer `connected` before you send.
+not mean the peer read it. `delivered: false` means Rafu holds the message (at
+most 8 per peer, 5 minutes) and sends it when it can, so do not send it again.
+The result names the cause: the peer is not connected yet, its agent cannot take
+messages yet, or the agent refused it while it starts. After 5 minutes Rafu
+drops the message and the link shows Failed; `list_connections` shows
+`pending` (held messages) and `lastDelivery` (`expired` or `failed`) for each
+peer. Wait until `list_connections` shows a started peer `connected` before you
+send.
+
+Codex reads a queued message when it next runs, and a queued message does not
+start a turn for an idle Codex. When the result of an accepted send to a Codex
+peer says so, call `terminal_send` with a short line to wake it.
+
+A received message begins with "Ensemble message from @name (peer id ...)".
+Answer with `send_message` to that `@mention` or peer ID.
 
 ## Changing a running agent
 

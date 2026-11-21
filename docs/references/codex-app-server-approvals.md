@@ -101,10 +101,41 @@ the first poll after 5 s. The terminal UI ran as `codex --remote unix://<dir>/te
 Permission probe: `--enable request_permissions_tool --enable exec_permission_approvals`. Each probe left one named
 session in `~/.codex`; archive it with the `thread/archive` request.
 
+## Rafu's own MCP tools are pre-approved (2026-11-21, codex-cli 0.171.0)
+
+Codex asks "Allow the rafu MCP server to run tool "ensemble_describe"?" for each Rafu tool. That question is an MCP
+elicitation (`mcpServer/elicitation/request` in the 0.171.0 method table). The proxy tracks four request methods only
+(command, file change, permissions, question), so this one is not announced and never shows in Up next. It shows
+in the terminal as "Needs you · Answer in the terminal" (an agent hook state). Rafu does not add Up next support for
+other servers' approvals (user decision).
+
+For Rafu's own server the question is redundant: Agent control (Off, Ask, Allow) already decides every call. The
+launcher adds `-c mcp_servers.rafu.default_tools_approval_mode="approve"` to the terminal's private app server
+(`CanvasBridgeLaunch.plan`; it sits in the prefix that `run` drops with `dropLast(arguments.count)`). It never writes
+`~/.codex/config.toml`, and it names only the `rafu` server. Decision:
+[`0044-pre-approve-rafu-tools-for-codex.md`](../decisions/0044-pre-approve-rafu-tools-for-codex.md).
+
+Verified values (0.171.0): the setting accepts `auto`, `prompt`, `writes` and `approve`. A per-tool form,
+`mcp_servers.<name>.tools.<tool>.approval_mode`, also exists. Reproduce (no write to the user's Codex config; the
+`-c` flags apply to this one command):
+
+```bash
+codex -c mcp_servers.zzz.command="/bin/true" \
+  -c mcp_servers.zzz.default_tools_approval_mode="bogus" mcp list
+# Error: unknown variant `bogus`, expected one of `auto`, `prompt`, `writes`, `approve`
+codex -c mcp_servers.zzz.command="/bin/true" \
+  -c mcp_servers.zzz.default_tools_approval_mode="approve" mcp list   # loads and lists "zzz"
+```
+
+Not verified: that `approve` removes the question in a live Codex turn. If it still prompts, try `writes` (the Rafu
+tool list marks read-only tools with `readOnlyHint`), then the per-tool `approval_mode`. Note: inside a Rafu terminal
+the `codex` on `PATH` is Rafu's wrapper, so run the probe with the real binary path.
+
 ## Verification
 
 ```bash
 swift test --filter CanvasCodexApprovalTests
+swift test --filter CanvasBridgeLaunchTests
 ```
 
 ## Related

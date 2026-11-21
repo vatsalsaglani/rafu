@@ -235,6 +235,9 @@ struct CanvasLiveBridgeTests {
         let received = await fixture.bridge.handle(fixture.request(1, "receive"))
         #expect(received.messages.map(\.text) == [text])
         #expect(received.messages.first?.source == fixture.cards[0].id.rawValue.uuidString)
+        // The receiver can name the sender to answer it.
+        #expect(received.messages.first?.sourceMention == "@terminal-0")
+        #expect(received.messages.first?.sourceTitle == "Terminal 0")
         #expect(await fixture.bridge.handle(fixture.request(1, "receive")).messages.isEmpty)
     }
 
@@ -1569,6 +1572,122 @@ struct CanvasHeldMessageTests {
         #expect(quit.error?.contains("Connect two live terminal nodes") == true)
         #expect(held(fixture, 1) == 0)
         #expect(try state(fixture).kind != .failed)
+    }
+
+    @Test("A held message says why it waits, in its own words for each cause")
+    func holdTextsNameTheirCause() async throws {
+        // 1. The peer has no client yet.
+        let starting = try CanvasLiveBridgeFixture()
+        starting.hints.cards = [starting.cards[1].id]
+        #expect(await starting.bridge.handle(starting.request(0, "register")).error == nil)
+        starting.bridge.enable(starting.edge, in: starting.board)
+        let notConnected = await starting.bridge.handle(
+            starting.request(0, "send", destination: 1, text: "one"))
+        let notConnectedText = try #require(notConnected.toolResult?.message)
+        #expect(notConnectedText.contains("not connected yet"))
+        #expect(notConnectedText.contains("5 minutes"))
+
+        // 2. The peer is connected, but its Codex agent has no thread yet.
+        let notReady = try CanvasLiveBridgeFixture()
+        #expect(await notReady.bridge.handle(notReady.request(0, "register")).error == nil)
+        #expect(
+            await notReady.bridge.handle(
+                notReady.codexRegistration(
+                    1, route: CanvasLiveBridgeFixture.route(), client: notReady.clients[1])
+            ).error == nil)
+        notReady.bridge.enable(notReady.edge, in: notReady.board)
+        let notReadyText = try #require(
+            await notReady.bridge.handle(
+                notReady.request(0, "send", destination: 1, text: "three")
+            ).toolResult?.message)
+        #expect(notReadyText.contains("is connected, but its agent cannot take messages yet"))
+        #expect(!notReadyText.contains("not connected yet"))
+
+        // 4. The peer is connected, and earlier held messages go first.
+        let behindText = try #require(
+            await notReady.bridge.handle(
+                notReady.request(0, "send", destination: 1, text: "four")
+            ).toolResult?.message)
+        #expect(behindText.contains("earlier messages"))
+        #expect(!behindText.contains("not connected yet"))
+
+        // 3. Codex refused the message while it started.
+        let refused = try CanvasLiveBridgeFixture()
+        try await codexPeer(refused)
+        refused.codex.refusals = 1
+        let refusedText = try #require(
+            await refused.bridge.handle(
+                refused.request(0, "send", destination: 1, text: "four")
+            ).toolResult?.message)
+        #expect(refusedText.contains("refused the message while it starts"))
+        #expect(!refusedText.contains("not connected yet"))
+    }
+
+    @Test("A message that expired shows as lastDelivery in list_connections, with no pending")
+    func expiredMessageIsVisibleToTheSender() async throws {
+        let fixture = try CanvasLiveBridgeFixture()
+        fixture.hints.cards = [fixture.cards[1].id]
+        #expect(await fixture.bridge.handle(fixture.request(0, "register")).error == nil)
+        fixture.bridge.enable(fixture.edge, in: fixture.board)
+        _ = await fixture.bridge.handle(fixture.request(0, "send", destination: 1, text: "lost"))
+
+        let waiting = await fixture.bridge.handle(fixture.request(0, "list"))
+        #expect(waiting.peers.first?.pending == 1)
+        #expect(waiting.peers.first?.lastDelivery == nil)
+
+        fixture.clock.date.addTimeInterval(CanvasLiveBridge.heldLifetime + 1)
+        fixture.bridge.expireHeldMessages()
+        _ = await fixture.bridge.handle(fixture.request(0, "receive"))
+        let listed = await fixture.bridge.handle(fixture.request(0, "list"))
+        #expect(listed.peers.first?.pending == 0)
+        #expect(listed.peers.first?.lastDelivery == "expired")
+
+        // The next message the peer takes clears it.
+        #expect(await fixture.bridge.handle(fixture.request(1, "register")).error == nil)
+        _ = await fixture.bridge.handle(fixture.request(0, "send", destination: 1, text: "again"))
+        await settle { held(fixture, 1) == 0 }
+        let cleared = await fixture.bridge.handle(fixture.request(0, "list"))
+        #expect(cleared.peers.first?.lastDelivery == nil)
+    }
+
+    @Test("An accepted message to a Codex peer tells the sender how to wake an idle agent")
+    func acceptedCodexSendNamesTerminalSend() async throws {
+        let fixture = try CanvasLiveBridgeFixture()
+        try await codexPeer(fixture)
+        let sent = await fixture.bridge.handle(
+            fixture.request(0, "send", destination: 1, text: "work"))
+        #expect(sent.toolResult?.delivered == true)
+        #expect(sent.toolResult?.message?.contains("terminal_send") == true)
+        // The text Codex receives names the sender and how to answer.
+        let received = try #require(fixture.codex.sent.first?.text)
+        #expect(received.hasPrefix("Ensemble message from @terminal-0 (peer id "))
+        #expect(received.contains(fixture.cards[0].id.rawValue.uuidString))
+        #expect(received.hasSuffix("\nwork"))
+
+        // A Claude peer reads its inbox on its own: no terminal_send advice.
+        let claude = try CanvasLiveBridgeFixture()
+        await claude.registerPair()
+        let plain = await claude.bridge.handle(
+            claude.request(0, "send", destination: 1, text: "work"))
+        #expect(plain.toolResult?.message?.contains("terminal_send") == false)
+    }
+
+    @Test("A Codex client that sends no route keys keeps the bound route and thread")
+    func codexRegistrationWithoutRouteKeepsTheRoute() async throws {
+        let fixture = try CanvasLiveBridgeFixture()
+        try await codexPeer(fixture)
+        // The first client went quiet; a new MCP client registers without route keys.
+        fixture.clock.date.addTimeInterval(20)
+        _ = await fixture.bridge.handle(fixture.request(0, "receive"))
+        let client = UUID().uuidString
+        let registration = fixture.request(1, "register", client: client, provider: "codex")
+        #expect(await fixture.bridge.handle(registration).error == nil)
+
+        let sent = await fixture.bridge.handle(
+            fixture.request(0, "send", destination: 1, text: "still routed"))
+        #expect(sent.toolResult?.delivered == true)
+        #expect(fixture.codex.sent.count == 1)
+        #expect(held(fixture, 1) == 0)
     }
 
     @Test("Held messages are bounded and a paused link drops them")

@@ -997,8 +997,10 @@ Rule now:
   senders still get the old error.
 - A message to a starting peer, to a connected Codex peer without a thread, or
   behind older held messages is **held** per target terminal: at most 8, in
-  send order, 2 minutes (`heldLifetime`), never saved, never logged, counts only.
-  The sender gets `delivered: false` and "Held: ...".
+  send order, 5 minutes (`heldLifetime`, was 2 minutes until 2026-11-21), never
+  saved, never logged, counts only.
+  The sender gets `delivered: false` and "Held: ..." (the words depend on the
+  cause, see "2026-11-21" below).
 - Held messages go out in order when the peer registers, when the supervisor
   `bind` supplies the thread, and on each heartbeat `receive` (`scheduleFlush`).
   Every message passes the same route, sender-liveness, rate-limit and inbox
@@ -1007,7 +1009,7 @@ Rule now:
 - A `codex queue` refusal (`deliveryFailed`, not a timeout, which may have
   delivered) within 45 s of the client connecting is a start-up race: the
   message waits and is retried every 3 s. Later, it is a real failure.
-- **Failed means a real failure:** a held message the peer never took in 2
+- **Failed means a real failure:** a held message the peer never took in 5
   minutes ("The peer did not connect in time. Send the message again."), a
   refusal after the grace, a full inbox, the send limit. While the peer is not
   connected the link shows Disconnected, as before.
@@ -1035,6 +1037,53 @@ typed, and the edge reaches Live without a click. Send a second message at
 once: the result says Held and the message arrives after Codex connects, the
 edge never shows Failed. Repeat Codex to Claude, Claude to Claude, and with the
 window minimized.
+
+## 2026-11-21: reply identity, honest holds, idle Codex (source and unit tests only)
+
+Applies to: `CanvasBridgeMessage.framedText` (`CanvasBridgeProtocol.swift`), the channel notification in
+`CanvasBridgeMCPServer.swift`, `deliver`, `hold`, `accepted` and `peers(for:)` in `CanvasLiveBridge.swift`. No live
+provider run yet.
+
+- **A child could not name the sender.** A message carried the sender's node id only in the Claude channel `meta`
+  (`source_id`), never in the visible text, so a child Claude wrote that it could not send a reply ("the send tool
+  needs the listed destination of the sender"). The node id is a valid `send_message` destination, and the sender is
+  listed for the child, so nothing was wrong with the link.
+- **Rule now.** Every received message starts with one Rafu line: `Ensemble message from @mention (peer id <id>).
+  Reply with send_message to that mention or peer id.` then a newline and the sender's text, unchanged. The same
+  line goes to Claude (channel `content`, plus `source_mention` in `meta`) and to Codex (the queued text). The
+  mention comes from the sender's card title, and a mention that is not a plain `@handle` of at most 64 bytes is
+  dropped rather than repaired, so the line never carries peer-controlled text. `CanvasBridgeMessage` gained
+  optional `sourceMention` and `sourceTitle` (an older peer sends neither and still decodes). The MCP instructions
+  and the `send_message` and `receive_messages` descriptions state the reply rule.
+- **Honest holds.** `hold` used to say "that peer is not connected yet" for every cause. It now has four texts: no
+  client yet; connected, but the Codex agent has no thread or route yet; the agent refused while it starts (retried
+  every 3 s); earlier held messages go first. All say `delivered: false`, the 5 minute limit and that the link then
+  shows Failed.
+- **`list_connections` fields.** A peer now has `pending` (held messages, a count) and `lastDelivery` (`expired` or
+  `failed`, cleared by the next message the peer takes). A sender whose message expired can see it.
+- **Idle Codex.** `codex queue` adds the message to the thread, but it does not start a turn for an idle agent
+  (see "Codex conversation navigation" above). The accepted reply for a Codex peer now adds: "Codex reads a queued
+  message when it next runs. If it waits at its prompt, start it with terminal_send."
+- **Register without route keys.** A Codex MCP client that registered without `RAFU_CANVAS_CODEX_ENDPOINT` and
+  `RAFU_CANVAS_CODEX_EXECUTABLE` used to write nil over the bound route and clear the thread: the peer showed
+  connected, and every delivery found no route. A Codex register without route keys now keeps the route and thread
+  that the supervisor bound (only when the route is not suspended).
+- **Pre-approved tools.** The Codex launcher adds `mcp_servers.rafu.default_tools_approval_mode="approve"` (decision
+  record [`0044-pre-approve-rafu-tools-for-codex.md`](../decisions/0044-pre-approve-rafu-tools-for-codex.md)).
+
+Verification:
+
+```bash
+./script/test.sh --filter CanvasHeldMessageTests
+./script/test.sh --filter CanvasLiveBridgeTests
+./script/test.sh --filter CanvasBridgeTests
+./script/test.sh --filter CanvasBridgeLaunchTests
+```
+
+Manual checks (the user, Rafu Lightning only): a coordinator Claude sends to a child Claude and the child answers
+over the channel with no question about the sender; a message to a Codex peer right after it starts says "not
+connected yet" or "cannot take messages yet", never a wrong cause; after 5 minutes `list_connections` shows
+`lastDelivery: expired` and the link shows Failed; a send to an idle Codex tells the sender to use `terminal_send`.
 
 ## 2026-11-14: NUL gaps — the real reason Allow still waited
 

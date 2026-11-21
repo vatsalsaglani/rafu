@@ -19,6 +19,15 @@
 8. Read the reply (channel event or `receive_messages`) and `note_read` the
    Findings section.
 
+## Answer a message from a peer
+
+A received message starts with `Ensemble message from @codex-review (peer id
+<uuid>).` Reply with `send_message {"destination": "@codex-review", "text":
+"Done. See Findings."}`. Use the peer ID when two peers share a name. If a send
+returns Held, do not repeat it; `list_connections` shows `pending` and, after
+5 minutes, `lastDelivery`. If the receiver is an idle Codex, wake it with
+`terminal_send`.
+
 ## Hand a long brief to a peer
 
 1. Write the brief to a file in the workspace (or `note_create` a note).

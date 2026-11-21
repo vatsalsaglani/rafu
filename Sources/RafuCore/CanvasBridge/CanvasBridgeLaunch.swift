@@ -91,6 +91,11 @@ public nonisolated enum CanvasBridgeLaunch {
                     "-c", "mcp_servers.rafu.args=[\"_canvas-mcp\",\"codex\"]",
                     "-c", "mcp_servers.rafu.env.RAFU_CANVAS_TOKEN=\(try quoted(token))",
                     "-c", "mcp_servers.rafu.env.RAFU_CANVAS_SOCKET=\(try quoted(socket))",
+                    // Rafu's own tool server only. Ensemble Agent control already
+                    // decides every call, so Codex must not ask a second time. The
+                    // flags reach this terminal's private app-server, never
+                    // ~/.codex/config.toml, and no other MCP server is affected.
+                    "-c", "mcp_servers.rafu.default_tools_approval_mode=\(try quoted("approve"))",
                 ] + arguments
         }
         return launch
