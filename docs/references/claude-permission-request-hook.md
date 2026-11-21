@@ -264,6 +264,9 @@ Applies to: `AgentPermissionRequestSummary.swift` (`ToolCall`, `mcpParts(of:)`, 
   fixed text and optional `interrupt`). The answer channel carries no tool name, so no change to the answer files,
   the spool or the hook entry was needed.
 - **Spool size.** The summary is at most about 3 KiB, so it fits `AgentHookSpool.maximumFileBytes` (64 KiB).
+- **The Codex side exists too (2026-11-21).** A Codex tool approval (`mcpServer/elicitation/request`) builds the same
+  `toolCall` request through the proxy, with its own recognition rule and answer shapes. See
+  [`codex-app-server-approvals.md`](codex-app-server-approvals.md), section "MCP tool approvals are elicitations".
 - **Not verified live:** that Claude Code sends `PermissionRequest` with `tool_name` in the `mcp__server__tool`
   form and `tool_input` as the arguments object. An earlier live run showed the row as "Needs you" for such a
   tool, which makes the form probable but does not prove it. If the form differs, the name rule gives no row and

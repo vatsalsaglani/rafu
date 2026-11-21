@@ -7,14 +7,16 @@ the reply shapes), and `Sources/RafuApp/Canvas/Integration/CanvasLiveBridge.swif
 Tests: `Tests/RafuCoreTests/CanvasCodexApprovalTests.swift`.
 
 Last verified: Swift 6.4.2, macOS 27, 2026-11-20, codex-cli 0.170.0 (live probes below, through the real proxy and
-supervisor code, with the real `codex app-server` and a real `codex --remote` terminal UI in a pseudo-terminal).
+supervisor code, with the real `codex app-server` and a real `codex --remote` terminal UI in a pseudo-terminal). The sections dated 2026-11-21 use codex-cli 0.171.0: the
+schema and binary strings were read, and the MCP tool approval section was not run live.
 
 ## Observations
 
 1. **The server resolves a request on the connection that owns it, and any client may answer.** The terminal UI
    (TUI) gets a server request (`item/commandExecution/requestApproval`, `item/fileChange/requestApproval`,
-   `item/permissions/requestApproval`, `item/tool/requestUserInput`) with a JSON-RPC `id`. A response with that same
-   `id` on the TUI's own connection answers it. The proxy writes one masked text frame
+   `item/permissions/requestApproval`, `item/tool/requestUserInput`; since 2026-11-21 also
+   `mcpServer/elicitation/request`, see the section "MCP tool approvals are elicitations") with a JSON-RPC `id`. A
+   response with that same `id` on the TUI's own connection answers it. The proxy writes one masked text frame
    `{"id": <same id>, "result": {...}}` upstream, as if the TUI had sent it.
 2. **The TUI closes its own prompt.** After the injected answer the server sends `serverRequest/resolved`. The TUI
    dismisses its prompt on that notification, with no keystroke. Observed with a command approval: the prompt
@@ -129,10 +131,10 @@ session in `~/.codex`; archive it with the `thread/archive` request.
 ## Rafu's own MCP tools are pre-approved (2026-11-21, codex-cli 0.171.0)
 
 Codex asks "Allow the rafu MCP server to run tool "ensemble_describe"?" for each Rafu tool. That question is an MCP
-elicitation (`mcpServer/elicitation/request` in the 0.171.0 method table). The proxy tracks four request methods only
-(command, file change, permissions, question), so this one is not announced and never shows in Up next. It shows
-in the terminal as "Needs you · Answer in the terminal" (an agent hook state). Rafu does not add Up next support for
-other servers' approvals (user decision).
+elicitation (`mcpServer/elicitation/request` in the 0.171.0 method table). Until 2026-11-21 the proxy tracked four
+request methods only, so this one never showed in Up next; it showed in the terminal as "Needs you · Answer in the
+terminal" (an agent hook state), and the user had decided not to add Up next support for other servers' approvals.
+That decision was reversed for tool approvals the same day: see the next section.
 
 For Rafu's own server the question is redundant: Agent control (Off, Ask, Allow) already decides every call. The
 launcher adds `-c mcp_servers.rafu.default_tools_approval_mode="approve"` to the terminal's private app server
@@ -160,12 +162,91 @@ Claude Code's equivalent of this approval mode is `--allowedTools=mcp__rafu` (se
 [`claude-permission-request-hook.md`](claude-permission-request-hook.md) and the amendment in the decision record about
 pre-approving Rafu's tool server).
 
+## MCP tool approvals are elicitations (2026-11-21, codex-cli 0.171.0; schema only, not run live)
+
+Applies to: `CanvasAgentRequest.parse` (case `mcpServer/elicitation/request`, helper `toolCallRequest`, set
+`knownToolApprovalMetaKeys`), `CanvasAgentRequest.result(for:)` (case `.toolCall`), `approvalMethods` in
+`CanvasCodexProxy.swift`. Tests: `CanvasAgentRequestTests`, `CanvasCodexApprovalTests`. Decision records: the amendment
+"Codex requests for MCP tools answer in the peek" of
+[`0042-answer-agent-requests-from-up-next.md`](../decisions/0042-answer-agent-requests-from-up-next.md) and decision 5 of
+[`0044-pre-approve-rafu-tools-for-codex.md`](../decisions/0044-pre-approve-rafu-tools-for-codex.md) (reversed for tool
+approvals).
+
+Codex asks before it calls a tool of an MCP server (for example "Allow the atlassian MCP server to run tool
+"getJiraIssue"?") with the server request `mcpServer/elicitation/request`. The proxy now follows it. A tool approval
+opens the same `toolCall` request that a Claude MCP tool request uses ("Use MCP tool" card).
+
+**Verified from the generated schema (0.171.0):**
+
+- Params: `threadId`, `turnId` (string or null), `serverName`, `environmentId`, `mode`, `message`, `_meta`.
+  `mode` is `form` (with `requestedSchema`, an object with `properties`), `openai/form`, `openaiForm` or `url`
+  (with `url` and `elicitationId`).
+- Response: `{"action": "accept" | "decline" | "cancel", "content": <any JSON or null>, "_meta": <any JSON or
+  null>}`. Only `action` is required.
+- `serverRequest/resolved` (`{threadId, requestId}`) clears the request, as for the other methods. There is no
+  "accept for session" decision on this method.
+
+**INFERRED from strings in the Mach-O binary (`strings`), not in the schema and not seen on a live request:** the
+`_meta` of a tool approval holds `codex_approval_kind` = `mcp_tool_call`, `tool_name`, `tool_params` (an object), and
+probably `tool_params_display`, `tool_title`, `tool_description`, `source`, `connector_id`, `connector_name`,
+`connector_description`, `persist`, `codex_request_type`. The evidence is the automatic reviewer's error texts ("must
+declare mcp_tool_call approval kind", "must include a non-empty tool_name", "tool_params must be an object", "review
+only supports empty form schemas", "review only supports form elicitations"). The terminal UI offers "remember for this
+session" and "remember for future tool calls"; these are `accept` plus a `persist` value in the response `_meta`.
+Other `_meta` keys exist in the binary that Rafu does not understand: `codex_sensitive_action`,
+`codex_requires_user_input`, `codex_approval_cancellation_reason`.
+
+**Recognition rule (all must hold, else no row and the terminal answers, as before):** mode `form`; `requestedSchema`
+an object whose `properties` is absent, null or empty; `_meta` an object with `codex_approval_kind` equal to
+`mcp_tool_call`; `serverName` non-empty and without `__`; `_meta.tool_name` non-empty; `_meta.tool_params` a JSON
+object (an empty object is valid; absent, null or another type gives no row, because Rafu must not let the user
+approve arguments it did not show); the built name `mcp__<server>__<tool>` passes the Claude name rule
+(`AgentPermissionRequestSummary.mcpParts`: characters `A-Z a-z 0-9 _ - .`, at most 200 bytes) and splits back into the
+same server and tool. A `_meta` key outside `knownToolApprovalMetaKeys` (for example `codex_sensitive_action`) makes
+the row terminal-only ("Open terminal"), because the request may ask for more than the card shows. An incomplete
+summary (arguments over 2 KiB, or cut or changed by the sanitizer) is terminal-only too. Rafu never reads `message`,
+`tool_title`, `tool_params_display` or the connector fields. A generic form (a property in the schema) and a `url`
+elicitation are forwarded to the terminal and not announced.
+
+**Answers (not run live):**
+
+| Button | Decision | `result` sent upstream |
+|---|---|---|
+| Allow | accept | `{"action": "accept", "content": {}}` |
+| Deny | decline | `{"action": "decline"}` |
+| Deny and stop | cancel | `{"action": "cancel"}` |
+
+Rafu never sends `_meta`, so it never sends `persist`: no "remember" answer can come from Rafu, and "Allow for this
+session" stays off for this kind. A Claude tool call never reaches the proxy table, so changing `result(for:)` for
+`.toolCall` cannot change a Claude answer.
+
+**Not verified. Hand checks (they need a live Codex turn and one MCP server in the user's Codex config that is not
+`rafu`; run the real binary, not Rafu's wrapper):**
+
+1. The exact `_meta` keys of a live request. If no card shows, or the card says "Open terminal" only, capture one
+   real request and compare key names (never values) with the rule. Do not loosen the rule without a captured frame.
+2. That `{"action":"accept","content":{}}` runs the tool (`content` may need to be `null` or another shape).
+3. That the terminal prompt closes by itself on `serverRequest/resolved` for this method (proved only for a command
+   approval, observation 2).
+4. That `cancel` stops the turn. For a command approval it does ("Conversation interrupted"). For an MCP tool it may
+   only skip the call; then "Deny and stop" is a false label for Codex, and the fallback is Allow and Deny only for a
+   Codex tool call, with a new stored flag on the request (needs the user's decision).
+5. That a Rafu tool (`ensemble_describe`) raises no Codex question (this also proves the `approve` setting above).
+
+Reproduce the schema: `codex app-server generate-json-schema --out <dir>` (and `generate-ts --out <dir>`), then read
+`McpServerElicitationRequestParams.json` and `McpServerElicitationRequestResponse.json`. The `_meta` keys were found
+with `strings` on the `codex` binary.
+
 ## Verification
 
 ```bash
 swift test --filter CanvasCodexApprovalTests
+swift test --filter CanvasAgentRequestTests
 swift test --filter CanvasBridgeLaunchTests
 ```
+
+Test evidence for the elicitation change: 4143 tests passed in parallel mode in the implementor's worktree. The
+`--no-parallel` count was not supplied to the documentor.
 
 ## Related
 

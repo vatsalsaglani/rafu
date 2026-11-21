@@ -570,7 +570,10 @@ Code: `ApprovalPeekModels.swift` (pure), `ApprovalPeekController.swift`,
   `defaultMaxCardHeight` (used before the screen is known). One question with
   4 or fewer choices, at most 44 label columns and at most 120 characters of
   text shows choice buttons; any other question shows "Answer in Up next".
-- **MCP tool card (2026-11-21, Claude only).** `CanvasAgentRequest.Kind.toolCall`, title "Use MCP tool"
+- **MCP tool card (2026-11-21, Claude and Codex).** Codex tool approvals (`mcpServer/elicitation/request`) build the
+  same request in `CanvasAgentRequest.parse`, so the card, the identity lines and the bounds below are the same; the
+  Codex answer shapes and the unverified `_meta` keys are in
+  [`codex-app-server-approvals.md`](codex-app-server-approvals.md). `CanvasAgentRequest.Kind.toolCall`, title "Use MCP tool"
   (`ApprovalPeekView`, `CompanionRequestPresentation`). The arguments are in `request.command` (sorted, pretty
   JSON; `{}` for none; the same 2 KiB bound and exact-or-terminal-only rule as a command, so `boxText`, `fits`
   and "Show all" need no special case). The identity is in `request.reason`, two lines: `"<friendly server>:
@@ -579,7 +582,8 @@ Code: `ApprovalPeekModels.swift` (pure), `ApprovalPeekController.swift`,
   the card never says "trusted" or "official". `ApprovalPeekFit` also requires the identity to fit
   `maxToolIdentityLines` (6 wrapped lines) and reserves 190 pt (not 150) for the text; the box shows with
   `CompanionToolCallHeader` in Up next. Options: Allow, Deny, Deny and stop; never a session answer; the Codex
-  proxy never answers this kind (`result(for:)` is nil). Text from the agent always shows verbatim. Values are
+  proxy answers it with `{"action":"accept","content":{}}`, `{"action":"decline"}` or `{"action":"cancel"}`
+  (`result(for:)`; it was nil before the Codex change). Text from the agent always shows verbatim. Values are
   never masked. VoiceOver: announcement "<agent> needs approval: Use tool <tool> of <server>" (a terminal-only
   card says "Use MCP tool. Open the terminal to answer."); the box reads "<agent> asks to use tool <tool> of
   <server>, named <raw name>, with arguments <text>". Source and unit tests only; not checked in the GUI.

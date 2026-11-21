@@ -885,8 +885,8 @@ Reference: the section "2026-11-21" of [`canvas-live-sessions.md`](../../referen
   keys keeps the bound route and thread. The Codex launcher adds `mcp_servers.rafu.default_tools_approval_mode="approve"`
   to the terminal's private app server only; the read-only Rafu tools carry `readOnlyHint`. The skill and the MCP
   instructions state the reply rule.
-- **Not built, decided.** Up next support for other MCP servers' Codex approvals. (The Claude case is built, see the
-  next status section.)
+- ~~**Not built, decided.** Up next support for other MCP servers' Codex approvals.~~ Reversed on 2026-11-21: built
+  for Claude and for Codex, see the next status section.
 - **Open checks (manual, in Rafu Lightning):** a Codex agent calls `ensemble_describe` and `list_connections` with no
   "Allow the rafu MCP server to run tool" question (if it still asks: try `writes`, then the per-tool
   `approval_mode`); Agent control Ask still raises a Rafu approval for a changing tool and Off refuses it; a child
@@ -914,9 +914,20 @@ bullet of [`notch-companion.md`](../../references/notch-companion.md).
   shows in the peek and in Up next as "Use MCP tool": identity in `reason`, sorted JSON arguments in `command`
   (2 KiB, no masking, "Show all", terminal-only when cut or changed), Allow, Deny, Deny and stop, no session allow.
   The hook decision JSON is unchanged.
+- **Delivered, Codex MCP tool requests (source and unit tests only).** The Codex proxy follows
+  `mcpServer/elicitation/request` (codex-cli 0.171.0). A tool approval (mode `form`, empty schema,
+  `_meta.codex_approval_kind` `mcp_tool_call`, `tool_name`, `tool_params` object, strict name rule) opens the same
+  "Use MCP tool" card. Allow sends `{"action":"accept","content":{}}`, Deny `{"action":"decline"}`, Deny and stop
+  `{"action":"cancel"}`; no `_meta`, no `persist`, no session allow. An unknown `_meta` key or cut arguments give
+  "Open terminal" only; a generic form or URL elicitation stays terminal-only with no row. No change in
+  `Sources/RafuApp`. Test evidence: 4143 tests passed in parallel mode in the implementor's worktree; the
+  `--no-parallel` result was not supplied to the documentor. Decision records: the Codex amendment of the decision
+  about answering agent requests from Up next (ADR 0042) and decision 5 of the decision about pre-approving Rafu's
+  tools (ADR 0044, reversed for tool approvals). Reference:
+  [`codex-app-server-approvals.md`](../../references/codex-app-server-approvals.md), section "MCP tool approvals are
+  elicitations".
 - **Deferred.** Steering a running Codex turn with `turn/steer` (stable in 0.171.0): needs inference to prove, an
-  app-to-proxy path and a hidden response frame. The Codex MCP approval (`mcpServer/elicitation/request`) stays
-  "Not built, decided".
+  app-to-proxy path and a hidden response frame.
 - **Not verified.** That a queued message starts a turn for a Codex that is idle at its prompt (test: neutral Codex
   peer, wait for idle, `send_message`; if no turn starts, try `codex queue --resume`). That Claude Code sends the
   `mcp__<server>__<tool>` name form and the arguments object in `PermissionRequest`. Test counts by mode for these two
@@ -926,3 +937,12 @@ bullet of [`notch-companion.md`](../../references/notch-companion.md).
   it ends. For Claude: ask for an Atlassian MCP tool and check the card ("Atlassian MCP (claude.ai):
   atlassianUserInfo", raw name, `{}`), Allow, Deny, long arguments ("Show all", then "Open terminal" only above
   2 KiB), VoiceOver, keyboard, a second window, and that Bash and file-edit cards are unchanged.
+- **Open checks, Codex MCP tool card (manual; they need a live Codex turn and one MCP server that is not `rafu`).**
+  (1) The card shows "Use MCP tool", `<server>: <tool>`, the raw name and the sorted JSON; if there is no card, or
+  only "Open terminal", capture one request and compare `_meta` key names (the key names are INFERRED from binary
+  strings, not seen live). (2) Allow runs the tool (the accept shape is not verified). (3) The terminal prompt
+  closes by itself after an answer from the row (not verified), and an answer in the terminal closes the card.
+  (4) Deny and stop stops the turn (not verified; if it only skips the call, the fallback is Allow and Deny only for
+  a Codex tool call, which needs the user's decision). (5) No arguments show `{}`; arguments over 2 KiB give "Open
+  terminal" only. (6) A Rafu tool raises no Codex question; the Claude card is unchanged. (7) VoiceOver, keyboard,
+  second window.

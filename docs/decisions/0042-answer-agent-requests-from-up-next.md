@@ -246,11 +246,12 @@ connector) showed only "Needs you", because the helper summarized Bash, Edit, Mu
    gives no summary and no row (an absent `tool_input` counts as `{}`).
 5. **Answers.** Allow, Deny, Deny and stop. There is no "Allow for this session" (decision 7 holds). The hook
    decision JSON is the same as for Bash: the answer channel has no tool name, so no change to the answer files,
-   the spool or the hook entry was needed. The Codex proxy never answers this kind.
-6. **Codex stays out.** A Codex approval for a tool of another MCP server (`mcpServer/elicitation/request`) is
+   the spool or the hook entry was needed. ~~The Codex proxy never answers this kind.~~ Superseded the same day by
+   the amendment "Codex requests for MCP tools answer in the peek" below.
+6. ~~**Codex stays out.** A Codex approval for a tool of another MCP server (`mcpServer/elicitation/request`) is
    still not followed by the proxy and still shows in the terminal only (the decision about pre-approving Rafu's
    own tools for Codex, [`0044-pre-approve-rafu-tools-for-codex.md`](0044-pre-approve-rafu-tools-for-codex.md),
-   decision 5).
+   decision 5).~~ Superseded the same day by the amendment below.
 
 Alternatives considered: a card for any unknown tool such as `WebFetch` (rejected: each built-in tool needs its own
 review of what must be shown); new fields on `CanvasAgentRequest` for server, tool and arguments (rejected: more
@@ -261,7 +262,54 @@ Not verified live: that Claude Code sends `PermissionRequest` with `tool_name` i
 `tool_input` as the arguments object. The hand check proves it. If Claude Code sends another form, the name rule
 gives no row and the terminal dialog stays (the safe result).
 
+## Amendment: Codex requests for MCP tools answer in the peek (2026-11-21)
+
+On the user's direction. It supersedes items 5 (last sentence) and 6 of the Claude amendment above, and reverses
+decision 5 of the decision about pre-approving Rafu's tools
+([`0044-pre-approve-rafu-tools-for-codex.md`](0044-pre-approve-rafu-tools-for-codex.md)) for tool approvals. Detail and
+evidence: [`codex-app-server-approvals.md`](../references/codex-app-server-approvals.md), section "MCP tool approvals are
+elicitations".
+
+1. **The proxy follows `mcpServer/elicitation/request`.** (Codex 0.171.0.) A Codex request to run a tool of an MCP
+   server opens the same `toolCall` request as the Claude case: same "Use MCP tool" card, same identity lines, sorted
+   JSON arguments up to 2 KiB with no masking, "Show all", Allow, Deny, Deny and stop, no session answer. No new
+   kind, no new field on the request and no change in the app were needed. The thread check, the 8-request bound, the
+   clear paths and the single masked frame with the original JSON-RPC id are unchanged.
+2. **Recognition rule.** A request is a tool approval only when: mode `form`; an empty form schema; `_meta`
+   has `codex_approval_kind` equal to `mcp_tool_call`; `serverName` is non-empty and has no `__`; `_meta.tool_name` is
+   non-empty; `_meta.tool_params` is a JSON object; and the built name `mcp__<server>__<tool>` passes the Claude name
+   rule and splits back into the same server and tool. Any other shape gives no row and the terminal answers, as
+   before. A generic form (a property in the schema) and a `url` elicitation stay terminal-only with no row.
+3. **Unknown `_meta` key.** A `_meta` key that Rafu does not know (for example `codex_sensitive_action`) makes the
+   row terminal-only ("Open terminal"), because the request may ask for more than the card shows. Arguments that are
+   cut or changed by the sanitizer do the same.
+4. **Answers.** Allow sends `{"action":"accept","content":{}}`, Deny sends `{"action":"decline"}`, Deny and stop
+   sends `{"action":"cancel"}`. Rafu never sends `_meta`, so it never sends `persist`: no "remember for this session"
+   or "always allow" can come from Rafu, and no session answer exists in the row.
+5. **Not shown.** `message`, the display title, the display arguments and the connector fields are free text from
+   Codex. The card builds its identity from `serverName` and `tool_name` only.
+
+Alternative considered: a row for generic forms ("Answer in the terminal"). Rejected: it needs a new kind and title,
+and the agent hook state already shows "Needs you". "Deny and stop" as a decline plus an injected `turn/interrupt` was
+rejected: the proxy would have to invent a client request id.
+
+Not verified live (the `_meta` key names are INFERRED from strings in the Codex binary, not from the schema): the
+exact `_meta` of a real request; that the accept shape runs the tool; that the terminal prompt closes by itself; that
+`cancel` stops the turn (it may only skip the call; then the fallback is Allow and Deny only for a Codex tool call,
+with a new stored flag). A request whose shape does not match the rule gets no row, so a wrong guess hides the feature
+and does not make it unsafe. Test evidence: 4143 tests passed in parallel mode in the implementor's worktree; the
+`--no-parallel` result was not supplied to the documentor.
+
 ## GUI checks pending
+
+For the Codex MCP tool card (needs a live Codex turn and one MCP server in the user's Codex config that is not
+Rafu): ask Codex to call a tool of that server with arguments. The peek must show "Use MCP tool", `<server>: <tool>`,
+the raw name and the sorted JSON. If no card shows, or the card says "Open terminal" only, capture one request and
+compare the `_meta` key names (never values) with the rule. Then check: Allow runs the tool and the terminal prompt
+closes by itself; a later answer in the terminal closes the card; Deny makes Codex report the refusal; Deny and stop
+stops the turn (if it does not, report it); a tool with no arguments shows `{}`; arguments over 2 KiB give "Open
+terminal" only; a Rafu tool raises no Codex question; a Claude MCP tool card is unchanged; VoiceOver, keyboard and a
+second window.
 
 For the MCP tool card: with "Answers from Up next" on, ask a Claude terminal for an MCP tool (for example "Atlassian
 MCP - Get Atlassian user info"). The peek must show "Atlassian MCP (claude.ai): atlassianUserInfo", the raw name and

@@ -5,6 +5,8 @@
 - **Date:** 2026-11-21
 - **Amended 2026-11-21:** the decision now covers Claude Code as well as Codex (see "Amendment: Claude Code"). The
   file name keeps "for-codex" so existing links stay valid.
+- **Amended 2026-11-21 (2):** decision 5 is reversed for tool approvals (the Codex proxy follows the MCP elicitation
+  method; see decision 5). Decisions 1 to 4 stay.
 - **Related:** [`codex-app-server-approvals.md`](../references/codex-app-server-approvals.md),
   [`canvas-live-sessions.md`](../references/canvas-live-sessions.md),
   the decision about answering agent requests from the Up next row
@@ -25,8 +27,9 @@ Off, every call is refused. The check runs again when the call executes (`Canvas
 question only repeats a decision that Rafu makes itself.
 
 The question is a Codex MCP elicitation (`mcpServer/elicitation/request`). It is not one of the four request kinds
-that the Codex proxy follows (command, file change, permissions, question), so it never appears in the Up next row.
-It shows in the terminal only, as "Needs you · Answer in the terminal".
+that the Codex proxy follows (command, file change, permissions, question), so it never appeared in the Up next row.
+It showed in the terminal only, as "Needs you · Answer in the terminal". (Later the same day the proxy began to
+follow this method for other servers' tool approvals; see decision 5.)
 
 ## Decision
 
@@ -42,11 +45,15 @@ It shows in the terminal only, as "Needs you · Answer in the terminal".
    `action_status`, `icon_search`, `list_connections`) with the MCP annotation `readOnlyHint: true`. A tool that
    changes anything is never marked. The hint is a fallback for the Codex mode `writes`, if `approve` proves
    not to be enough. It does not replace decision 1.
-5. **No Up next support for other servers' approvals.** The user decided not to build it. A Codex approval for an
+5. ~~**No Up next support for other servers' approvals.** The user decided not to build it. A Codex approval for an
    MCP server that is not Rafu keeps showing in the terminal only. The Codex proxy does not follow the elicitation
-   method. (Amended 2026-11-21: this holds for Codex only. A Claude request for another server's MCP tool is now
-   answerable from the peek; see the amendment "Claude requests for MCP tools answer in the peek" in
-   [`0042-answer-agent-requests-from-up-next.md`](0042-answer-agent-requests-from-up-next.md).)
+   method.~~ **Reversed for tool approvals (2026-11-21), on the user's direction.** A request for another server's
+   MCP tool is answerable from the peek, for Claude Code and for Codex. The Codex proxy now follows
+   `mcpServer/elicitation/request`; see the amendments "Claude requests for MCP tools answer in the peek" and "Codex
+   requests for MCP tools answer in the peek" in
+   [`0042-answer-agent-requests-from-up-next.md`](0042-answer-agent-requests-from-up-next.md). Decisions 1 to 4 stay:
+   Rafu's own server stays pre-approved, so its tools should raise no question. A generic MCP form or URL
+   elicitation still shows in the terminal only.
 
 ## Amendment: Claude Code (2026-11-21)
 
@@ -73,9 +80,10 @@ Evidence, Claude Code 2.1.330: `claude --help` lists `--allowedTools, --allowed-
 
 ## Alternatives considered
 
-- **Show the elicitation in Up next.** Rejected for now (user decision). It needs a new request kind, a new
-  sanitizer for tool names and arguments from any server, and an answer frame. It would also keep a question
-  that Rafu already decides.
+- **Show the elicitation in Up next.** Rejected at first (user decision). Chosen later the same day for other
+  servers' tool approvals (decision 5). It needed no new kind and no new sanitizer: the Claude tool call kind and
+  the tool-name rule were reused. For Rafu's own server it stays redundant, because the `approve` setting should
+  remove the question.
 - **Write the setting to `~/.codex/config.toml`.** Rejected. It changes the user's own Codex for every terminal and
   every other tool, and it is a durable edit that the user did not ask for.
 - **Mode `writes` with annotations.** Kept as the fallback (decision 4). It trusts the read-only hint of each tool,
@@ -107,8 +115,9 @@ Codex 0.171.0, 2026-11-21:
 ## Revisit trigger
 
 A Codex release that changes the value names or the key, a hand check that shows `approve` still prompts (then try
-`writes` with the hints, then the per-tool `approval_mode`), or a user wish to answer other servers' approvals from
-the Up next row.
+`writes` with the hints, then the per-tool `approval_mode`). (The earlier trigger "a wish to answer other servers'
+approvals from the Up next row" was met on 2026-11-21 and is now built; its hand checks are in the Codex amendment of
+the decision about answering agent requests from Up next.)
 
 ## Hand checks
 
