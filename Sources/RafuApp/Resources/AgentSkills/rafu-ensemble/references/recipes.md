@@ -16,8 +16,8 @@
 6. Work. Append progress with
    `note_write {"node_id": "<plan>", "mode": "insert_after_heading", "heading": "Tasks", "text": "- [x] parser"}`.
 7. When ready: `send_message {"destination": "<codex node>", "text": "Ready for review. See Plan."}`.
-8. Read the reply (channel event or `receive_messages`) and `note_read` the
-   Findings section.
+8. Read the reply (it arrives as a channel event for Claude Code or as a new
+   turn for Codex) and `note_read` the Findings section.
 
 ## Answer a message from a peer
 
@@ -25,13 +25,17 @@ A received message starts with `Ensemble message from @codex-review (peer id
 <uuid>).` Reply with `send_message {"destination": "@codex-review", "text":
 "Done. See Findings."}`. Use the peer ID when two peers share a name. If a send
 returns Held, do not repeat it; `list_connections` shows `pending` and, after
-5 minutes, `lastDelivery`. If the receiver is an idle Codex, wake it with
+5 minutes, `lastDelivery`. A Codex receiver takes the message when its current
+turn ends; if it waits idle at its prompt and does not answer, start it with
 `terminal_send`.
 
 ## Hand a long brief to a peer
 
 1. Write the brief to a file in the workspace (or `note_create` a note).
 2. `terminal_create {"agent": "claude", "title": "Claude — Docs", "prompt": "Read docs/briefs/schema.md and do what it asks", "link": true}`.
+   Do not write "wait for the next message" in a prompt: a peer that is told to
+   wait may poll in a loop. Give it the task and tell it to reply with
+   `send_message` and then stop. A message starts its next turn.
 3. Later messages follow the same rule: `send_message {"destination": "@claude-docs", "text": "Brief updated in docs/briefs/schema.md; redo step 2"}`.
 
 ## An agent you typed into a shell node

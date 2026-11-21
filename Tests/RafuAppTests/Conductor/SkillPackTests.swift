@@ -47,6 +47,26 @@ func bundledAgentSkillCoversEveryTool() throws {
     }
 }
 
+@MainActor
+@Test("The agent skill tells Codex to wait by ending its turn and never to poll")
+func bundledAgentSkillTeachesCodexToWaitByEndingTheTurn() throws {
+    let catalog = try ConductorBundledSkillCatalog.bundled()
+    func text(_ components: [String]) throws -> String {
+        String(
+            decoding: try catalog.data(for: .init(pathComponents: components)), as: UTF8.self)
+    }
+    let skill = try text(["SKILL.md"])
+    #expect(skill.contains("To wait for a message, end your"))
+    #expect(skill.contains("Never sleep and never poll `receive_messages`"))
+    #expect(skill.contains("when its current turn ends"))
+    #expect(skill.contains("do not write \"wait for the next"))
+    #expect(try text(["references", "tools.md"]).contains("Claude Code only"))
+    #expect(try text(["references", "recipes.md"]).contains("channel event for Claude Code"))
+    #expect(
+        try text(["references", "codex-agents-snippet.md"]).contains(
+            "To wait for one, end your turn."))
+}
+
 @Test("Skill frontmatter parsing reads keys and rejects a missing block")
 func skillFrontmatterParsing() throws {
     let values = try ConductorBundledSkillCatalog.frontmatter(

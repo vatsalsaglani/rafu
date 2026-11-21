@@ -12,7 +12,7 @@ Off blocks edit and sensitive tools.
 |---|---|---|
 | `list_connections` | read | — |
 | `send_message` | Live link | `destination` (@mention or node ID), `text` (≤ 16 KiB) |
-| `receive_messages` | read | — |
+| `receive_messages` | read | — (Claude Code only; Codex has no inbox: its messages arrive as new turns) |
 | `ensemble_describe` | read | — |
 | `note_read` | read | `node_id`, `offset`?, `length`? (≤ 4000 scalars) |
 | `note_write` | edit | `node_id`, `text` (≤ 16 KiB), `mode` (append, prepend, replace, insert_after_heading), `heading`? |

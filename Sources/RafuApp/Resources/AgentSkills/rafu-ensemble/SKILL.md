@@ -92,13 +92,19 @@ logged under "Agents" in the Ensemble bar, and undoable by the user.
    that waits 5 minutes is dropped and the link shows Failed; `list_connections`
    then shows `lastDelivery: expired` (and `pending` counts held messages). A
    paused link or a peer that is not connected is an error that says so.
-   A message to an idle Codex is queued, but Codex reads it only when it next
-   runs: if the result says so, wake it with `terminal_send`.
-6. Read replies: Claude Code receives channel messages automatically; also
-   call `receive_messages`. **To answer a message**, call `send_message` with
-   the sender's `@mention` or peer ID. Every received message starts with
-   "Ensemble message from @name (peer id ...)": use that. `list_connections`
-   shows the same peer. Do not tell the user that you cannot reply.
+   Codex takes a queued message as a new turn when its current turn ends. If
+   Codex waits idle at its prompt and does not answer, start it with
+   `terminal_send`.
+6. Read replies: Claude Code receives channel messages automatically
+   (`receive_messages` reads any that still wait). Codex has no inbox: it
+   receives each message as a new turn. **To wait for a message, end your
+   turn. Never sleep and never poll `receive_messages`.** A Codex peer takes a
+   message when its current turn ends, so do not write "wait for the next
+   message" in a `terminal_create` prompt: give the peer the task and tell it
+   to reply with `send_message` and then stop. **To answer a message**, call
+   `send_message` with the sender's `@mention` or peer ID. Every received
+   message starts with "Ensemble message from @name (peer id ...)": use that.
+   `list_connections` shows the same peer. Do not tell the user that you cannot reply.
 
 `terminal_send` uses a Live message link when one exists. Without one, Rafu
 types only into terminals **you** created: `text` when an agent is connected in
