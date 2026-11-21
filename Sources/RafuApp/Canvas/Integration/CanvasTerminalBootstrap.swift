@@ -1,4 +1,5 @@
 import Foundation
+import RafuCore
 
 /// One terminal owns this directory. Remove it after the terminal process has ended.
 nonisolated struct CanvasTerminalBootstrap: Sendable {
@@ -88,7 +89,9 @@ nonisolated struct CanvasTerminalBootstrap: Sendable {
         let socket = socketURL?.path ?? baseEnvironment["RAFU_CANVAS_SOCKET"]
         guard let socket, socket.hasPrefix("/") else { throw BootstrapError.missingSocket }
         let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("rafu-canvas-shell-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent(
+                "\(CanvasBridgeLaunch.wrapperDirectoryPrefix)\(UUID().uuidString)",
+                isDirectory: true)
         try FileManager.default.createDirectory(
             at: directory, withIntermediateDirectories: false,
             attributes: [.posixPermissions: 0o700]
@@ -96,10 +99,8 @@ nonisolated struct CanvasTerminalBootstrap: Sendable {
         do {
             for provider in ["claude", "codex"] {
                 try write(
-                    """
-                    #!/bin/sh
-                    exec "$RAFU_CANVAS_BRIDGE_CLI" _canvas-agent \(provider) "$@"
-                    """, name: provider, directory: directory, permissions: 0o700)
+                    CanvasBridgeLaunch.wrapperScript(provider: provider), name: provider,
+                    directory: directory, permissions: 0o700)
             }
             // SwiftTerm replaces its default environment when a caller supplies one.
             // Preserve normal shell state and apply each bridge override exactly once.
@@ -185,7 +186,7 @@ nonisolated struct CanvasTerminalBootstrap: Sendable {
                 // No private startup hook exists for this shell. Prepending PATH in
                 // the environment alone is the only mechanism available — a startup
                 // file that rewrites PATH afterward can still move the wrappers.
-                environment["PATH"] = "\(directory.path):\(baseEnvironment["PATH"] ?? "")"
+                environment["PATH"] = "\(directory.path):\(environment["PATH"] ?? "")"
                 arguments = loginArguments
             }
             let execName: String?

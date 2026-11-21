@@ -1058,3 +1058,46 @@ Verified with Claude Code 2.1.323, SwiftTerm as pinned, macOS 27.
   `CanvasChannelPromptTests.cursorPositionedDialogWithNulGapsMatches`.
 - Verify: `swift test --filter CanvasChannelPromptTests`; live: Allow board,
   start Claude, the dialog answers itself and the log says "confirmed".
+
+## 2026-11-21: Launcher loop when Rafu inherits another terminal's PATH
+
+Applies to: `CanvasBridgeLaunch.resolve`, `CanvasTerminalBootstrap`,
+`TerminalChildEnvironment.scrubbed`. Verified with Claude Code 2.1.x, fish,
+macOS 27, Swift 6.4.
+
+- Observation: in an Ensemble terminal, `claude` showed only a cursor and the
+  title said "Running". It worked in a Terminal Group terminal.
+- Cause: Rafu Lightning is started with `/usr/bin/open -n`, which keeps the
+  `PATH` of the terminal that ran the script. From an Ensemble terminal of the
+  release app, that `PATH` starts with the release app's
+  `/var/folders/.../T/rafu-canvas-shell-<UUID>` wrapper folder. An Ensemble
+  terminal passes the app environment to its shell (a Terminal Group terminal
+  does not). The launcher (`rafu _canvas-agent claude`) skipped only its own
+  `RAFU_CANVAS_WRAPPER_DIR`, so it picked the release wrapper, which ran the
+  Lightning `rafu` again. Result: `execve` in a loop with one pid, each pass
+  adding the `--mcp-config` and dev-channel flags and a launch announce.
+- Reproduction: put a foreign `rafu-canvas-shell-<UUID>` folder with the two
+  wrapper scripts on `PATH`, then run `rafu _canvas-agent claude --version`. It
+  spun at full CPU for 39 s. Without the folder it printed the version at once.
+- Rules:
+  - The launcher never picks a `PATH` entry whose folder name starts with
+    `rafu-canvas-shell-`, and never picks a file whose content is a Rafu
+    wrapper (`CanvasBridgeLaunch.wrapperScript`, one source of truth shared with
+    the bootstrap).
+  - A re-entry guard (`RAFU_CANVAS_LAUNCH_PID`) stops a loop that still gets
+    through: `execve` keeps the pid, so a second entry in the same pid exits
+    with status 127 and one stderr line. A nested `claude` from Claude's Bash
+    tool has another pid and is not blocked.
+  - `TerminalChildEnvironment.scrubbed` removes wrapper folders from `PATH`
+    and the inherited `RAFU_CANVAS_*` keys.
+- Ruled out: agent hooks (same in both terminal kinds), the announce IPC (1 s
+  timeout), `TERM`/`COLORTERM`, fish configuration.
+- Verify: `swift test --filter CanvasBridgeLaunchTests`,
+  `--filter TerminalChildEnvironmentTests`,
+  `--filter CanvasTerminalBootstrapTests`. By hand: start Lightning with
+  `./script/build_and_run.sh` from an Ensemble terminal of the release app; in
+  a fish Ensemble terminal `claude` shows the dev-channel dialog or the Claude
+  screen within seconds, `claude --version` prints at once, and `echo $PATH`
+  shows one `rafu-canvas-shell-` folder.
+- Open: Codex took the same path by the code (`CanvasCodexSession` spawn) and is
+  covered by the same fix, but the report only named `claude`.

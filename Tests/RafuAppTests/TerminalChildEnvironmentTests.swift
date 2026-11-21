@@ -45,4 +45,29 @@ struct TerminalChildEnvironmentTests {
         let base: [String: String] = ["HOME": "/fixture/home", "PATH": "/usr/bin:/bin"]
         #expect(TerminalChildEnvironment.scrubbed(base) == base)
     }
+
+    @Test func scrubRemovesInheritedRafuWrapperFoldersFromPath() {
+        let first = "/var/folders/ab/T/rafu-canvas-shell-AAAA"
+        let second = "/private/var/folders/ab/T/rafu-canvas-shell-BBBB/"
+        let base = ["PATH": "\(first):/opt/bin::\(second):/usr/bin:/bin:/opt/rafu-canvas-shell"]
+        // Order is kept, an empty entry is kept, and only wrapper folders go.
+        #expect(
+            TerminalChildEnvironment.scrubbed(base)["PATH"]
+                == "/opt/bin::/usr/bin:/bin:/opt/rafu-canvas-shell")
+        let clean = ["PATH": "/usr/bin:/bin"]
+        #expect(TerminalChildEnvironment.scrubbed(clean) == clean)
+    }
+
+    @Test func scrubRemovesInheritedEnsembleKeys() {
+        let base: [String: String] = [
+            "RAFU_CANVAS_TOKEN": "fixture-token", "RAFU_CANVAS_SOCKET": "/fixture/socket",
+            "RAFU_CANVAS_BRIDGE_CLI": "/fixture/rafu",
+            "RAFU_CANVAS_WRAPPER_DIR": "/fixture/rafu-canvas-shell-AAAA",
+            "RAFU_CANVAS_LAUNCH_PID": "4242", "MCP_PROTOCOL_NEGOTIATION": "legacy",
+            "CLAUDE_CODE_USE_BEDROCK": "1", "HOME": "/fixture/home",
+        ]
+        #expect(
+            TerminalChildEnvironment.scrubbed(base)
+                == ["CLAUDE_CODE_USE_BEDROCK": "1", "HOME": "/fixture/home"])
+    }
 }
