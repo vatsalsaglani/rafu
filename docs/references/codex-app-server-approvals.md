@@ -63,6 +63,31 @@ answerable and the labelled answer worked. Decision (2026-11-20): `isOther` alon
 terminal-only (`CanvasAgentRequest.Question.init`, test in `CanvasAgentRequestTests`). The row shows only the labelled
 options. A free-text answer still needs the terminal.
 
+## The diff of a file change comes from `patchUpdated` (2026-11-21, codex-cli 0.171.0)
+
+Applies to: `CanvasAgentRequest.fileChanges(fromPatchUpdated:)`, the patch cache in `CanvasCodexProxy.Connection`
+(`notePatch`, `patch(itemID:)`). Tests: `CanvasCodexApprovalTests` (`patchUpdatedFillsTheFileChangeRequest`,
+`aFileChangeWithoutAPatchStaysTerminalOnly`, `thePatchCacheClearsWhenTheTurnEnds`,
+`thePatchCacheKeepsAtMostEightItems`) and `CanvasAgentRequestTests` (`patchUpdatedMapping`).
+
+- `FileChangeRequestApprovalParams` has only `itemId`, `threadId`, `turnId`, `startedAtMs`, and optional `reason`
+  and `grantRoot`. It carries no diff.
+- The diff arrives in the notification `item/fileChange/patchUpdated` (`FileChangePatchUpdatedNotification`):
+  `itemId`, `threadId`, `turnId` and `changes`, a list of `{path, diff, kind}`. `kind` is an object:
+  `{"type": "add"}`, `{"type": "delete"}` or `{"type": "update", "move_path": <string or null>}`.
+- Rafu keeps the newest patch of each `itemId` (at most 8 per connection), clears them on `turn/completed` for the
+  bound thread and when the connection retires, and never logs them. A later request for that `itemId` is
+  answerable only when the patch fits the bounds exactly (at most 2 files, 4 KiB of diff each); no patch, or a
+  `kind` that Rafu does not know, makes the request terminal-only.
+- The order is an assumption that was not verified live: the patch notification comes before the approval request
+  of the same item. If it does not, the request is terminal-only (the safe result).
+- "Allow for this session" stays off for file changes. Whether a Codex session grant for files would apply to the
+  same `grantRoot` was not verified.
+
+Reproduce the schema: `codex app-server generate-json-schema --out <dir>`, then read
+`FileChangeRequestApprovalParams.json` and the `FileChangePatchUpdatedNotification` and `PatchChangeKind` entries of
+`codex_app_server_protocol.v2.schemas.json`.
+
 ## Rules
 
 - **The JSON-RPC id never leaves the proxy.** The table maps an opaque key (a UUID) to the raw id text. The app,

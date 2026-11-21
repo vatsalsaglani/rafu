@@ -62,8 +62,10 @@ public enum AgentHookSpoolError: Error, Equatable, Sendable {
 /// any platform.
 public enum AgentHookSpool {
     /// The largest spool file, in bytes. A Claude permission request (answer
-    /// mode) carries up to 2 KiB of command text that JSON may double.
-    public static let maximumFileBytes = 16_384
+    /// mode) carries up to 2 KiB of command text, or up to 4 KiB of file
+    /// change body and a path, and JSON may double each. 64 KiB holds the
+    /// worst case with room to spare.
+    public static let maximumFileBytes = 65_536
     /// The helper stops writing when the spool holds this many files (the app
     /// is not running or not draining).
     public static let maximumFiles = 2_048

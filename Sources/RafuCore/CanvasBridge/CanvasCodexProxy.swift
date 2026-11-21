@@ -79,6 +79,8 @@ final class CanvasCodexProxy: Sendable {
 
     /// The most unanswered server requests the proxy tracks per connection.
     static let maximumApprovals = 8
+    /// The most file-change patches the proxy remembers per connection.
+    static let maximumPatches = 8
 
     /// One accepted TUI socket and its upstream socket. The descriptors close
     /// only after both workers (and any injection) end, under the same lock that
@@ -94,6 +96,9 @@ final class CanvasCodexProxy: Sendable {
             var pendingIDs: Set<String> = []
             var resumeAttempted = false
             var requests: [UUID: PendingRequest] = [:]
+            /// The newest patch of each file-change item, oldest first. The
+            /// approval request names the item but carries no diff.
+            var patches: [(itemID: String, changes: [CanvasAgentRequest.FileChange])] = []
         }
         private let life = Mutex(Life())
         /// Serializes every upstream write. The flag is true while the outgoing
@@ -123,7 +128,10 @@ final class CanvasCodexProxy: Sendable {
                     Darwin.shutdown(frontend, SHUT_RDWR)
                     Darwin.shutdown(upstream, SHUT_RDWR)
                 }
-                defer { life.requests.removeAll() }
+                defer {
+                    life.requests.removeAll()
+                    life.patches.removeAll()
+                }
                 return Array(life.requests.keys)
             }
             guard let keys else { return false }
@@ -205,12 +213,35 @@ final class CanvasCodexProxy: Sendable {
             }
         }
 
-        /// Clears every tracked request.
+        /// Clears every tracked request, and the cached patches of the turn.
         func resolveAll() -> [UUID] {
             life.withLock { life in
-                defer { life.requests.removeAll() }
+                defer {
+                    life.requests.removeAll()
+                    life.patches.removeAll()
+                }
                 return Array(life.requests.keys)
             }
+        }
+
+        /// Remembers the newest patch of a file-change item. `nil` forgets it:
+        /// a patch Rafu cannot read must not leave an older one behind. Only
+        /// `CanvasCodexProxy.maximumPatches` items stay; the oldest goes first.
+        func notePatch(itemID: String, changes: [CanvasAgentRequest.FileChange]?) {
+            life.withLock { life in
+                guard !life.retired else { return }
+                life.patches.removeAll { $0.itemID == itemID }
+                guard let changes else { return }
+                life.patches.append((itemID, changes))
+                if life.patches.count > CanvasCodexProxy.maximumPatches {
+                    life.patches.removeFirst(life.patches.count - CanvasCodexProxy.maximumPatches)
+                }
+            }
+        }
+
+        /// The cached patch of a file-change item, or empty.
+        func patch(itemID: String) -> [CanvasAgentRequest.FileChange] {
+            life.withLock { life in life.patches.first { $0.itemID == itemID }?.changes ?? [] }
         }
 
         /// Answers one tracked request on this connection's server socket. The
@@ -563,9 +594,25 @@ final class CanvasCodexProxy: Sendable {
             }
         case "turn/completed":
             for key in connection.resolveAll() { approvals.clear(key) }
+        case "item/fileChange/patchUpdated":
+            // The diff of a file change. The approval request that follows
+            // names the item only. Kept in memory; never logged.
+            if let itemID = params["itemId"] as? String, !itemID.isEmpty {
+                connection.notePatch(
+                    itemID: itemID,
+                    changes: CanvasAgentRequest.fileChanges(fromPatchUpdated: params))
+            }
         case _ where Self.approvalMethods.contains(method):
-            guard let identifier = Self.integerOrStringID(object["id"]),
-                let request = CanvasAgentRequest.parse(method: method, params: params)
+            guard let identifier = Self.integerOrStringID(object["id"]) else { return nil }
+            var changes: [CanvasAgentRequest.FileChange] = []
+            if method == "item/fileChange/requestApproval",
+                let itemID = params["itemId"] as? String
+            {
+                changes = connection.patch(itemID: itemID)
+            }
+            guard
+                let request = CanvasAgentRequest.parse(
+                    method: method, params: params, fileChanges: changes)
             else { return nil }
             var profile: Data?
             if let permissions = params["permissions"] as? [String: Any] {

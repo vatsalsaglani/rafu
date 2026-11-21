@@ -30,23 +30,139 @@ struct AgentPermissionRequestSummaryTests {
         #expect(summary.isComplete)
     }
 
-    @Test("Edit, MultiEdit and Write keep only the file path")
-    func files() throws {
-        for tool in ["Edit", "MultiEdit", "Write"] {
+    @Test("A Write carries the full content")
+    func writeCarriesTheFullContent() throws {
+        let summary = try #require(
+            AgentPermissionRequestSummary(
+                toolName: "Write",
+                toolInput: ["file_path": "/Users/me/repo/a.swift", "content": "let a = 1\n"]))
+        #expect(summary.filePath == "/Users/me/repo/a.swift")
+        #expect(summary.command == nil)
+        #expect(summary.isComplete)
+        let change = try #require(summary.fileChanges.first)
+        #expect(change.kind == .overwrite)
+        #expect(change.body == "let a = 1\n")
+        #expect(!change.isDiff)
+    }
+
+    @Test("An Edit carries the old and new strings")
+    func editCarriesOldAndNewStrings() throws {
+        let summary = try #require(
+            AgentPermissionRequestSummary(
+                toolName: "Edit",
+                toolInput: [
+                    "file_path": "/r/a.swift", "old_string": "a\nb", "new_string": "c",
+                    "replace_all": true,
+                ]))
+        #expect(summary.isComplete)
+        let change = try #require(summary.fileChanges.first)
+        #expect(change.kind == .edit)
+        #expect(change.isDiff)
+        #expect(change.body == "(every match)\n- a\n- b\n+ c")
+    }
+
+    @Test("An Edit with an edits array is read")
+    func editWithEditsArrayIsRead() throws {
+        let summary = try #require(
+            AgentPermissionRequestSummary(
+                toolName: "Edit",
+                toolInput: [
+                    "file_path": "/r/a.swift",
+                    "edits": [["old_string": "x", "new_string": "y"]],
+                ]))
+        #expect(summary.isComplete)
+        #expect(summary.fileChanges.first?.body == "- x\n+ y")
+        // The two forms together are ambiguous: only the terminal answers.
+        let both = try #require(
+            AgentPermissionRequestSummary(
+                toolName: "Edit",
+                toolInput: [
+                    "file_path": "/r/a.swift", "old_string": "x", "new_string": "y",
+                    "edits": [["old_string": "x", "new_string": "y"]],
+                ]))
+        #expect(!both.isComplete)
+    }
+
+    @Test("A MultiEdit carries every edit")
+    func multiEditCarriesEveryEdit() throws {
+        let summary = try #require(
+            AgentPermissionRequestSummary(
+                toolName: "MultiEdit",
+                toolInput: [
+                    "file_path": "/r/a.swift",
+                    "edits": [
+                        ["old_string": "a", "new_string": "b"],
+                        ["old_string": "c", "new_string": ""],
+                    ],
+                ]))
+        #expect(summary.isComplete)
+        #expect(summary.fileChanges.first?.body == "- a\n+ b\n\n- c")
+    }
+
+    @Test("A body over the limit is cut and incomplete")
+    func contentOverTheLimitIsIncomplete() throws {
+        let content = String(
+            repeating: "a", count: CanvasAgentRequest.Limits.fileChangeBodyBytes + 1)
+        let summary = try #require(
+            AgentPermissionRequestSummary(
+                toolName: "Write", toolInput: ["file_path": "/r/a", "content": content]))
+        #expect(!summary.isComplete)
+        #expect(
+            summary.fileChanges.first?.body.utf8.count
+                == CanvasAgentRequest.Limits.fileChangeBodyBytes)
+    }
+
+    @Test("An input of an unknown shape is incomplete")
+    func editWithoutNewStringIsIncomplete() throws {
+        for input: [String: Any] in [
+            ["file_path": "/r/a", "old_string": "x"],
+            ["file_path": "/r/a", "edits": [["old_string": "x"]]],
+            ["file_path": "/r/a", "edits": [String]()],
+            ["file_path": "/r/a", "edits": "x"],
+        ] {
             let summary = try #require(
-                AgentPermissionRequestSummary(
-                    toolName: tool,
-                    toolInput: [
-                        "file_path": "/Users/me/repo/a.swift", "content": "secret body",
-                        "old_string": "old secret", "new_string": "new secret",
-                    ]))
-            #expect(summary.filePath == "/Users/me/repo/a.swift")
-            #expect(summary.command == nil)
-            #expect(summary.description == nil)
-            #expect(summary.isComplete)
-            let encoded = String(decoding: try JSONEncoder().encode(summary), as: UTF8.self)
-            #expect(!encoded.contains("secret"))
+                AgentPermissionRequestSummary(toolName: "Edit", toolInput: input))
+            #expect(!summary.isComplete)
         }
+        let write = try #require(
+            AgentPermissionRequestSummary(toolName: "Write", toolInput: ["file_path": "/r/a"]))
+        #expect(!write.isComplete)
+    }
+
+    @Test("The summary with the largest body fits the spool file")
+    func summaryWithTheLargestBodyFitsTheSpoolFile() throws {
+        // Worst case for JSON: every character is escaped.
+        let quotes = String(repeating: "\"", count: CanvasAgentRequest.Limits.fileChangeBodyBytes)
+        let path =
+            "/"
+            + String(repeating: "\"", count: AgentPermissionRequestSummary.maximumFilePathBytes - 1)
+        let event = try AgentHookEvent(
+            provider: .claude,
+            payload: permissionRequest(
+                tool: "Write", input: ["file_path": path, "content": quotes]),
+            includesRequestSummary: true)
+        let summary = try #require(event.requestSummary)
+        #expect(summary.isComplete)
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "spool-\(UUID().uuidString)", directoryHint: .isDirectory)
+            .appending(path: "AgentTracking", directoryHint: .isDirectory)
+            .appending(path: "spool", directoryHint: .isDirectory)
+        defer {
+            try? FileManager.default.removeItem(
+                at: directory.deletingLastPathComponent().deletingLastPathComponent())
+        }
+        try AgentHookSpool.write(event, to: directory)
+        let drained = try AgentHookSpool.drain(directory: directory)
+        #expect(drained == [event])
+    }
+
+    @Test("A summary from an older helper keeps the path and is incomplete")
+    func olderHelperSummary() throws {
+        let json = #"{"filePath":"/r/a.swift","isComplete":true}"#
+        let summary = try JSONDecoder().decode(
+            AgentPermissionRequestSummary.self, from: Data(json.utf8))
+        #expect(summary.filePath == "/r/a.swift")
+        #expect(!summary.isComplete)
     }
 
     @Test("A Bash request that leaves the sandbox is incomplete")

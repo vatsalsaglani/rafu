@@ -210,6 +210,31 @@ cases were run" (seen with Swift 6.4.2).
 - [`codex-app-server-approvals.md`](codex-app-server-approvals.md): the Codex side of the same Up next answer path.
 - [`agent-hooks-and-now-playing.md`](agent-hooks-and-now-playing.md): the normal hook helper, the spool and the merge.
 
+## Write, Edit and MultiEdit inputs, and the file change row (2026-11-21, Claude Code 2.1.330)
+
+Applies to: `AgentPermissionRequestSummary.swift` (`readFileChange`), `AgentHookSpool.maximumFileBytes`,
+`ClaudePermissionAnswerBridge.request(for:)`. Tests: `AgentPermissionRequestSummaryTests` (suite "Claude permission
+request summary"), `ClaudePermissionAnswerBridgeTests`.
+
+- `tool_input` shapes the summary reads. Write: `{file_path, content}`. Edit: `{file_path, old_string, new_string,
+  replace_all?}` **or** an `edits` array of `{old_string, new_string, replace_all?}`. MultiEdit: `{file_path, edits}`.
+  Both keys together, a missing `new_string`, an empty `edits` list, or any other shape makes the summary
+  incomplete (the row then offers "Open terminal" only). An edit renders as `- ` lines (removed) and `+ ` lines
+  (added), with no invented unified header; `replace_all` adds the line "(every match)". An empty `new_string` is a
+  valid deletion.
+- Bounds: path 480 bytes, body 4 KiB (the sanitizer cuts and marks it incomplete), one file.
+- The spool file limit rose from 16 KiB to 64 KiB. One summary needs about 9 KiB in the worst case (a body of 4 KiB
+  of characters that JSON escapes, plus a path), and the limit keeps room for more.
+- An older helper wrote only `filePath` in the summary. The app reads it as a change with no body and marks it
+  incomplete.
+- The hook decision schema (unchanged): `{"hookSpecificOutput": {"hookEventName": "PermissionRequest",
+  "decision": {"behavior": "allow" | "deny", ...}}}`. For `allow`, the optional `updatedPermissions` can hold
+  `[{"type": "setMode", "mode": "acceptEdits", "destination": "session"}]`, which would make Claude Code accept edits
+  for the session. Rafu does **not** send it (not verified live; the person should see each change). It is the known
+  alternative if answering every edit proves too slow.
+- Why an `mcp__` tool (for example a Rafu tool) produced no row: the summary reads only Bash, Edit, MultiEdit and
+  Write, so the answer-mode helper returns at once for any other tool and Claude Code shows its own dialog.
+
 ## Claude Code questions use a different hook
 
 Verified with Claude Code 2.1.329 and Haiku in an interactive terminal on
