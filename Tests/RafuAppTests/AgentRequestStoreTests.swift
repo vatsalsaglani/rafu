@@ -147,6 +147,56 @@ struct AgentRequestStoreTests {
                 == .chosen)
     }
 
+    @Test("A question set takes labels and typed text only as the request permits")
+    func questionSetAnswers() {
+        let store = AgentRequestStore()
+        let terminal = UUID()
+        let request = CanvasAgentRequest(
+            kind: .userInput,
+            questions: [
+                .init(
+                    id: "theme", header: "", text: "Which theme?",
+                    choices: [.init(label: "Indigo", detail: ""), .init(label: "Khadi", detail: "")],
+                    allowsFreeText: true),
+                .init(
+                    id: "parts", header: "", text: "Which parts?",
+                    choices: [.init(label: "Editor", detail: ""), .init(label: "Git", detail: "")],
+                    allowsMultiple: true),
+            ])
+        _ = store.open(request, controllerID: terminal)
+        // One question unanswered.
+        #expect(
+            store.choose(
+                controllerID: terminal, key: request.key, decision: .answers(["theme": "Indigo"]))
+                == .invalid)
+        // Two labels for a single-choice question.
+        #expect(
+            store.choose(
+                controllerID: terminal, key: request.key,
+                decision: .answers([
+                    "theme": QuestionAnswer(labels: ["Indigo", "Khadi"]),
+                    "parts": QuestionAnswer(labels: ["Git"]),
+                ])) == .invalid)
+        // Typed text where the question takes none.
+        #expect(
+            store.choose(
+                controllerID: terminal, key: request.key,
+                decision: .answers([
+                    "theme": "Indigo", "parts": QuestionAnswer(labels: ["Git"], text: "Docs"),
+                ])) == .invalid)
+        // A remember choice is never valid while the policy is off.
+        #expect(
+            store.choose(
+                controllerID: terminal, key: request.key, decision: .acceptAndRemember(.session))
+                == .invalid)
+        let answer = CanvasAgentRequestDecision.answers([
+            "theme": QuestionAnswer(text: "Solarized"),
+            "parts": QuestionAnswer(labels: ["Editor", "Git"]),
+        ])
+        #expect(store.choose(controllerID: terminal, key: request.key, decision: answer) == .chosen)
+        #expect(store.decision(for: terminal, key: request.key) == answer)
+    }
+
     @Test("Clearing a terminal removes its requests and answers only")
     func clear() {
         let store = AgentRequestStore()
