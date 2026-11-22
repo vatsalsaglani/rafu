@@ -281,8 +281,13 @@ struct CompanionRestingStatus: View {
 
     var body: some View {
         let summary = model.agentSummary
+        let recording = MeetingsRecordingBadge.isShowing
         HStack(spacing: RafuMetrics.space2 - 2) {
-            if !AgentRequestStore.shared.pending.isEmpty {
+            // A meeting recording always shows first: capture always has an
+            // indicator on the closed strip.
+            if recording {
+                MeetingsRecordingBadge()
+            } else if !AgentRequestStore.shared.pending.isEmpty {
                 Label("Needs approval", systemImage: "exclamationmark.bubble")
                     .labelStyle(.iconOnly)
                     .help("Needs approval")
@@ -295,7 +300,7 @@ struct CompanionRestingStatus: View {
                         .foregroundStyle(ink.accent)
                 }
             }
-            if summary.live > 0, wide || model.attentionCount == 0 {
+            if summary.live > 0, wide || (model.attentionCount == 0 && !recording) {
                 HStack(spacing: 3) {
                     Image(systemName: "point.3.connected.trianglepath.dotted")
                         .font(.system(size: 9, weight: .medium))
@@ -303,7 +308,7 @@ struct CompanionRestingStatus: View {
                 }
                 .foregroundStyle(ink.primary)
             }
-            if wide || (summary.live == 0 && model.attentionCount == 0) {
+            if wide || (summary.live == 0 && model.attentionCount == 0 && !recording) {
                 HStack(spacing: 3) {
                     if wide {
                         Image(systemName: "macwindow")
@@ -371,7 +376,9 @@ struct CompanionIslandWingsView: View {
                 .padding(.leading, padding)
             Spacer(minLength: 0)
             Group {
-                if AgentRequestStore.shared.pending.isEmpty {
+                if MeetingsRecordingBadge.isShowing {
+                    MeetingsRecordingBadge()
+                } else if AgentRequestStore.shared.pending.isEmpty {
                     usageLobe(glance)
                 } else {
                     Label("Needs approval", systemImage: "exclamationmark.bubble")

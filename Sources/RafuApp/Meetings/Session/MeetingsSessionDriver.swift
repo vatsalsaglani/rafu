@@ -232,7 +232,14 @@ final class MeetingsSessionDriver {
         guard activeMeeting == meeting else { return }
         activeMeeting = nil
         stoppedMeetings.insert(meeting)
-        stopLive()
+        // A Record that came before this late `.stopped` already made the
+        // new recording's live text; closing it would lose that live text.
+        if isStarting {
+            timerTask?.cancel()
+            timerTask = nil
+        } else {
+            stopLive()
+        }
         session.noteLibraryChanged()
         runner.enqueue(meeting)
         let diagnostics = feature?.diagnostics
