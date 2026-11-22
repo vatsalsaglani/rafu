@@ -16,6 +16,8 @@ typealias MeetingsViewHook = @MainActor (MeetingsFeature) -> AnyView
 typealias MeetingsSessionViewHook = @MainActor (MeetingsFeature, WorkspaceSession) -> AnyView
 /// The body of a meeting tab in a workspace window.
 typealias MeetingsTabBodyHook = @MainActor (MeetingsFeature, WorkspaceSession, MeetingID) -> AnyView
+/// The detail view of one meeting, in the Meetings window and in a workspace tab.
+typealias MeetingsDetailHook = @MainActor (MeetingsFeature, MeetingID) -> AnyView
 /// An action that the menu runs (for example, Export Meeting Diagnostics…).
 typealias MeetingsAction = @MainActor (MeetingsFeature) -> Void
 
@@ -37,13 +39,15 @@ enum MeetingsFeaturePart {
     case settingsView(MeetingsViewHook)
     case recordButton(MeetingsSessionViewHook)
     case companionSection(MeetingsViewHook)
+    case meetingDetailView(MeetingsDetailHook)
+    case modelDownloadSheet(MeetingsViewHook)
 
     /// The kind of part, without its value.
     enum Kind: CaseIterable, Hashable {
         case store, recorder, textEngine, speakerEngine, modelLocator
         case diagnosticsRecorder, diagnosticsExporter, agentRunner
         case windowView, navigatorView, meetingTabBody, welcomeCard, settingsView
-        case recordButton, companionSection
+        case recordButton, companionSection, meetingDetailView, modelDownloadSheet
     }
 
     var kind: Kind {
@@ -63,6 +67,8 @@ enum MeetingsFeaturePart {
         case .settingsView: .settingsView
         case .recordButton: .recordButton
         case .companionSection: .companionSection
+        case .meetingDetailView: .meetingDetailView
+        case .modelDownloadSheet: .modelDownloadSheet
         }
     }
 }
@@ -95,6 +101,11 @@ final class MeetingsFeature {
     private(set) var settingsView: MeetingsViewHook?
     private(set) var recordButton: MeetingsSessionViewHook?
     private(set) var companionSection: MeetingsViewHook?
+    private(set) var meetingDetailView: MeetingsDetailHook?
+    private(set) var modelDownloadSheet: MeetingsViewHook?
+
+    /// The shared state of the live recording and of processing.
+    let session = MeetingsSessionModel()
 
     /// The kinds registered so far, for tests and diagnostics.
     private(set) var registeredKinds: Set<MeetingsFeaturePart.Kind> = []
@@ -133,6 +144,8 @@ final class MeetingsFeature {
         case .settingsView(let hook): settingsView = hook
         case .recordButton(let hook): recordButton = hook
         case .companionSection(let hook): companionSection = hook
+        case .meetingDetailView(let hook): meetingDetailView = hook
+        case .modelDownloadSheet(let hook): modelDownloadSheet = hook
         }
     }
 
@@ -155,8 +168,11 @@ final class MeetingsFeature {
         registerAppleSpeechParts()
         registerModelCatalogParts()
         registerSpeechWorkerParts()
+        registerSessionParts()
         registerSettingsParts()
+        registerDetailParts()
         registerWindowParts()
+        registerWorkspaceParts()
         registerCompanionParts()
         registerAgentParts()
     }

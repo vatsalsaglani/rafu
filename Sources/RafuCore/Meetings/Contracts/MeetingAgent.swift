@@ -42,3 +42,67 @@ public protocol MeetingAgentRunning: Sendable {
     func suggestSpeakerNames(for meeting: MeetingID, using cli: MeetingAgentCLI)
         async throws -> [MeetingSpeakerLabel: String]
 }
+
+extension MeetingAgentCLI {
+    /// The name in the interface.
+    public var displayName: String {
+        switch self {
+        case .claudeCode: "Claude Code"
+        case .codex: "Codex"
+        }
+    }
+
+    /// The provider that gets the meeting text when this CLI answers.
+    public var providerName: String {
+        switch self {
+        case .claudeCode: "Anthropic"
+        case .codex: "OpenAI"
+        }
+    }
+}
+
+/// Whether a CLI can answer now.
+public enum MeetingAgentAvailability: Hashable, Sendable {
+    case ready
+    case notInstalled
+    /// The installed version did not pass Rafu's limits check.
+    case unsupportedVersion(found: String)
+}
+
+/// Why a hidden agent run gave no answer.
+public enum MeetingAgentError: Error, Hashable, Sendable {
+    case notInstalled(MeetingAgentCLI)
+    case unsupportedVersion(MeetingAgentCLI)
+    case notSignedIn(MeetingAgentCLI)
+    /// The meeting is live or has no transcript yet.
+    case meetingNotReady
+    /// A run for this meeting is in progress.
+    case busy
+    case timedOut
+    case cancelled
+    case replyTooLarge
+    case transcriptTooLarge
+    case failed
+
+    public var message: String {
+        switch self {
+        case .notInstalled(let cli): "\(cli.displayName) is not installed on this Mac."
+        case .unsupportedVersion(let cli): "Not available with this \(cli.displayName) version."
+        case .notSignedIn(let cli):
+            "\(cli.displayName) is not signed in. Sign in with \(cli.displayName) in a terminal, then try again."
+        case .meetingNotReady: "You can ask after the meeting has stopped and its text is ready."
+        case .busy: "An answer for this meeting is in progress."
+        case .timedOut: "The agent gave no answer in 2 minutes."
+        case .cancelled: "Cancelled."
+        case .replyTooLarge: "The answer was too large, so Rafu did not show it."
+        case .transcriptTooLarge: "This meeting is too long to send in one question."
+        case .failed: "The agent gave no answer. Try again."
+        }
+    }
+}
+
+/// A runner can also tell whether a CLI can answer. The interface reads it
+/// through `feature.agentRunner as? any MeetingAgentAvailabilityChecking`.
+public protocol MeetingAgentAvailabilityChecking: Sendable {
+    func availability(of cli: MeetingAgentCLI) async -> MeetingAgentAvailability
+}

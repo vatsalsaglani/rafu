@@ -7,6 +7,8 @@ public enum MeetingPreferenceKeys {
     public static let microphone = "meetings.microphone"
     public static let audioRetention = "meetings.audioRetention"
     public static let agentAccess = "meetings.agentAccess"
+    /// True after the first-use download sheet was shown one time.
+    public static let firstUseSheetShown = "meetings.firstUseSheetShown"
 }
 
 /// The selected engines. The interface always names the engine in use,

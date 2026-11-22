@@ -204,6 +204,72 @@ struct MeetingsWiringTests {
         }
     }
 
+    // MARK: Session contract
+
+    @MainActor
+    @Test("Record is possible only with a driver and a free recorder")
+    func canStartRecording() {
+        let model = MeetingsSessionModel()
+        #expect(!model.canStartRecording)
+        model.isDriverInstalled = true
+        #expect(model.canStartRecording)
+        model.recorderState = .problem(.noBuffers)
+        #expect(model.canStartRecording)
+        model.recorderState = .recording(MeetingID())
+        #expect(!model.canStartRecording)
+        #expect(model.isRecordingOrPaused)
+        model.recorderState = .starting
+        #expect(!model.canStartRecording)
+    }
+
+    @MainActor
+    @Test("An action calls its handler")
+    func actionsCallHandlers() {
+        let model = MeetingsSessionModel()
+        var stops = 0
+        var started: [String?] = []
+        var deleted: [MeetingID] = []
+        model.handlers.stop = { stops += 1 }
+        model.handlers.start = { started.append($0) }
+        model.handlers.deleteMeeting = { deleted.append($0) }
+        model.stop()
+        model.stop()
+        model.startRecording(title: "Weekly")
+        let meeting = MeetingID()
+        model.deleteMeeting(meeting)
+        #expect(stops == 2)
+        #expect(started == ["Weekly"])
+        #expect(deleted == [meeting])
+        let before = model.libraryRevision
+        model.noteLibraryChanged()
+        #expect(model.libraryRevision == before + 1)
+    }
+
+    @MainActor
+    @Test("Registering the detail and download hooks fills them")
+    func detailAndDownloadHooks() {
+        let feature = MeetingsFeature(availability: .available)
+        #expect(feature.meetingDetailView == nil)
+        #expect(feature.modelDownloadSheet == nil)
+        feature.register(.meetingDetailView { _, _ in AnyView(EmptyView()) })
+        feature.register(.modelDownloadSheet { _ in AnyView(EmptyView()) })
+        #expect(feature.meetingDetailView != nil)
+        #expect(feature.modelDownloadSheet != nil)
+        #expect(feature.registeredKinds == [.meetingDetailView, .modelDownloadSheet])
+    }
+
+    @Test("A processing step has a plain label")
+    func processingStepLabel() {
+        #expect(
+            MeetingsProcessingStep.text(track: .me, fraction: 0.4).label
+                == "Writing the text (Me) 40%")
+        #expect(
+            MeetingsProcessingStep.text(track: .them, fraction: 3).label
+                == "Writing the text (Them) 100%")
+        #expect(MeetingsProcessingStep.failed(reasonCode: "interrupted").isFailed)
+        #expect(!MeetingsProcessingStep.waiting.isFailed)
+    }
+
     // MARK: Helpers
 
     private struct FakeRecorder: MeetingRecorderControlling {
