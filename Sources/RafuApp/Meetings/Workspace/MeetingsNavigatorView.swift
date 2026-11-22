@@ -4,7 +4,7 @@ import SwiftUI
 /// Two lines for one meeting: the title, then the date and the state word or
 /// the length. A shape goes with each state, so colour is never the only cue.
 struct MeetingsListRowLabel: View {
-    let row: MeetingsListRow
+    let row: MeetingsWorkspaceRow
     let session: MeetingsSessionModel
 
     @Environment(\.rafuTheme) private var theme
@@ -158,7 +158,7 @@ struct MeetingsNavigatorView: View {
         }
     }
 
-    private func rowButton(_ row: MeetingsListRow) -> some View {
+    private func rowButton(_ row: MeetingsWorkspaceRow) -> some View {
         RafuHoverRow(isSelected: workspaceSession.selectedAuxiliaryTab == .meeting(row.id)) {
             Button {
                 workspaceSession.openMeetingTab(row.id)

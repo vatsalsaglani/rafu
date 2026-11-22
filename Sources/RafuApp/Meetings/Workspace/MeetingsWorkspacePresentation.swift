@@ -14,7 +14,7 @@ nonisolated struct MeetingsStatusBadge: Hashable, Sendable {
 
 /// One row of the meeting list: the summary only, with the date and the
 /// length already formatted when the rows load. No turn text.
-nonisolated struct MeetingsListRow: Identifiable, Hashable, Sendable {
+nonisolated struct MeetingsWorkspaceRow: Identifiable, Hashable, Sendable {
     var id: MeetingID
     var title: String
     /// For example "Today 10:30".
@@ -60,14 +60,14 @@ nonisolated enum MeetingsWorkspacePresentation {
         now: Date = Date(),
         calendar: Calendar = .current,
         locale: Locale = .current
-    ) -> [MeetingsListRow] {
+    ) -> [MeetingsWorkspaceRow] {
         summaries
             .sorted { lhs, rhs in
                 if lhs.startDate != rhs.startDate { return lhs.startDate > rhs.startDate }
                 return lhs.id.uuidString < rhs.id.uuidString
             }
             .map { summary in
-                MeetingsListRow(
+                MeetingsWorkspaceRow(
                     id: summary.id,
                     title: displayTitle(summary.title),
                     dateText: dateText(
@@ -79,8 +79,8 @@ nonisolated enum MeetingsWorkspacePresentation {
     }
 
     /// The newest rows for the Welcome card. `rows` is already newest first.
-    static func newest(_ rows: [MeetingsListRow], count: Int = welcomeRecentCount)
-        -> [MeetingsListRow]
+    static func newest(_ rows: [MeetingsWorkspaceRow], count: Int = welcomeRecentCount)
+        -> [MeetingsWorkspaceRow]
     {
         Array(rows.prefix(max(0, count)))
     }
@@ -123,7 +123,7 @@ nonisolated enum MeetingsWorkspacePresentation {
 
     /// The second line of a row: the date, then the state word when there is
     /// one, else the length.
-    static func subtitle(row: MeetingsListRow, badge: MeetingsStatusBadge?) -> String {
+    static func subtitle(row: MeetingsWorkspaceRow, badge: MeetingsStatusBadge?) -> String {
         row.dateText + " · " + (badge?.word ?? row.durationText)
     }
 

@@ -7,7 +7,7 @@ import RafuCore
 @MainActor
 @Observable
 final class MeetingsWorkspaceListModel {
-    private(set) var rows: [MeetingsListRow] = []
+    private(set) var rows: [MeetingsWorkspaceRow] = []
     /// True after the first read finished, so an empty list is not shown
     /// before the library answered.
     private(set) var isLoaded = false

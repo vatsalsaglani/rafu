@@ -315,8 +315,14 @@ actor MeetingAgentRunner: MeetingAgentRunning, MeetingAgentAvailabilityChecking 
         }
         defer { try? FileManager.default.removeItem(at: run.root) }
 
+        // Launch the resolved file, not the Homebrew link: under the `meeting`
+        // permission profile Codex's file-system sandbox helper re-executes
+        // the launch path, and the `/opt/homebrew/bin` link is outside the
+        // readable set ("sandbox-exec: execvp() … Operation not permitted",
+        // checked 2026-11-23 with Codex 0.171.0). The re-check used the
+        // resolved Caskroom path.
         let spec = MeetingAgentProcessSpec(
-            executableURL: executable.url,
+            executableURL: URL(fileURLWithPath: executable.resolvedPath),
             arguments: MeetingAgentArguments.codex(emptyFolder: run.emptyFolder),
             environment: environment, currentDirectoryURL: run.emptyFolder, standardInput: packet)
         let (parser, end, termination) = try await drive(spec, parser: CodexStreamParser())
