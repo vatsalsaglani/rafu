@@ -476,7 +476,8 @@ final class NotchCompanionModel: NSObject {
                 : AgentTrackedPhase.terminalPhase(
                     session: session, status: controller.status, now: store.now),
             subagents: AgentTrackedPhase.subagentEntries(session),
-            fullAccess: fullAccess)
+            fullAccess: fullAccess,
+            notificationMessage: session?.notificationMessage)
     }
 
     /// Every agent terminal in every registered window. Reads only the

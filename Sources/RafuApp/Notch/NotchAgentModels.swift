@@ -111,6 +111,9 @@ nonisolated struct NotchTerminalInput: Equatable, Sendable {
     /// Rafu started or switched this terminal's Codex to full access
     /// (`CanvasFullAccessTerminals`).
     let fullAccess: Bool
+    /// The matched hook session's sanitized Claude notification text, kept
+    /// only while the session waits. In memory only; never logged.
+    let notificationMessage: String?
 
     init(
         id: UUID,
@@ -125,7 +128,8 @@ nonisolated struct NotchTerminalInput: Equatable, Sendable {
         windowID: UUID? = nil,
         trackedPhase: NotchAgentPhase? = nil,
         subagents: [NotchSubagentEntry] = [],
-        fullAccess: Bool = false
+        fullAccess: Bool = false,
+        notificationMessage: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -140,6 +144,7 @@ nonisolated struct NotchTerminalInput: Equatable, Sendable {
         self.trackedPhase = trackedPhase
         self.subagents = subagents
         self.fullAccess = fullAccess
+        self.notificationMessage = notificationMessage
     }
 }
 
@@ -208,12 +213,18 @@ nonisolated struct NotchAgentRow: Identifiable, Equatable, Sendable {
     let sessionSuffix: String?
     /// The agent runs with full access: the row shows a "Full access" badge.
     let fullAccess: Bool
+    /// The sanitized text of the Claude notification that made the agent
+    /// wait ("Claude needs your permission to use Bash"), `nil` when there is
+    /// none. In memory only; never logged. `CompanionUpNextContent.needsYouHint`
+    /// shows it on a "Needs you" row that has no request card.
+    let notificationMessage: String?
 
     init(
         id: UUID, title: String, cli: ConductorCLIID, phase: NotchAgentPhase,
         boardID: UUID? = nil, cardID: UUID? = nil, windowID: UUID? = nil,
         subagents: [NotchSubagentEntry] = [], detail: String? = nil, updatedAt: Date? = nil,
-        lastMessage: String? = nil, sessionSuffix: String? = nil, fullAccess: Bool = false
+        lastMessage: String? = nil, sessionSuffix: String? = nil, fullAccess: Bool = false,
+        notificationMessage: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -228,6 +239,7 @@ nonisolated struct NotchAgentRow: Identifiable, Equatable, Sendable {
         self.lastMessage = lastMessage
         self.sessionSuffix = sessionSuffix
         self.fullAccess = fullAccess
+        self.notificationMessage = notificationMessage
     }
 
     /// What VoiceOver reads for the row: title, agent, state, and full
@@ -258,7 +270,8 @@ nonisolated struct NotchAgentRow: Identifiable, Equatable, Sendable {
                 cardID: terminal.cardID,
                 windowID: terminal.windowID,
                 subagents: terminal.subagents,
-                fullAccess: terminal.fullAccess)
+                fullAccess: terminal.fullAccess,
+                notificationMessage: terminal.notificationMessage)
         }
     }
 
@@ -281,7 +294,8 @@ nonisolated struct NotchAgentRow: Identifiable, Equatable, Sendable {
             id: id, title: Self.preferredTitle(cardTitle: cardTitle, fallback: title), cli: cli,
             phase: phase, boardID: boardID, cardID: cardID, windowID: windowID,
             subagents: subagents, detail: detail, updatedAt: updatedAt,
-            lastMessage: lastMessage, sessionSuffix: sessionSuffix)
+            lastMessage: lastMessage, sessionSuffix: sessionSuffix,
+            notificationMessage: notificationMessage)
     }
 
     /// Most urgent first. Equal urgency keeps the input order.
@@ -413,11 +427,13 @@ nonisolated enum CompanionUpNextContent {
     /// The second line of a "Needs you" row: where the person answers. A row
     /// with a `request` names what the agent asks ("Plan ready. Open the
     /// terminal to answer"), so it never says only "Answer in the terminal".
-    /// `nil` for any other row, or a row with no window (an agent outside
-    /// Rafu).
+    /// A row with no request but a Claude `notificationMessage` starts with
+    /// that message ("Claude needs your permission to use Bash. Answer in the
+    /// terminal"). `nil` for any other row, or a row with no window (an agent
+    /// outside Rafu).
     static func needsYouHint(
         phase: NotchAgentPhase, cli: ConductorCLIID, hasWindow: Bool, claudeAnswersEnabled: Bool,
-        request: CanvasAgentRequest? = nil
+        request: CanvasAgentRequest? = nil, notificationMessage: String? = nil
     ) -> String? {
         guard hasWindow else { return nil }
         if let request {
@@ -426,10 +442,23 @@ nonisolated enum CompanionUpNextContent {
                 ? "\(title). Open the terminal to answer" : "\(title). Answer here"
         }
         guard phase == .needsYou else { return nil }
-        if cli == .claudeCode, !claudeAnswersEnabled {
-            return "Turn on Answers from Up next in Settings to answer here"
-        }
-        return "Answer in the terminal"
+        let answer =
+            cli == .claudeCode && !claudeAnswersEnabled
+            ? "Turn on Answers from Up next in Settings to answer here"
+            : "Answer in the terminal"
+        guard let message = oneLine(notificationMessage) else { return answer }
+        let end = message.last.map { ".!?:".contains($0) } ?? false
+        return end ? "\(message) \(answer)" : "\(message). \(answer)"
+    }
+
+    /// `text` on one line with no outer spaces, or `nil` when nothing is left.
+    private static func oneLine(_ text: String?) -> String? {
+        guard let text else { return nil }
+        let line = text.split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        return line.isEmpty ? nil : line
     }
 }
 

@@ -62,6 +62,65 @@ func needsYouHintWithRequest() {
             request: plan) == nil)
 }
 
+@Test("CompanionUpNextContent.needsYouHint: a Claude notification message leads the hint")
+func needsYouHintWithNotificationMessage() {
+    let message = "Claude needs your permission to use Bash"
+    #expect(
+        CompanionUpNextContent.needsYouHint(
+            phase: .needsYou, cli: .claudeCode, hasWindow: true, claudeAnswersEnabled: true,
+            notificationMessage: message)
+            == "Claude needs your permission to use Bash. Answer in the terminal")
+    #expect(
+        CompanionUpNextContent.needsYouHint(
+            phase: .needsYou, cli: .claudeCode, hasWindow: true, claudeAnswersEnabled: false,
+            notificationMessage: message)
+            == "Claude needs your permission to use Bash. "
+            + "Turn on Answers from Up next in Settings to answer here")
+    // A message that ends with punctuation gets no second full stop; a
+    // message on two lines becomes one line.
+    #expect(
+        CompanionUpNextContent.needsYouHint(
+            phase: .needsYou, cli: .claudeCode, hasWindow: true, claudeAnswersEnabled: true,
+            notificationMessage: "Which file?\n  Pick one ")
+            == "Which file? Pick one. Answer in the terminal")
+    // An empty or blank message, or a missing one, keeps the old hint.
+    for blank in [nil, "", "  \n "] {
+        #expect(
+            CompanionUpNextContent.needsYouHint(
+                phase: .needsYou, cli: .claudeCode, hasWindow: true, claudeAnswersEnabled: true,
+                notificationMessage: blank) == "Answer in the terminal")
+    }
+    // The message never shows for another phase, a row with no window, or a
+    // row whose request card names the ask.
+    #expect(
+        CompanionUpNextContent.needsYouHint(
+            phase: .replyReady, cli: .claudeCode, hasWindow: true, claudeAnswersEnabled: true,
+            notificationMessage: message) == nil)
+    #expect(
+        CompanionUpNextContent.needsYouHint(
+            phase: .needsYou, cli: .claudeCode, hasWindow: false, claudeAnswersEnabled: true,
+            notificationMessage: message) == nil)
+    let command = CanvasAgentRequest(kind: .command, command: "ls")
+    #expect(
+        CompanionUpNextContent.needsYouHint(
+            phase: .needsYou, cli: .claudeCode, hasWindow: true, claudeAnswersEnabled: true,
+            request: command, notificationMessage: message) == "Run command. Answer here")
+}
+
+@Test("NotchAgentRow keeps the notification message through rows(from:) and a card title")
+func notificationMessageReachesRow() {
+    let id = UUID()
+    let rows = NotchAgentRow.rows(from: [
+        NotchTerminalInput(
+            id: id, title: "claude", cli: .claudeCode, status: .running,
+            trackedPhase: .needsYou, notificationMessage: "Claude needs your permission")
+    ])
+    #expect(rows.first?.notificationMessage == "Claude needs your permission")
+    #expect(
+        rows.first?.preferringCardTitle("Fix tests").notificationMessage
+            == "Claude needs your permission")
+}
+
 // MARK: - Phase
 
 @Test("NotchAgentPhase.resolve: status, output, and attention cause map to the five phases")

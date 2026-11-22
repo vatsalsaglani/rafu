@@ -146,7 +146,8 @@ extension AgentActivityStore {
                 detail: AgentTrackedPhase.cardDetail(cwd: session.cwd),
                 updatedAt: session.updatedAt,
                 lastMessage: session.lastMessagePreview,
-                sessionSuffix: AgentTrackedPhase.sessionSuffix(session.sessionID))
+                sessionSuffix: AgentTrackedPhase.sessionSuffix(session.sessionID),
+                notificationMessage: session.notificationMessage)
         }
     }
 }
