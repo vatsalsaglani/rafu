@@ -112,6 +112,9 @@ final class RafuAppDelegate: NSObject, NSApplicationDelegate {
         // Watches the agent hook spool only if the person connected a
         // provider in Settings ▸ Agents. Never installs or changes hooks.
         AgentActivityStore.shared.start()
+        // Replaces a stale installed hook helper after an app update, only
+        // when a provider is connected. Never installs or changes hooks.
+        AgentHookSetupModel.refreshHelperAtLaunch()
         // After the companion activates: a usage link that arrived during
         // launch can now show the menu bar card or the panel.
         UsageDeepLink.launchDidFinish()

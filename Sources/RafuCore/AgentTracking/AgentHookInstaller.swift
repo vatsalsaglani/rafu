@@ -1,13 +1,29 @@
 import Foundation
 
+/// The result of `AgentHookInstaller.refreshHelper`.
+public enum AgentHookHelperRefresh: Equatable, Sendable {
+    /// No provider file refers to this app variant's helper. Nothing was
+    /// written.
+    case notConnected
+    /// The app has no bundled helper to copy from. Nothing was written.
+    case bundledHelperMissing
+    /// The installed helper has the same bytes as the bundled helper.
+    case current
+    /// The installed helper was replaced, or restored when it was gone.
+    case updated
+}
+
 /// The file-system half of hook setup. Blocking: call it off the main actor.
 ///
 /// - `prepare` reads the provider file and plans the change; it writes
 ///   nothing.
 /// - `apply` writes only if the file is byte-for-byte what was reviewed. It
-///   copies the bundled helper to its stable path (Connect only), keeps a
+///   copies the bundled helper to its stable path (Connect), keeps a
 ///   timestamped backup of the old file, and writes the new file through a
 ///   temporary file and a rename.
+/// - `refreshHelper` replaces a stale installed helper with the bundled one,
+///   only when a provider file already refers to the installed helper. It
+///   never writes a provider file.
 public enum AgentHookInstaller {
     /// Reads the provider's configuration and plans the change.
     public static func prepare(
@@ -43,6 +59,55 @@ public enum AgentHookInstaller {
     public static func isAnswerConnected(destination: URL, paths: AgentTrackingPaths) -> Bool {
         AgentHookConfiguration.isAnswerConnected(
             existing: try? readConfiguration(at: destination), helper: paths.helper)
+    }
+
+    /// Keeps the installed helper equal to the bundled helper, so a Rafu
+    /// update reaches agents that are already connected.
+    ///
+    /// Writes only when a provider file at one of `targets` has a hook
+    /// command that runs `paths.helper`. It never writes a provider file and
+    /// never installs a helper for a person who did not connect. The copy is
+    /// `stageHelper`: 0700, symbolic-link refusal, write then rename.
+    /// Blocking: call it off the main actor.
+    public static func refreshHelper(
+        targets: [(provider: AgentHookProvider, destination: URL)],
+        paths: AgentTrackingPaths,
+        bundledHelper: URL?
+    ) throws -> AgentHookHelperRefresh {
+        let fileManager = FileManager.default
+        guard let bundledHelper, fileManager.isExecutableFile(atPath: bundledHelper.path) else {
+            return .bundledHelperMissing
+        }
+        let connected = targets.contains { target in
+            AgentHookConfiguration.referencesHelper(
+                provider: target.provider,
+                existing: try? readConfiguration(at: target.destination),
+                helper: paths.helper)
+        }
+        guard connected else { return .notConnected }
+        try requireNoSymlink(paths.root)
+        try requireNoSymlink(paths.helper.deletingLastPathComponent())
+        try requireNoSymlink(paths.helper)
+        if sameBytes(bundledHelper, paths.helper) { return .current }
+        try stageHelper(from: bundledHelper, paths: paths)
+        return .updated
+    }
+
+    /// Whether both files are regular files with equal size and bytes. Checks
+    /// the size first, so files of different size cost no read.
+    private static func sameBytes(_ first: URL, _ second: URL) -> Bool {
+        let fileManager = FileManager.default
+        func size(_ url: URL) -> Int? {
+            guard let attributes = try? fileManager.attributesOfItem(atPath: url.path),
+                (attributes[.type] as? FileAttributeType) == .typeRegular
+            else { return nil }
+            return (attributes[.size] as? NSNumber)?.intValue
+        }
+        guard let firstSize = size(first), firstSize == size(second),
+            let firstData = try? Data(contentsOf: first, options: .mappedIfSafe),
+            let secondData = try? Data(contentsOf: second, options: .mappedIfSafe)
+        else { return false }
+        return firstData == secondData
     }
 
     /// Applies a reviewed change. Returns the backup URL, if one was made.
