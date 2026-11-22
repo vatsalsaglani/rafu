@@ -206,4 +206,109 @@ struct AgentHookSpoolTests {
                 == "/Users/me/Library/Application Support/Rafu Lightning/AgentTracking/spool")
         #expect(paths.helper.lastPathComponent == AgentTrackingPaths.helperName)
     }
+
+    // MARK: Prompt text and shapes
+
+    @Test("A Claude notification keeps its message, bounded and clean")
+    func notificationMessage() throws {
+        let event = try AgentHookEvent(
+            provider: .claude,
+            payload: payload([
+                "session_id": "s", "hook_event_name": "Notification",
+                "notification_type": "permission_prompt",
+                "message": "Claude needs your permission\u{202E} to use the network\n"
+                    + String(repeating: "m", count: 600),
+            ]))
+        let message = try #require(event.notificationMessage)
+        #expect(message.hasPrefix("Claude needs your permission to use the network\n"))
+        #expect(message.utf8.count == AgentHookEvent.maximumNotificationMessageBytes)
+        #expect(
+            try JSONDecoder().decode(AgentHookEvent.self, from: JSONEncoder().encode(event))
+                == event)
+        // No other event, and no other provider, keeps it.
+        let stop = try AgentHookEvent(
+            provider: .claude,
+            payload: payload(["session_id": "s", "hook_event_name": "Stop", "message": "x"]))
+        #expect(stop.notificationMessage == nil)
+    }
+
+    @Test("The answer mode records the shape of an unclassified request, never a value")
+    func unclassifiedShape() throws {
+        let secret = "sk-ant-secret-value-123"
+        let event = try AgentHookEvent(
+            provider: .claude,
+            payload: payload([
+                "session_id": "s", "hook_event_name": "PermissionRequest",
+                "tool_name": "Bash", "tool_input": ["cmd": secret, "n": 3],
+            ]),
+            includesRequestSummary: true)
+        // Bash without a `command` string is unclassified: no summary, a shape.
+        #expect(event.requestSummary == nil)
+        let shape = try #require(event.requestShape)
+        #expect(shape == "claude Bash {cmd:string,n:number}")
+        #expect(!shape.contains(secret))
+        // The shape is set only in the answer mode.
+        let plain = try AgentHookEvent(
+            provider: .claude,
+            payload: payload([
+                "session_id": "s", "hook_event_name": "PermissionRequest",
+                "tool_name": "Bash", "tool_input": ["cmd": secret],
+            ]))
+        #expect(plain.requestShape == nil)
+    }
+
+    @Test("Only classes the helper waits for carry a summary in the event")
+    func waitingClassesOnly() throws {
+        func summary(_ tool: String, _ input: [String: Any]) throws
+            -> AgentPermissionRequestSummary?
+        {
+            try AgentHookEvent(
+                provider: .claude,
+                payload: payload([
+                    "session_id": "s", "hook_event_name": "PermissionRequest",
+                    "tool_name": tool, "tool_input": input,
+                ]),
+                includesRequestSummary: true
+            ).requestSummary
+        }
+        #expect(try summary("Bash", ["command": "ls"]) != nil)
+        #expect(try summary("mcp__a__b", [:]) != nil)
+        #expect(try summary("WebFetch", ["url": "https://example.com"]) == nil)
+        #expect(try summary("AskUserQuestion", ["questions": []]) == nil)
+        #expect(try summary("ExitPlanMode", ["plan": "p"]) == nil)
+    }
+
+    @Test("A summary of four full questions fits one spool file")
+    func largestQuestionSetFitsSpool() throws {
+        // Worst case for JSON: quotes and line breaks everywhere, every bound full.
+        let limits = CanvasAgentRequest.Limits.self
+        let preview = String(repeating: "\n", count: limits.previewBytes)
+        let questions = (0..<limits.questions).map { index -> [String: Any] in
+            [
+                "question": "\(index)" + String(repeating: "\"", count: limits.questionBytes - 1),
+                "header": String(repeating: "\"", count: limits.headerBytes),
+                "multiSelect": true,
+                "options": (0..<limits.choices).map { choice in
+                    [
+                        "label": "\(choice)"
+                            + String(repeating: "\"", count: limits.labelBytes - 1),
+                        "description": String(repeating: "\"", count: limits.detailBytes),
+                        "preview": preview,
+                    ]
+                },
+            ]
+        }
+        let summary = AgentPermissionRequestSummary.classify(
+            toolName: "AskUserQuestion", toolInput: ["questions": questions])
+        #expect(summary.isComplete)
+        let event = AgentHookEvent(
+            provider: .claude, sessionID: "s", hookEventName: "PermissionRequest",
+            requestSummary: summary)
+        let data = try JSONEncoder().encode(event)
+        // Measured: 41,272 bytes with every character escaped and 8 KiB of
+        // previews (about 12 KiB of plain text without previews). The spool
+        // file bound stays 64 KiB.
+        #expect(data.count <= AgentHookSpool.maximumFileBytes, "\(data.count) bytes")
+        #expect(try JSONDecoder().decode(AgentHookEvent.self, from: data) == event)
+    }
 }

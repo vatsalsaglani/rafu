@@ -25,6 +25,8 @@ struct CompanionRequestPresentation {
         case .permissions: "Grant permissions"
         case .userInput: "Answer questions"
         case .toolCall: "Use MCP tool"
+        case .plan: "Plan ready"
+        case .notice: "Needs you"
         }
     }
 

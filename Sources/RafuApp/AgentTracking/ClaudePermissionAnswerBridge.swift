@@ -83,7 +83,7 @@ nonisolated struct ClaudePermissionAnswerBridge: Equatable, Sendable {
         case .accept: AgentPermissionAnswer(eventID: eventID, verdict: .allow)
         case .decline: AgentPermissionAnswer(eventID: eventID, verdict: .deny)
         case .cancel: AgentPermissionAnswer(eventID: eventID, verdict: .deny, interrupt: true)
-        case .acceptForSession, .answers: nil
+        case .acceptForSession, .acceptAndRemember, .answers: nil
         }
     }
 

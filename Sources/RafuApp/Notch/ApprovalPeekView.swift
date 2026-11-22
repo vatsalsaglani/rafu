@@ -252,6 +252,8 @@ private struct ApprovalPeekCardBody: View {
         case .permissions: "Grant permissions"
         case .userInput: "Answer questions"
         case .toolCall: "Use MCP tool"
+        case .plan: "Plan ready"
+        case .notice: "Needs you"
         }
     }
 
@@ -416,7 +418,7 @@ private struct ApprovalPeekCardBody: View {
                     ForEach(question.choices.indices, id: \.self) { index in
                         let choice = question.choices[index]
                         Button {
-                            choose(.answers([question.id: choice.label]))
+                            choose(.answers(labels: [question.id: choice.label]))
                         } label: {
                             Text(choice.label).frame(maxWidth: .infinity)
                         }

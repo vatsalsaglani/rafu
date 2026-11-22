@@ -848,4 +848,256 @@ struct CanvasAgentRequestTests {
             token: "t", operation: CanvasAgentRequest.openOperation, approval: largest)
         #expect(try JSONEncoder().encode(full).count < LauncherIPCProtocol.maxFrameBytes / 2)
     }
+
+    // MARK: Question sets
+
+    private static func set(
+        multiple: Bool = false, freeText: Bool = true, labels: [String] = ["A", "B", "C"]
+    ) -> CanvasAgentRequest {
+        CanvasAgentRequest(
+            kind: .userInput,
+            questions: [
+                .init(
+                    id: "q", header: "H", text: "Pick?",
+                    choices: labels.map { .init(label: $0, detail: "") },
+                    allowsMultiple: multiple, allowsFreeText: freeText)
+            ])
+    }
+
+    @Test("A single-choice question takes exactly one label or a text")
+    func singleChoiceAnswers() {
+        let request = Self.set()
+        #expect(request.permits(.answers(["q": "A"])))
+        #expect(request.permits(.answers(["q": QuestionAnswer(text: "Mine")])))
+        #expect(!request.permits(.answers(["q": QuestionAnswer(labels: ["A", "B"])])))
+        #expect(!request.permits(.answers(["q": QuestionAnswer(labels: ["A"], text: "x")])))
+        #expect(!request.permits(.answers(["q": QuestionAnswer()])))
+        #expect(!request.permits(.answers(["q": "D"])))
+        // Text must be allowed, fit, stay on one line, be clean and not blank.
+        #expect(!Self.set(freeText: false).permits(.answers(["q": QuestionAnswer(text: "x")])))
+        let long = String(repeating: "t", count: CanvasAgentRequest.Limits.freeTextBytes + 1)
+        for text in [long, "a\nb", "a\u{202E}b", "   "] {
+            #expect(!request.permits(.answers(["q": QuestionAnswer(text: text)])))
+        }
+        let fits = String(repeating: "t", count: CanvasAgentRequest.Limits.freeTextBytes)
+        #expect(request.permits(.answers(["q": QuestionAnswer(text: fits)])))
+    }
+
+    @Test("A multiple-choice question takes labels, a text, or both, each label once")
+    func multipleChoiceAnswers() {
+        let request = Self.set(multiple: true)
+        #expect(request.questions[0].allowsMultiple)
+        #expect(request.permits(.answers(["q": QuestionAnswer(labels: ["A", "C"])])))
+        #expect(request.permits(.answers(["q": QuestionAnswer(labels: ["B"], text: "and")])))
+        #expect(request.permits(.answers(["q": QuestionAnswer(text: "only")])))
+        #expect(!request.permits(.answers(["q": QuestionAnswer(labels: ["A", "A"])])))
+        #expect(!request.permits(.answers(["q": QuestionAnswer()])))
+        // A label with ", " makes a multiple-choice question terminal-only.
+        let comma = Self.set(multiple: true, labels: ["a, b", "c"])
+        #expect(comma.terminalOnly)
+        #expect(!Self.set(labels: ["a, b", "c"]).terminalOnly)
+        // Two choices with one label cannot be told apart.
+        #expect(Self.set(labels: ["A", "A"]).terminalOnly)
+    }
+
+    @Test("A Codex answer sends labels, then the note; a lone note goes with the other label")
+    func codexQuestionResult() throws {
+        let request = try userInput([question("a", isOther: true), question("b", isOther: true)])
+        #expect(request.questions.allSatisfy { $0.allowsFreeText })
+        let result = try #require(
+            request.result(
+                for: .answers(["a": QuestionAnswer(text: "Mine"), "b": "Yes"])))
+        let answers = try #require(result["answers"] as? [String: [String: [String]]])
+        #expect(
+            answers == [
+                "a": ["answers": ["None of the above", "user_note: Mine"]],
+                "b": ["answers": ["Yes"]],
+            ])
+        // No free text without `isOther`.
+        let closed = try userInput([question("c")])
+        #expect(!closed.permits(.answers(["c": QuestionAnswer(text: "x")])))
+    }
+
+    @Test("A question answer reads the older form and writes it when it can")
+    func questionAnswerWire() throws {
+        let old = #"{"type":"answers","answers":{"a":"Yes","b":"Blue"}}"#
+        let decision = try JSONDecoder().decode(
+            CanvasAgentRequestDecision.self, from: Data(old.utf8))
+        #expect(decision == .answers(labels: ["a": "Yes", "b": "Blue"]))
+        // One label and no text encodes as the plain label, so an older peer reads it.
+        let plain = try JSONEncoder().encode(QuestionAnswer(labels: ["Yes"]))
+        #expect(String(decoding: plain, as: UTF8.self) == #""Yes""#)
+        let rich = QuestionAnswer(labels: ["A", "B"], text: "and")
+        #expect(try roundTrip(rich) == rich)
+        #expect(try roundTrip(QuestionAnswer(text: "t")) == QuestionAnswer(text: "t"))
+        // Too many labels or too much text is refused at decode.
+        let many = #"{"labels":["1","2","3","4","5","6","7"]}"#
+        #expect((try? JSONDecoder().decode(QuestionAnswer.self, from: Data(many.utf8))) == nil)
+        let text = String(repeating: "t", count: CanvasAgentRequest.Limits.freeTextBytes + 1)
+        let big = #"{"text":"\#(text)"}"#
+        #expect((try? JSONDecoder().decode(QuestionAnswer.self, from: Data(big.utf8))) == nil)
+    }
+
+    @Test("A preview is display only, bounded per choice and per request")
+    func previews() throws {
+        let preview = String(repeating: "p", count: CanvasAgentRequest.Limits.previewBytes + 5)
+        let one = CanvasAgentRequest.Question(
+            id: "q", header: "", text: "?",
+            choices: [.init(label: "A", detail: "", preview: preview)])
+        #expect(one.choices[0].preview?.utf8.count == CanvasAgentRequest.Limits.previewBytes)
+        #expect(!one.terminalOnly)
+        let full = String(repeating: "p", count: CanvasAgentRequest.Limits.previewBytes)
+        let questions = (0..<4).map { index in
+            CanvasAgentRequest.Question(
+                id: "q\(index)", header: "", text: "Q\(index)?",
+                choices: (0..<6).map { .init(label: "L\($0)", detail: "", preview: full) })
+        }
+        let request = CanvasAgentRequest(kind: .userInput, questions: questions)
+        let total = request.questions.flatMap(\.choices).compactMap(\.preview)
+            .reduce(0) { $0 + $1.utf8.count }
+        #expect(total <= CanvasAgentRequest.Limits.previewBytesTotal)
+        #expect(!request.terminalOnly)
+        #expect(try roundTrip(request) == request)
+        // Even the largest request with previews fits one IPC frame.
+        let open = CanvasBridgeRequest(
+            token: "t", operation: CanvasAgentRequest.openOperation, approval: request)
+        #expect(try JSONEncoder().encode(open).count < LauncherIPCProtocol.maxFrameBytes / 2)
+    }
+
+    // MARK: Plans and notices
+
+    @Test("A plan and a notice are shown, never answered, and cut text is marked")
+    func planAndNotice() throws {
+        let plan = CanvasAgentRequest(
+            kind: .plan, reason: "/tmp/plan.md",
+            text: String(repeating: "x", count: CanvasAgentRequest.Limits.planBytes + 1))
+        #expect(plan.terminalOnly)
+        #expect(plan.options.isEmpty)
+        #expect(!plan.permits(.accept))
+        #expect(plan.text?.utf8.count == CanvasAgentRequest.Limits.planBytes)
+        #expect(plan.textIsCut)
+        let notice = CanvasAgentRequest(
+            kind: .notice, reason: "Network request", text: "Allow example.com?")
+        #expect(notice.terminalOnly)
+        #expect(notice.text == "Allow example.com?")
+        #expect(!notice.textIsCut)
+        let long = CanvasAgentRequest(
+            kind: .notice, reason: "x",
+            text: String(repeating: "n", count: CanvasAgentRequest.Limits.noticeBytes + 1))
+        #expect(long.text?.utf8.count == CanvasAgentRequest.Limits.noticeBytes)
+        #expect(long.textIsCut)
+        for request in [plan, notice, long] { #expect(try roundTrip(request) == request) }
+        // Only a plan or a notice carries text.
+        let command = CanvasAgentRequest(kind: .command, command: "ls", text: "hidden")
+        #expect(command.text == nil)
+        #expect(!command.textIsCut)
+    }
+
+    @Test("A request from an older peer decodes with the new fields at their defaults")
+    func olderPeerRequest() throws {
+        let request = CanvasAgentRequest(kind: .command, command: "ls")
+        var object = try #require(
+            try JSONSerialization.jsonObject(with: JSONEncoder().encode(request))
+                as? [String: Any])
+        for key in ["text", "textIsCut", "persistChoices", "stopsTurnOnCancel"] {
+            object.removeValue(forKey: key)
+        }
+        let decoded = try JSONDecoder().decode(
+            CanvasAgentRequest.self, from: JSONSerialization.data(withJSONObject: object))
+        #expect(decoded == request)
+        #expect(decoded.stopsTurnOnCancel)
+        #expect(decoded.persistChoices.isEmpty)
+    }
+
+    // MARK: Remember choices
+
+    private static let remembering = CanvasAgentRequest(
+        kind: .toolCall, command: "{}",
+        reason: "codex_apps: create_event\nmcp__codex_apps__create_event",
+        persistChoices: [
+            .init(kind: .session, line: "Allow for this session"),
+            .init(kind: .always, line: "Always allow create_event for Codex"),
+            .init(kind: .session, line: "A second session choice is dropped"),
+        ],
+        stopsTurnOnCancel: false, offersSessionAllow: false)
+
+    @Test("Remember choices are off by default; the policy turns each kind on")
+    func rememberChoicesOffByDefault() {
+        let request = Self.remembering
+        #expect(request.persistChoices.map(\.kind) == [.session, .always])
+        #expect(CanvasAgentRequest.PersistPolicy.current.allowsSession == false)
+        #expect(CanvasAgentRequest.PersistPolicy.current.allowsLasting == false)
+        #expect(request.options.map(\.label) == ["Allow", "Deny", "Cancel tool call"])
+        #expect(!request.permits(.acceptAndRemember(.session)))
+        #expect(!request.permits(.acceptAndRemember(.always)))
+        #expect(request.result(for: .acceptAndRemember(.session)) == nil)
+        let session = CanvasAgentRequest.PersistPolicy(allowsSession: true, allowsLasting: false)
+        #expect(
+            request.options(policy: session).map(\.label) == [
+                "Allow", "Allow for this session", "Deny", "Cancel tool call",
+            ])
+        #expect(request.permits(.acceptAndRemember(.session), policy: session))
+        #expect(!request.permits(.acceptAndRemember(.always), policy: session))
+        let all = request.options(policy: .all)
+        // Never the first option, every id unique.
+        #expect(all.first?.decision == .accept)
+        #expect(Set(all.map(\.id)).count == all.count)
+        #expect(all.map(\.label).contains("Always allow create_event for Codex"))
+    }
+
+    @Test("Remember choices hold only whole, clean lines, and only on commands and tool calls")
+    func rememberChoiceSanitizing() throws {
+        let unclean = CanvasAgentRequest(
+            kind: .command, command: "ls",
+            persistChoices: [
+                .init(kind: .rule, line: "Add rule\u{202E} x"),
+                .init(kind: .always, line: String(repeating: "l", count: 600)),
+                .init(kind: .session, line: ""),
+            ])
+        #expect(unclean.persistChoices.isEmpty)
+        let checkpoint = CanvasAgentRequest(
+            kind: .command, isHumanCheckpoint: true, command: "ls",
+            persistChoices: [.init(kind: .rule, line: "Rule")])
+        #expect(checkpoint.persistChoices.isEmpty)
+        let file = CanvasAgentRequest(
+            kind: .fileChange, persistChoices: [.init(kind: .rule, line: "Rule")])
+        #expect(file.persistChoices.isEmpty)
+        #expect(try roundTrip(Self.remembering) == Self.remembering)
+        // The command order keeps the remember choice after the accept options.
+        let command = CanvasAgentRequest(
+            kind: .command, command: "npm test",
+            persistChoices: [.init(kind: .rule, line: "Add rule Bash(npm test) to local settings")])
+        #expect(
+            command.options(policy: .all).map(\.decision) == [
+                .accept, .acceptForSession, .acceptAndRemember(.rule), .decline, .cancel,
+            ])
+        #expect(command.options.map(\.label).last == "Deny and stop")
+    }
+
+    @Test("A remember decision survives a round trip and an unknown kind is refused")
+    func rememberDecisionWire() throws {
+        for kind in CanvasAgentRequest.PersistChoice.Kind.allCases {
+            #expect(
+                try roundTrip(CanvasAgentRequestDecision.acceptAndRemember(kind))
+                    == .acceptAndRemember(kind))
+        }
+        let bad = #"{"type":"acceptAndRemember","persist":"forever"}"#
+        #expect(
+            (try? JSONDecoder().decode(CanvasAgentRequestDecision.self, from: Data(bad.utf8)))
+                == nil)
+        #expect(
+            CanvasAgentRequestDecision.acceptAndRemember(.rule).identifier
+                == "acceptAndRemember.rule")
+    }
+
+    // MARK: Codex classes
+
+    @Test("Codex methods classify by name; an unknown one is unclassified")
+    func codexClasses() {
+        #expect(CanvasAgentRequest.classify(method: commandMethod) == .command)
+        #expect(CanvasAgentRequest.classify(method: elicitationMethod) == .elicitation)
+        #expect(CanvasAgentRequest.classify(method: "execCommandApproval") == .legacyApproval)
+        #expect(CanvasAgentRequest.classify(method: "item/tool/call") == .notUserPrompt)
+        #expect(CanvasAgentRequest.classify(method: "item/new/thing") == .unclassified)
+    }
 }
