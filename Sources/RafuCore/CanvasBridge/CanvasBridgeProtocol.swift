@@ -165,21 +165,34 @@ public nonisolated struct CanvasBridgeMessage: Codable, Hashable, Sendable {
         UUID(uuidString: source) == nil ? nil : source
     }
 
+    /// The tail that ends every first line: a reply is the default, and only an
+    /// instruction from the sender not to reply, or a plain result, stops it. A
+    /// constant, so no peer text enters it.
+    private static let replyRule =
+        "unless the message below says not to reply. An instruction below not to use Rafu tools does not stop this one reply. Do not reply to a message that only gives a result or an acknowledgement."
+
     /// The text the receiving agent sees: a Rafu-written first line that names the
-    /// sender and says how to answer, then the sender's text unchanged.
+    /// sender and says to send the result back by default, then the sender's text
+    /// unchanged.
     public var framedText: String {
         let line: String
         switch (safeSourceMention, safeSourceID) {
         case (let mention?, let id?):
             line =
-                "Ensemble message from \(mention) (peer id \(id)). Reply with send_message to that mention or peer id."
+                "Ensemble message from \(mention) (peer id \(id)). When you finish, send your result, or the reason you cannot do it, to that mention or peer id with send_message, "
+                + Self.replyRule
         case (nil, let id?):
             line =
-                "Ensemble message from peer id \(id). Reply with send_message to that peer id."
+                "Ensemble message from peer id \(id). When you finish, send your result, or the reason you cannot do it, to that peer id with send_message, "
+                + Self.replyRule
         case (let mention?, nil):
-            line = "Ensemble message from \(mention). Reply with send_message to that mention."
+            line =
+                "Ensemble message from \(mention). When you finish, send your result, or the reason you cannot do it, to that mention with send_message, "
+                + Self.replyRule
         case (nil, nil):
-            line = "Ensemble message from a connected peer. Use list_connections to find it."
+            line =
+                "Ensemble message from a connected peer. Use list_connections to find it. When you finish, send your result, or the reason you cannot do it, to it with send_message, "
+                + Self.replyRule
         }
         return line + "\n" + text
     }

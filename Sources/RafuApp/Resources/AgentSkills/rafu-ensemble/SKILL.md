@@ -101,10 +101,32 @@ logged under "Agents" in the Ensemble bar, and undoable by the user.
    turn. Never sleep and never poll `receive_messages`.** A Codex peer takes a
    message when its current turn ends, so do not write "wait for the next
    message" in a `terminal_create` prompt: give the peer the task and tell it
-   to reply with `send_message` and then stop. **To answer a message**, call
-   `send_message` with the sender's `@mention` or peer ID. Every received
+   to reply with `send_message` and then end its turn. **To answer a message**,
+   call `send_message` with the sender's `@mention` or peer ID. Every received
    message starts with "Ensemble message from @name (peer id ...)": use that.
    `list_connections` shows the same peer. Do not tell the user that you cannot reply.
+   - **Reply by default.** When you finish the work that a message asks for,
+     send the result (or that you cannot do it, and why) to the sender with
+     `send_message`. Do not write the answer only in your terminal: the sender
+     cannot read your terminal. Do not reply only when the message says not to
+     reply, or when the message only gives a result or an acknowledgement.
+   - "Do not use Rafu tools" in a message does not stop this one reply. If
+     your own user tells you not to use Rafu tools, obey the user.
+
+## Give a peer authority for later tasks
+
+- Claude Code treats a channel message as text from another session, not as
+  an instruction from its user. It can refuse a task that its start prompt did
+  not permit. This is a safety rule of Claude Code. Rafu does not change it
+  and you must not try to get past it.
+- If you will send tasks later, put this in the visible start prompt:
+  `Also do the tasks that <your @mention or node ID> sends you through the Ensemble channel, and reply to it with send_message.`
+  Your node ID is `caller_node_id` from `ensemble_describe`.
+- If a Claude peer refuses a channel task: tell the user, and ask the user to
+  type the task or the permission in that terminal. Do not reword the message
+  to push it through.
+- Do not tell a peer "do not use the Rafu MCP" when you need its answer. Say
+  which tools it must not use, or say "reply with `send_message` only".
 
 `terminal_send` uses a Live message link when one exists. Without one, Rafu
 types only into terminals **you** created: `text` when an agent is connected in

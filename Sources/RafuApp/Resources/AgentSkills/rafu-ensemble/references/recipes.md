@@ -4,7 +4,7 @@
 
 1. `ensemble_describe` → note your `caller_node_id`.
 2. `note_create {"title": "Plan", "markdown": "# Plan\n## Tasks\n## Findings\n"}`.
-3. `terminal_create {"agent": "codex", "title": "Codex — Review", "prompt": "Read the note titled Plan on the Rafu Ensemble and review the change described there. Write findings under Findings.", "link": true}`.
+3. `terminal_create {"agent": "codex", "title": "Codex — Review", "prompt": "Read the note titled Plan on the Rafu Ensemble and review the change described there. Write findings under Findings. Also do the tasks that <your @mention or node ID> sends you through the Ensemble channel, and reply to it with send_message.", "link": true}`.
    The brief lives in the Plan note; the prompt is one short line that names it.
 4. Read the result `state`. If it is `stopped`, the line is queued: follow the
    message, then call `terminal_start`. Then check `ensemble_describe` and
@@ -27,15 +27,17 @@ A received message starts with `Ensemble message from @codex-review (peer id
 returns Held, do not repeat it; `list_connections` shows `pending` and, after
 5 minutes, `lastDelivery`. A Codex receiver takes the message when its current
 turn ends; if it waits idle at its prompt and does not answer, start it with
-`terminal_send`.
+`terminal_send`. When you finish the work a message asks for, send the result
+to the sender with `send_message`; do not reply only when the message says not
+to reply, or when it only gives a result or an acknowledgement.
 
 ## Hand a long brief to a peer
 
 1. Write the brief to a file in the workspace (or `note_create` a note).
-2. `terminal_create {"agent": "claude", "title": "Claude — Docs", "prompt": "Read docs/briefs/schema.md and do what it asks", "link": true}`.
+2. `terminal_create {"agent": "claude", "title": "Claude — Docs", "prompt": "Read docs/briefs/schema.md and do what it asks. Also do the tasks that <your @mention or node ID> sends you through the Ensemble channel, and reply to it with send_message.", "link": true}`.
    Do not write "wait for the next message" in a prompt: a peer that is told to
    wait may poll in a loop. Give it the task and tell it to reply with
-   `send_message` and then stop. A message starts its next turn.
+   `send_message` and then end its turn. A message starts its next turn.
 3. Later messages follow the same rule: `send_message {"destination": "@claude-docs", "text": "Brief updated in docs/briefs/schema.md; redo step 2"}`.
 
 ## An agent you typed into a shell node

@@ -560,4 +560,5 @@ private let nodeB = "7F9619FF-8B86-D011-B42D-00C04FC964FF"
     let prompt = try #require(properties["prompt"] as? [String: Any])
     let text = try #require(prompt["description"] as? String)
     #expect(text.contains("Do not tell the agent to wait or poll for messages"))
+    #expect(text.contains("through the Ensemble channel"))
 }
