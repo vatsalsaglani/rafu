@@ -349,7 +349,11 @@ private func canvasRPC(_ method: String, params: [String: Any] = [:], id: Int? =
             let hints = entry["annotations"] as? [String: Any]
             return hints?["readOnlyHint"] as? Bool == true ? entry["name"] as? String : nil
         })
-    #expect(annotated == ["ensemble_describe", "note_read", "action_status", "icon_search"])
+    #expect(
+        annotated == [
+            "ensemble_describe", "note_read", "action_status", "icon_search", "meeting_access",
+            "meeting_search", "meeting_read",
+        ])
 }
 
 @Test func canvasTransientExchangeFailureDoesNotDisconnect() throws {

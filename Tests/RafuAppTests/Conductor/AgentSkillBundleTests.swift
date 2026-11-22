@@ -36,10 +36,22 @@ struct AgentSkillBundleTests {
         return names
     }
 
-    @Test("The catalog lists the three skills, json-render-swift-use among them")
+    @Test("The catalog lists the four skills, json-render-swift-use and rafu-meetings among them")
     func skillList() {
         let names = ConductorBundledSkillCatalog.skills.map(\.identifier)
-        #expect(names == ["rafu-ensemble", "rafu-view", Self.jsonRenderSkill])
+        #expect(names == ["rafu-ensemble", "rafu-view", Self.jsonRenderSkill, "rafu-meetings"])
+    }
+
+    @Test("The rafu-meetings skill names its three tools and the Settings switch")
+    func meetingsSkill() throws {
+        let meetings = try #require(try catalogs().first { $0.skill == "rafu-meetings" })
+        let body = try text(meetings, "SKILL.md")
+        for tool in ["meeting_access", "meeting_search", "meeting_read", "next_after"] {
+            #expect(body.contains(tool), Comment(rawValue: tool))
+        }
+        #expect(body.contains("Settings ▸ Meetings ▸ Allow agents to read your meetings"))
+        #expect(body.contains("Do not look for meeting files on disk"))
+        #expect(!body.contains("Canvas") && !body.contains("Conductor"))
     }
 
     @Test("Every skill the view_render description and the rafu-view skill name is bundled")

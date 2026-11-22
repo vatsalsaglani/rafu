@@ -43,7 +43,7 @@ func ensembleSettingsInstallResultState() async throws {
     #expect(!model.isInstalling)
     #expect(
         model.operationMessage
-            == "Installed at \(expected.path) and 2 more beside it: 17 written, 0 replaced, 0 skipped."
+            == "Installed at \(expected.path) and 3 more beside it: 18 written, 0 replaced, 0 skipped."
     )
     #expect(
         FileManager.default.fileExists(
@@ -96,7 +96,10 @@ func ensembleSettingsAsksBeforeAnySkillIsWritten() async throws {
     let model = EnsembleSettingsModel()
 
     await model.load()
-    #expect(model.skillNames == ["rafu-ensemble", "rafu-view", "json-render-swift-use"])
+    #expect(
+        model.skillNames == [
+            "rafu-ensemble", "rafu-view", "json-render-swift-use", "rafu-meetings",
+        ])
     await model.install(at: .custom(destination))
     #expect(model.pendingReplacement?.conflicts == ["rafu-view/SKILL.md"])
     #expect(

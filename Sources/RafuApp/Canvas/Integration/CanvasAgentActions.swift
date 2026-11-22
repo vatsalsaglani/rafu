@@ -413,8 +413,18 @@ enum CanvasAgentActions {
         case .viewUpdate: return try await viewUpdate(call, caller: caller)
         case .agentConfigure: return await agentConfigure(call, caller: caller)
         case .actionStatus: return .init(error: "No action matches that request_id.")
+        case .meetingAccess, .meetingSearch, .meetingRead:
+            // Voice does not read meetings in version 1. The tools are hidden
+            // from voice; this also refuses a voice call that names one.
+            guard caller.provider != CanvasAgentCaller.voiceProvider else {
+                return .init(error: Self.meetingsVoiceMessage)
+            }
+            // A meeting tool needs no board state.
+            return await MeetingAgentToolService.shared.perform(call)
         }
     }
+
+    static let meetingsVoiceMessage = "Voice cannot read meetings."
 
     private static func ok(
         _ message: String, node: CanvasCardID? = nil, edge: UUID? = nil, state: String? = nil
