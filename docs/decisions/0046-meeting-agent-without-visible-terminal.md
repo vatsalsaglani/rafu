@@ -5,7 +5,9 @@
   ([`docs/references/meeting-hidden-agent-limits.md`](../references/meeting-hidden-agent-limits.md); checked
   2026-11-22). Codex is offered in version 1 by the user's decision of 2026-11-23, with a different limit (decision
   11). The Codex 0.171.0 file-reading design was not held in the check of 2026-11-22. The new Codex design (the
-  meeting text on standard input) is not tested yet; it needs the re-check in "Open".
+  meeting text on standard input, no shell, a new empty folder for each run) was re-checked on 2026-11-23 and held
+  every attempt on Codex 0.171.0; the exact array is in the limits note. Note for decision 2: Codex gets no file,
+  only the text of one meeting on standard input.
 - **Date:** 2026-11-22
 - **Related:** the decision about external agent CLIs in the Ensemble
   ([`0018-conductor-external-agent-orchestration.md`](0018-conductor-external-agent-orchestration.md)), the decision
@@ -106,8 +108,10 @@ A CLI release that changes its permission flags. The start of the API-key stage.
 
 ## Open
 
-- The result of the Codex standard-input re-check. It must show that the Codex design of decision 11 holds each
-  escape attempt, and it gives the exact Codex argument array. Until it passes, Codex is "not available yet".
+- Nothing. The Codex standard-input re-check passed on 2026-11-23 (Codex 0.171.0, 60 runs). Three flags were
+  added to the candidate: `-c skills.include_instructions=false` (else the user's skills are listed to the model),
+  `--disable=view_image` and `--disable=sleep_tool`. Rafu makes a new empty folder for each run, because Codex
+  applies an `AGENTS.md` it finds there. A new Codex version must pass the re-check before it is offered.
 
 The summary question is answered (decision 12). The Claude Code array is in the limits note. The stricter run
 (the meeting text on standard input) is the Codex design; Claude Code keeps the file-reading design.
