@@ -88,9 +88,32 @@ nonisolated enum MeetingAgentRunFolders {
         case notPrivate
     }
 
+    /// `MeetingAgentRuns-<variant>` in the user's temporary folder. Rafu and
+    /// Rafu Lightning share that folder, so each variant has its own root
+    /// and removes only its own folders.
     static var defaultRunsRoot: URL {
         FileManager.default.temporaryDirectory
-            .appendingPathComponent("MeetingAgentRuns", isDirectory: true)
+            .appendingPathComponent(
+                variantFolderName("MeetingAgentRuns", identity: .current), isDirectory: true)
+    }
+
+    /// `MeetingAgentSnapshots-<variant>`: the snapshot root of the app's store.
+    static var defaultSnapshotRoot: URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                variantFolderName("MeetingAgentSnapshots", identity: .current), isDirectory: true)
+    }
+
+    /// For example `MeetingAgentRuns-RafuLightning`.
+    nonisolated static func variantFolderName(_ stem: String, identity: RafuAppIdentity) -> String {
+        "\(stem)-\(identity.executableName)"
+    }
+
+    /// Removes each folder inside `root` (one variant's runs or snapshots).
+    /// Used at start and at quit: no run of this variant lives across a
+    /// launch. `root` itself stays.
+    static func removeAll(in root: URL) {
+        removeStale(in: root, olderThan: -1)
     }
 
     static func make(in runsRoot: URL) throws -> Run {

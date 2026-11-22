@@ -8,7 +8,10 @@ extension MeetingsFeature {
     /// Registers the hidden meeting agent on a Mac that can use Meetings.
     /// Making the runner starts no process; a run starts only when the
     /// interface calls `ask` or `suggestSpeakerNames` on a user action.
-    func registerAgentParts(runsRoot: URL = MeetingAgentRunFolders.defaultRunsRoot) {
+    func registerAgentParts(
+        runsRoot: URL = MeetingAgentRunFolders.defaultRunsRoot,
+        snapshotRoot: URL = MeetingAgentRunFolders.defaultSnapshotRoot
+    ) {
         guard availability.isAvailable else { return }
         register(
             .agentRunner(
@@ -16,11 +19,19 @@ extension MeetingsFeature {
                     store: { @MainActor [weak self] in self?.store },
                     diagnostics: diagnostics, runsRoot: runsRoot)))
 
-        // Folders left by a crash: run roots and snapshots older than 1 hour.
-        let store = store as? MeetingStore
+        // Both roots carry the app variant in their name, so these
+        // folders belong to this variant only, and no run of it lives
+        // across a launch: remove each one now (a crash left them), and at
+        // quit after the processes ended.
         Task.detached(priority: .utility) {
-            MeetingAgentRunFolders.removeStale(in: runsRoot, olderThan: 3_600)
-            await store?.removeStaleSnapshots(olderThan: 3_600)
+            MeetingAgentRunFolders.removeAll(in: runsRoot)
+            MeetingAgentRunFolders.removeAll(in: snapshotRoot)
         }
+        let registry = MeetingAgentProcessRegistry.shared
+        registry.addQuitCleanup {
+            MeetingAgentRunFolders.removeAll(in: runsRoot)
+            MeetingAgentRunFolders.removeAll(in: snapshotRoot)
+        }
+        registry.observeQuit()
     }
 }

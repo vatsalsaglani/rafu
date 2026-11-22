@@ -99,6 +99,9 @@ private struct MeetingDetailContent: View {
             await model.reload()
         }
         .task { await model.refreshAvailability() }
+        // `.id(meeting)` above makes a new content view for each meeting,
+        // so this covers a change of meeting too.
+        .onDisappear { model.cancelRunsOnDisappear() }
     }
 
     @ViewBuilder

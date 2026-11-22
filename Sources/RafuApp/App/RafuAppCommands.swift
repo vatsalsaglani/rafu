@@ -1,4 +1,5 @@
 import AppKit
+import RafuCore
 import SwiftUI
 
 extension FocusedValues {
@@ -507,17 +508,52 @@ struct RafuAppCommands: Commands {
     }
 
     /// The Meetings menu: Open Meetings (⇧⌘M, an app shortcut, not a
-    /// system-wide key) and Export Meeting Diagnostics…. Opening the window
-    /// makes the Meetings feature; the menu itself does not.
+    /// system-wide key), Start/Stop Recording, Pause/Resume Recording, and
+    /// Export Meeting Diagnostics…. Opening the window and Start Recording
+    /// make the Meetings feature; the menu itself, Stop, Pause and Resume
+    /// do not. The recording items have no key (the menu path is enough).
     private var meetingsCommands: some Commands {
         CommandMenu("Meetings") {
             Button("Open Meetings") {
                 openWindow(id: MeetingsWindowRoot.windowID)
             }
             .keyboardShortcut("m", modifiers: [.command, .shift])
+            meetingsRecordingItems
             Divider()
             meetingsExportDiagnosticsButton
         }
+    }
+
+    /// Start/Stop Recording and Pause/Resume Recording. Each reads the
+    /// existing feature only; Start Recording is the one user action that
+    /// makes it.
+    @ViewBuilder
+    private var meetingsRecordingItems: some View {
+        let factory = MeetingsFeatureFactory.shared
+        let menu = MeetingsMenuState(
+            isAvailable: factory.availability.isAvailable,
+            session: factory.feature?.session)
+        Button(menu.recordTitle) {
+            if menu.recordStops {
+                MeetingsFeatureFactory.shared.feature?.session.stop()
+            } else {
+                let feature = MeetingsFeatureFactory.shared.resolve()
+                guard feature.availability.isAvailable, feature.session.canStartRecording
+                else { return }
+                openWindow(id: MeetingsWindowRoot.windowID)
+                feature.session.startRecording()
+            }
+        }
+        .disabled(!menu.isRecordEnabled)
+        Button(menu.pauseTitle) {
+            guard let session = MeetingsFeatureFactory.shared.feature?.session else { return }
+            switch session.recorderState {
+            case .recording: session.pause()
+            case .paused: session.resume()
+            case .idle, .starting, .stopping, .problem: break
+            }
+        }
+        .disabled(!menu.isPauseEnabled)
     }
 
     /// Export Meeting Diagnostics…, in the Meetings menu and the Help menu.
@@ -731,4 +767,57 @@ struct RafuAppCommands: Commands {
         else { return }
         perform(workspaceSession)
     }
+}
+
+/// The titles and the active state of the recording items of the Meetings
+/// menu. Pure, so a test checks each rule without a menu.
+nonisolated struct MeetingsMenuState: Equatable {
+    var isAvailable: Bool
+    /// False before the Meetings feature is made.
+    var featureExists: Bool
+    var canStartRecording: Bool
+    var recorderState: MeetingRecorderState
+
+    init(
+        isAvailable: Bool, featureExists: Bool, canStartRecording: Bool,
+        recorderState: MeetingRecorderState
+    ) {
+        self.isAvailable = isAvailable
+        self.featureExists = featureExists
+        self.canStartRecording = canStartRecording
+        self.recorderState = recorderState
+    }
+
+    @MainActor
+    init(isAvailable: Bool, session: MeetingsSessionModel?) {
+        self.init(
+            isAvailable: isAvailable, featureExists: session != nil,
+            canStartRecording: session?.canStartRecording ?? false,
+            recorderState: session?.recorderState ?? .idle)
+    }
+
+    /// True while a recording runs or is paused: the record item stops it.
+    var recordStops: Bool {
+        switch recorderState {
+        case .recording, .paused: true
+        case .idle, .starting, .stopping, .problem: false
+        }
+    }
+
+    var recordTitle: String { recordStops ? "Stop Recording" : "Start Recording" }
+
+    /// Stop: a recording runs. Start: Meetings can run here, and the
+    /// feature is not made yet (the first use makes it) or it can start.
+    var isRecordEnabled: Bool {
+        guard isAvailable else { return false }
+        if recordStops { return true }
+        return !featureExists || canStartRecording
+    }
+
+    var pauseTitle: String {
+        if case .paused = recorderState { return "Resume Recording" }
+        return "Pause Recording"
+    }
+
+    var isPauseEnabled: Bool { isAvailable && featureExists && recordStops }
 }

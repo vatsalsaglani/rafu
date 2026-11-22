@@ -54,6 +54,11 @@ final class MeetingProcessingRunner {
     private var running: (meeting: MeetingID, task: Task<Void, Never>)?
     /// The track whose text progress may change the step now.
     private var progressPhase: (meeting: MeetingID, track: MeetingTrack)?
+    /// True for the meeting that still records. The driver sets it from the
+    /// recorder's events: the recorder state stream and the event stream
+    /// are read by two tasks, so `session.liveMeeting` can still name a
+    /// meeting whose `.stopped` event was already handled.
+    var isLiveMeeting: (MeetingID) -> Bool
 
     init(
         feature: MeetingsFeature, session: MeetingsSessionModel,
@@ -62,6 +67,7 @@ final class MeetingProcessingRunner {
         self.feature = feature
         self.session = session
         self.preferences = preferences
+        self.isLiveMeeting = { [weak session] meeting in session?.liveMeeting == meeting }
     }
 
     /// The meetings that wait or run now.
@@ -190,7 +196,7 @@ final class MeetingProcessingRunner {
     /// or failed, or the live meeting).
     private func beginJob(_ job: Job, store: any MeetingStoring) async throws -> Bool {
         let meeting = job.meeting
-        guard meeting != session.liveMeeting else { return false }
+        guard !isLiveMeeting(meeting) else { return false }
         guard let summary = try await store.summary(of: meeting) else {
             throw MeetingProcessingError(reasonCode: MeetingProcessingFailure.libraryWrite)
         }
