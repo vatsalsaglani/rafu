@@ -6,31 +6,35 @@ import Testing
 /// The AskUserQuestion input that Claude Code 2.1.330 sent to a
 /// `PermissionRequest` hook in the live probe (two questions, the second
 /// multiple-choice). Descriptions shortened.
-private var questionInput: [String: Any] { [
-    "questions": [
-        [
-            "question": "Which color do you prefer?", "header": "Color", "multiSelect": false,
-            "options": [
-                ["label": "Red", "description": "Choose Red"],
-                ["label": "Blue", "description": "Choose Blue"],
-                ["label": "Green", "description": "Choose Green"],
+private var questionInput: [String: Any] {
+    [
+        "questions": [
+            [
+                "question": "Which color do you prefer?", "header": "Color", "multiSelect": false,
+                "options": [
+                    ["label": "Red", "description": "Choose Red"],
+                    ["label": "Blue", "description": "Choose Blue"],
+                    ["label": "Green", "description": "Choose Green"],
+                ],
             ],
-        ],
-        [
-            "question": "Which fruits do you like?", "header": "Fruits", "multiSelect": true,
-            "options": [
-                ["label": "Apple", "description": "Choose Apple"],
-                ["label": "Banana", "description": "Choose Banana"],
-                ["label": "Cherry", "description": "Choose Cherry"],
+            [
+                "question": "Which fruits do you like?", "header": "Fruits", "multiSelect": true,
+                "options": [
+                    ["label": "Apple", "description": "Choose Apple"],
+                    ["label": "Banana", "description": "Choose Banana"],
+                    ["label": "Cherry", "description": "Choose Cherry"],
+                ],
             ],
-        ],
+        ]
     ]
-] }
+}
 
-private var suggestion: [String: Any] { [
-    "type": "addRules", "rules": [["toolName": "Bash", "ruleContent": "npm test"]],
-    "behavior": "allow", "destination": "localSettings",
-] }
+private var suggestion: [String: Any] {
+    [
+        "type": "addRules", "rules": [["toolName": "Bash", "ruleContent": "npm test"]],
+        "behavior": "allow", "destination": "localSettings",
+    ]
+}
 
 private func payload(
     tool: String, input: [String: Any], suggestions: [Any]? = nil
@@ -140,15 +144,17 @@ struct ClaudeAnswerModeRequestTests {
                 for: answered(.init(eventID: event.id, verdict: .allow, answers: answers)))
         }
         // A label that is not a choice.
-        #expect(output([.init(index: 0, labels: ["Pink"]), .init(index: 1, labels: ["Apple"])])
-            == nil)
+        #expect(
+            output([.init(index: 0, labels: ["Pink"]), .init(index: 1, labels: ["Apple"])])
+                == nil)
         // Two labels on a single-choice question.
         #expect(
             output([.init(index: 0, labels: ["Red", "Blue"]), .init(index: 1, labels: ["Apple"])])
                 == nil)
         // One question left out, or an index out of range.
         #expect(output([.init(index: 0, labels: ["Red"])]) == nil)
-        #expect(output([.init(index: 0, labels: ["Red"]), .init(index: 5, labels: ["Apple"])]) == nil)
+        #expect(
+            output([.init(index: 0, labels: ["Red"]), .init(index: 5, labels: ["Apple"])]) == nil)
     }
 
     @Test("A question set takes no plain allow; a deny prints")

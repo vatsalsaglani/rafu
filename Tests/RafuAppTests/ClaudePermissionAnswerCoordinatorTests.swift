@@ -51,20 +51,24 @@ private func notification(
         time: start.addingTimeInterval(seconds), notificationMessage: message)
 }
 
-private var twoQuestions: [String: Any] { [
-    "questions": [
-        [
-            "question": "Which color?", "header": "Color", "multiSelect": false,
-            "options": [["label": "Red", "description": ""], ["label": "Blue", "description": ""]],
-        ],
-        [
-            "question": "Which fruits?", "header": "Fruits", "multiSelect": true,
-            "options": [
-                ["label": "Apple", "description": ""], ["label": "Banana", "description": ""],
+private var twoQuestions: [String: Any] {
+    [
+        "questions": [
+            [
+                "question": "Which color?", "header": "Color", "multiSelect": false,
+                "options": [
+                    ["label": "Red", "description": ""], ["label": "Blue", "description": ""],
+                ],
             ],
-        ],
+            [
+                "question": "Which fruits?", "header": "Fruits", "multiSelect": true,
+                "options": [
+                    ["label": "Apple", "description": ""], ["label": "Banana", "description": ""],
+                ],
+            ],
+        ]
     ]
-] }
+}
 
 private func hook(
     _ name: String, session: String = "s1", subagent: String? = nil, tool: String? = nil,
@@ -249,7 +253,8 @@ struct ClaudePermissionAnswerCoordinatorTests {
                 controllerID: harness.terminalID, key: event.id, decision: decision) == .chosen)
         harness.coordinator.reconcile()
         #expect(
-            harness.writes == [.submit(CanvasAgentRequestAnswer(key: event.id, decision: decision))])
+            harness.writes == [.submit(CanvasAgentRequestAnswer(key: event.id, decision: decision))]
+        )
         #expect(harness.openKeys.isEmpty)
     }
 
