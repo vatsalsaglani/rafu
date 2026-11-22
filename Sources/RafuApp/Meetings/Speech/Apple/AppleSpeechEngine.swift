@@ -127,17 +127,23 @@ nonisolated struct AppleSpeechEngine: MeetingTextEngine {
 
     /// The words of the final results, in time order.
     static func words(from results: [AppleSpeechResult]) -> [MeetingWord] {
-        results
-            .filter(\.isFinal)
-            .flatMap { result in
-                AppleSpeechWords.words(from: result.runs, fallback: result.range) { $0 }
-            }
-            .enumerated()
-            .sorted { lhs, rhs in
-                lhs.element.start == rhs.element.start
-                    ? lhs.offset < rhs.offset : lhs.element.start < rhs.element.start
-            }
-            .map(\.element)
+        // Split into typed steps: as one chain this expression timed out in
+        // the type checker on the CI runner (not on a faster Mac).
+        var collected: [MeetingWord] = []
+        for result in results where result.isFinal {
+            let resultWords: [MeetingWord] = AppleSpeechWords.words(
+                from: result.runs, fallback: result.range
+            ) { $0 }
+            collected.append(contentsOf: resultWords)
+        }
+        let indexed: [(offset: Int, word: MeetingWord)] = collected.enumerated().map {
+            (offset: $0.offset, word: $0.element)
+        }
+        let ordered = indexed.sorted { (lhs, rhs) -> Bool in
+            if lhs.word.start == rhs.word.start { return lhs.offset < rhs.offset }
+            return lhs.word.start < rhs.word.start
+        }
+        return ordered.map(\.word)
     }
 }
 
