@@ -365,7 +365,9 @@ struct CompanionUpNextSectionView: View {
                                         hint: CompanionUpNextContent.needsYouHint(
                                             phase: row.phase, cli: row.cli, hasWindow: true,
                                             claudeAnswersEnabled: AgentActivityStore.shared
-                                                .claudeAnswersEnabled))
+                                                .claudeAnswersEnabled,
+                                            request: AgentRequestStore.shared.current(
+                                                for: row.id)))
                                 }
                             }
                         }

@@ -1,4 +1,5 @@
 import Foundation
+import RafuCore
 import Testing
 
 @testable import RafuApp
@@ -30,6 +31,35 @@ func needsYouHint() {
     #expect(
         CompanionUpNextContent.needsYouHint(
             phase: .needsYou, cli: .codex, hasWindow: false, claudeAnswersEnabled: false) == nil)
+}
+
+@Test("CompanionUpNextContent.needsYouHint: a row with a request names what the agent asks")
+func needsYouHintWithRequest() {
+    let notice = CanvasAgentRequest(kind: .notice, reason: "Network request", text: "curl x")
+    let plan = CanvasAgentRequest(kind: .plan, reason: "/repo/plan.md", text: "1. Do it")
+    let command = CanvasAgentRequest(kind: .command, command: "ls")
+    for (request, hint) in [
+        (notice, "Network request. Open the terminal to answer"),
+        (plan, "Plan ready. Open the terminal to answer"),
+        (command, "Run command. Answer here"),
+    ] {
+        for answers in [true, false] {
+            let text = CompanionUpNextContent.needsYouHint(
+                phase: .needsYou, cli: .claudeCode, hasWindow: true,
+                claudeAnswersEnabled: answers, request: request)
+            #expect(text == hint)
+            #expect(text != "Answer in the terminal")
+        }
+    }
+    // A request outranks a lagging phase; an agent outside Rafu has no hint.
+    #expect(
+        CompanionUpNextContent.needsYouHint(
+            phase: .working, cli: .codex, hasWindow: true, claudeAnswersEnabled: false,
+            request: plan) == "Plan ready. Open the terminal to answer")
+    #expect(
+        CompanionUpNextContent.needsYouHint(
+            phase: .needsYou, cli: .codex, hasWindow: false, claudeAnswersEnabled: false,
+            request: plan) == nil)
 }
 
 // MARK: - Phase

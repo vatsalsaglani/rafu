@@ -217,10 +217,15 @@ nonisolated enum ApprovalPeekContent: Equatable, Sendable {
     /// The whole request in a scrollable, selectable box, with Allow active.
     /// Only a person's click on "Show all" gets here.
     case expanded(CompanionRequestActions)
-    /// One short question: one button for each choice.
+    /// One short single-choice question: one button for each choice, and
+    /// "Other…" (which expands the card) when the agent takes typed text.
     case choices(CanvasAgentRequest.Question)
-    /// Any other question: answered from the full Up next row.
-    case answerInUpNext
+    /// Any other question set, collapsed: the first question, and "Answer"
+    /// expands the card. Nothing is chosen before the person expands it.
+    case questionsCollapsed
+    /// The question set whole (`CompanionQuestionSetView`). Only a person's
+    /// click on "Answer" or "Other…" gets here.
+    case questionSet
     /// An answer was chosen and waits for the agent.
     case sending
 
@@ -238,13 +243,14 @@ nonisolated enum ApprovalPeekContent: Equatable, Sendable {
         if request.terminalOnly { return .terminalOnly }
         if decision != nil { return .sending }
         if request.kind == .userInput {
+            if isExpanded { return .questionSet }
             guard request.questions.count == 1, let question = request.questions.first,
-                !question.terminalOnly, !question.choices.isEmpty,
+                !question.terminalOnly, !question.allowsMultiple, !question.choices.isEmpty,
                 question.choices.count <= maxChoices,
                 question.choices.reduce(0, { $0 + ApprovalPeekFit.columns($1.label) })
                     <= maxChoiceColumns,
                 question.text.count <= maxQuestionCharacters
-            else { return .answerInUpNext }
+            else { return .questionsCollapsed }
             return .choices(question)
         }
         let actions = CompanionRequestActions(request: request)
@@ -380,6 +386,26 @@ nonisolated enum ApprovalPeekGeometry {
         return max(60, min(wanted, limit))
     }
 
+    /// The most height of a plan's box in the compact peek card. The plan
+    /// scrolls in it; Up next shows a taller box.
+    static let planBoxHeight: CGFloat = 120
+    /// The rest of an expanded question card: header, title, question text,
+    /// the page line and the buttons.
+    static let questionCardReserved: CGFloat = 230
+    /// The least height of the choice list of an expanded question card.
+    static let minQuestionChoicesHeight: CGFloat = 80
+
+    /// The most height of the choice list of an expanded question card: it
+    /// scrolls above this, so Answer stays in view. At most
+    /// `expandedBodyHeight`, and never more than the screen leaves room for.
+    static func questionChoicesHeight(visibleFrame: CGRect?) -> CGFloat {
+        var limit = expandedBodyHeight
+        if let visibleFrame {
+            limit = min(limit, visibleFrame.height - 2 * screenInset - questionCardReserved)
+        }
+        return max(minQuestionChoicesHeight, limit)
+    }
+
     /// The card (with its stack) hangs `anchorGap` below `anchor`, centred
     /// on it, and stays `screenInset` inside `visibleFrame` at the sides.
     static func cardFrame(anchor: CGRect, cardSize: CGSize, visibleFrame: CGRect) -> CGRect {
@@ -429,7 +455,9 @@ nonisolated enum ApprovalPeekText {
         switch request.kind {
         case .userInput:
             let text = request.questions.first?.text ?? ""
-            return text.isEmpty ? "\(agent) asks: Answer questions" : "\(agent) asks: \(text)"
+            let count = request.questions.count
+            let lead = count > 1 ? "\(agent) asks \(count) questions" : "\(agent) asks"
+            return text.isEmpty ? "\(lead): Answer questions" : "\(lead): \(text)"
         case .fileChange:
             guard !request.terminalOnly, let first = request.fileChanges.first else {
                 return "\(agent) needs approval: Apply file changes. Open the terminal to answer."
@@ -443,7 +471,7 @@ nonisolated enum ApprovalPeekText {
             guard !request.terminalOnly, let command = request.command else {
                 return "\(agent) needs approval: Run command. Open the terminal to answer."
             }
-            return "\(agent) needs approval: \(command)"
+            return "\(agent) needs approval: \(command)" + spokenLines(request)
         case .toolCall:
             guard !request.terminalOnly, let reason = request.reason,
                 let identity = AgentPermissionRequestSummary.toolIdentity(fromReason: reason)
@@ -454,7 +482,10 @@ nonisolated enum ApprovalPeekText {
         case .plan:
             return "\(agent) has a plan ready. Open the terminal to answer."
         case .notice:
-            return "\(agent) needs you. Open the terminal to answer."
+            guard let kind = CompanionRequestPresentation.noticeKind(request) else {
+                return "\(agent) needs you. Open the terminal to answer."
+            }
+            return "\(agent) needs you: \(kind). Open the terminal to answer."
         }
     }
 
@@ -483,8 +514,14 @@ nonisolated enum ApprovalPeekText {
         request.command ?? fileChangeText(request)
     }
 
+    /// The grant lines of a command (a network target, "Network: https
+    /// example.com"), as one spoken sentence each. Empty for none.
+    static func spokenLines(_ request: CanvasAgentRequest) -> String {
+        request.permissions.map { ". \($0)" }.joined()
+    }
+
     /// What VoiceOver reads for the box: all of it, with the path and the
-    /// kind of body ("New content" or "Diff").
+    /// kind of body ("New content" or "Diff"), and a command's network target.
     static func spokenBox(agent: String, request: CanvasAgentRequest) -> String? {
         if request.kind == .toolCall, let arguments = request.command {
             // The raw name is part of what is read: it is the real target.
@@ -495,7 +532,9 @@ nonisolated enum ApprovalPeekText {
                 "\(agent) asks to use tool \(identity.tool) of \(identity.server), "
                 + "named \(identity.name), with arguments \(arguments)"
         }
-        if let command = request.command { return "\(agent) asks to run \(command)" }
+        if let command = request.command {
+            return "\(agent) asks to run \(command)" + spokenLines(request)
+        }
         guard request.kind == .fileChange, !request.fileChanges.isEmpty else { return nil }
         return request.fileChanges.map { change in
             let lead: String

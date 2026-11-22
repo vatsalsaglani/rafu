@@ -246,15 +246,7 @@ private struct ApprovalPeekCardBody: View {
     }
 
     private var title: String {
-        switch entry.request.kind {
-        case .command: "Run command"
-        case .fileChange: "Apply file changes"
-        case .permissions: "Grant permissions"
-        case .userInput: "Answer questions"
-        case .toolCall: "Use MCP tool"
-        case .plan: "Plan ready"
-        case .notice: "Needs you"
-        }
+        CompanionRequestPresentation.title(for: entry.request)
     }
 
     // MARK: Header
@@ -320,7 +312,29 @@ private struct ApprovalPeekCardBody: View {
         switch content {
         case .choices(let question):
             questionText(question)
-        case .answerInUpNext:
+        case .questionsCollapsed:
+            if let question = request.questions.first { questionText(question, limit: 3) }
+            if request.questions.count > 1 {
+                Text("\(request.questions.count) questions")
+                    .font(.system(size: 10))
+                    .foregroundStyle(ink.muted)
+            }
+        case .questionSet where !interactive:
+            // The departing card: the question, not an empty set of choices.
+            if let question = request.questions.first { questionText(question, limit: 3) }
+        case .questionSet:
+            // The set brings its own Answer, Back, Next and "Open terminal".
+            CompanionQuestionSetView(
+                request: request,
+                maxChoicesHeight: ApprovalPeekGeometry.questionChoicesHeight(
+                    visibleFrame: controller.visibleFrame),
+                choose: choose, openTerminal: { controller.openTerminal(for: entry) }
+            )
+        case .terminalOnly where request.kind == .plan:
+            CompanionPlanView(request: request, maxBoxHeight: ApprovalPeekGeometry.planBoxHeight)
+        case .terminalOnly where request.kind == .notice:
+            CompanionNoticeView(request: request)
+        case .terminalOnly where request.kind == .userInput:
             if let question = request.questions.first { questionText(question, limit: 3) }
         case .answer, .sending:
             toolHeader
@@ -414,24 +428,50 @@ private struct ApprovalPeekCardBody: View {
                 CompanionRequestActionRow(
                     actions: actions, choose: choose, menuItems: menuItems)
             case .choices(let question):
-                HStack(spacing: RafuMetrics.space2) {
-                    ForEach(question.choices.indices, id: \.self) { index in
-                        let choice = question.choices[index]
-                        Button {
-                            choose(.answers(labels: [question.id: choice.label]))
-                        } label: {
-                            Text(choice.label).frame(maxWidth: .infinity)
+                VStack(alignment: .leading, spacing: RafuMetrics.space2) {
+                    HStack(spacing: RafuMetrics.space2) {
+                        ForEach(question.choices.indices, id: \.self) { index in
+                            let choice = question.choices[index]
+                            Button {
+                                choose(.answers(labels: [question.id: choice.label]))
+                            } label: {
+                                Text(choice.label).frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.bordered)
+                            .help(choice.detail.isEmpty ? choice.label : choice.detail)
                         }
-                        .buttonStyle(.bordered)
-                        .help(choice.detail.isEmpty ? choice.label : choice.detail)
+                    }
+                    if question.allowsFreeText {
+                        Button("Other…") { controller.expand(entry) }
+                            .buttonStyle(.link)
+                            .help("Type your own answer")
+                            .accessibilityLabel("Other answer")
                     }
                 }
-            case .answerInUpNext:
-                if controller.canRevealUpNext {
-                    Button("Answer in Up next") { controller.showInUpNext() }
-                } else {
-                    Button("Open terminal") { controller.openTerminal(for: entry) }
+            case .questionsCollapsed:
+                HStack(spacing: RafuMetrics.space2) {
+                    Button {
+                        controller.expand(entry)
+                    } label: {
+                        Text("Answer").frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(CompanionAllowButtonStyle())
+                    .help("Show the questions and answer them here")
+                    Menu {
+                        ForEach(menuItems) { item in
+                            Button(item.title, action: item.action)
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .help("More actions")
+                    .accessibilityLabel("More actions")
                 }
+            case .questionSet:
+                EmptyView()
             }
         }
         .allowsHitTesting(interactive)
