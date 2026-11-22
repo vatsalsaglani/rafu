@@ -17,6 +17,8 @@ nonisolated enum WorkspaceNavigatorMode: String, CaseIterable, Codable, Sendable
     case terminals
     case ensemble
     case history
+    /// Meetings (app data, not workspace files). Usable with no folder open.
+    case meetings
 
     var title: String {
         switch self {
@@ -26,6 +28,7 @@ nonisolated enum WorkspaceNavigatorMode: String, CaseIterable, Codable, Sendable
         case .terminals: "Terminals"
         case .ensemble: "Ensembles"
         case .history: "History"
+        case .meetings: "Meetings"
         }
     }
 
@@ -37,11 +40,12 @@ nonisolated enum WorkspaceNavigatorMode: String, CaseIterable, Codable, Sendable
         case .terminals: "terminal"
         case .ensemble: CanvasBoardState.ensembleSymbol
         case .history: "clock.arrow.circlepath"
+        case .meetings: "waveform.and.person.filled"
         }
     }
 
     /// The digit of this mode's ⌘-number shortcut, in rail order: Files is
-    /// ⌘1 and History is ⌘6. The View menu, the rail tooltips and the
+    /// ⌘1, History is ⌘6 and Meetings is ⌘7. The View menu, the rail tooltips and the
     /// hold-⌘ badges all read this one value.
     var shortcutDigit: Character {
         switch self {
@@ -51,6 +55,7 @@ nonisolated enum WorkspaceNavigatorMode: String, CaseIterable, Codable, Sendable
         case .terminals: "4"
         case .ensemble: "5"
         case .history: "6"
+        case .meetings: "7"
         }
     }
 
@@ -533,14 +538,26 @@ final class WorkspaceSession {
     }
 
     /// True when `mode` can be shown now. Files needs no folder (it shows
-    /// "Open a folder to begin" itself); every other mode needs a workspace.
-    /// The rail buttons, the View menu and the ⌘-number keys all use this
-    /// one rule, so a key never does what its rail icon will not.
+    /// "Open a folder to begin" itself), and Meetings needs no folder (its
+    /// meetings live in app data) but needs macOS 26; every other mode needs
+    /// a workspace. The rail buttons, the View menu and the ⌘-number keys all
+    /// use this one rule, so a key never does what its rail icon will not.
     func isNavigatorModeAvailable(_ mode: WorkspaceNavigatorMode) -> Bool {
-        mode == .files || descriptor != nil
+        switch mode {
+        case .files: true
+        case .meetings: MeetingsAvailability.current.isAvailable
+        default: descriptor != nil
+        }
     }
 
-    /// ⌘1 to ⌘6 (and their View menu items): switch to `mode` and never
+    /// Why `mode` is not usable now, for its rail tooltip; nil when usable.
+    func navigatorModeUnavailableReason(_ mode: WorkspaceNavigatorMode) -> String? {
+        guard !isNavigatorModeAvailable(mode) else { return nil }
+        if mode == .meetings { return MeetingsAvailability.current.unavailableReason }
+        return "open a folder first"
+    }
+
+    /// ⌘1 to ⌘7 (and their View menu items): switch to `mode` and never
     /// toggle. A key that hid the sidebar when the mode was already shown
     /// would make the same press do two different things.
     func switchNavigator(to mode: WorkspaceNavigatorMode) {
@@ -595,6 +612,9 @@ final class WorkspaceSession {
     /// Agent History (X12): this window's History navigator filter and the
     /// transcripts of its open Agent Session tabs.
     @ObservationIgnored let agentHistory = AgentHistoryWindowState()
+    /// The meeting whose tab is selected (`WorkspaceAuxiliaryTab.meeting`).
+    /// Window-only; never restored.
+    var visibleMeetingTab: MeetingID?
     var auxiliaryTabGroups: [WorkspaceAuxiliaryTab: EditorGroupID] = [:]
 
     func showSettings() {

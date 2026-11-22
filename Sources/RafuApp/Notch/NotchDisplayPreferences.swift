@@ -11,6 +11,20 @@ nonisolated enum NotchSection: String, CaseIterable, Identifiable, Sendable {
     case upNext
     case nowPlaying
     case usage
+    /// The Meetings recording status. Offered only after a Meetings recorder
+    /// is registered (see `allCases`).
+    case meetings
+
+    /// Every section in tab order. `.meetings` is in the list only after a
+    /// Meetings recorder is registered (`MeetingsCompanionGate`), so with
+    /// Meetings unused the panel, the menu bar card, the Settings toggles
+    /// and the stored flags all behave as before. A stored `meetings` value
+    /// (a remembered tab) still decodes through `init(rawValue:)`; while the
+    /// section is hidden, `selection` falls back to the first offered one.
+    static var allCases: [NotchSection] {
+        let sections: [NotchSection] = [.ensembles, .upNext, .nowPlaying, .usage]
+        return MeetingsCompanionGate.shared.isRecorderRegistered ? sections + [.meetings] : sections
+    }
 
     var id: String { rawValue }
 
@@ -20,6 +34,7 @@ nonisolated enum NotchSection: String, CaseIterable, Identifiable, Sendable {
         case .upNext: "Up next"
         case .nowPlaying: "Now Playing"
         case .usage: "Usage"
+        case .meetings: "Meetings"
         }
     }
 
@@ -29,6 +44,7 @@ nonisolated enum NotchSection: String, CaseIterable, Identifiable, Sendable {
         case .upNext: "tray.full"
         case .nowPlaying: "music.note"
         case .usage: "gauge.with.dots.needle.33percent"
+        case .meetings: "waveform.and.person.filled"
         }
     }
 
@@ -40,6 +56,7 @@ nonisolated enum NotchSection: String, CaseIterable, Identifiable, Sendable {
         case .upNext: "Agents that need you or have a reply ready, with quick replies."
         case .nowPlaying: "What is playing on this Mac, with transport controls."
         case .usage: "Agent usage limits and token totals."
+        case .meetings: "The meeting that is recording, with pause and stop."
         }
     }
 

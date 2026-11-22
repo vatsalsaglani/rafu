@@ -33,6 +33,9 @@ struct WorkspaceSidebarPanelView: View {
             CanvasNavigatorPanelView(session: session)
         case .history:
             AgentHistoryPanelView(session: session)
+        case .meetings:
+            // The header is fixed; the body is the Meetings navigator hook.
+            MeetingsNavigatorPanelView(session: session)
         }
     }
 }
@@ -145,8 +148,9 @@ struct WorkspaceActivityRail: View {
 
     private func railButton(_ mode: WorkspaceNavigatorMode) -> some View {
         // Files needs no open workspace — it shows "Open a folder to begin"
-        // itself — so it alone stays enabled and can show as selected
-        // without one; the other five modes need a workspace for both.
+        // itself — and Meetings needs none either (macOS 26 only), so they
+        // stay enabled and can show as selected without one; the other
+        // modes need a workspace for both.
         let isEnabled = session.isNavigatorModeAvailable(mode)
         let isActive = isEnabled && session.navigatorMode == mode && !session.isSidebarCollapsed
         // Only computed for `.terminals` — deriving it for every rail
@@ -165,7 +169,8 @@ struct WorkspaceActivityRail: View {
                     deckFacingEdge: .trailing,
                     tooltip: NavigatorRailPresentation.tooltip(
                         title: mode.title, isEnabled: isEnabled, isActive: isActive,
-                        shortcut: mode.shortcutLabel),
+                        shortcut: mode.shortcutLabel,
+                        disabledReason: session.navigatorModeUnavailableReason(mode)),
                     badge: mode == .terminals && attentionCount > 0 ? attentionCount : nil
                 )
             )
@@ -195,11 +200,14 @@ struct WorkspaceActivityRail: View {
 /// button in the panel headers, the rail must say so.
 nonisolated enum NavigatorRailPresentation {
     /// `shortcut` is the ⌘-number label ("⌘1"); it is appended in brackets
-    /// when the icon is usable.
+    /// when the icon is usable. `disabledReason` follows the title of an
+    /// unusable icon ("open a folder first" unless the mode says otherwise,
+    /// for example "Meetings needs macOS 26").
     static func tooltip(
-        title: String, isEnabled: Bool, isActive: Bool, shortcut: String? = nil
+        title: String, isEnabled: Bool, isActive: Bool, shortcut: String? = nil,
+        disabledReason: String? = nil
     ) -> String {
-        guard isEnabled else { return "\(title) — open a folder first" }
+        guard isEnabled else { return "\(title) — \(disabledReason ?? "open a folder first")" }
         let text = isActive ? "Hide \(title)" : title
         guard let shortcut else { return text }
         return "\(text) (\(shortcut))"

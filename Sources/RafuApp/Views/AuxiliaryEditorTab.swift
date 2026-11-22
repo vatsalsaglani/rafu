@@ -19,6 +19,8 @@ struct AuxiliaryEditorTabContent: View {
                 if let openDiff = session.gitOpenDiff {
                     GitSideBySideDiffView(openDiff: openDiff, session: session)
                 }
+            case .meeting(let meeting):
+                MeetingsTabHost(session: session, meeting: meeting)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)

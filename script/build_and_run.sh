@@ -7,6 +7,10 @@ APP_EXECUTABLE="${APP_NAME// /}"
 GUI_PRODUCT="RafuApp"
 CLI_PRODUCT="rafu"
 HOOK_HELPER_PRODUCT="rafu-agent-events"
+# Meetings speech helper: the only binary that links FluidAudio and
+# argmax-oss-swift. The app starts it with an argument array; it never
+# runs at launch.
+MEETINGS_WORKER_PRODUCT="RafuMeetingsWorker"
 # SPIKE: WidgetKit extension executable, wrapped into an .appex below.
 WIDGET_PRODUCT="RafuWidgets"
 MIN_SYSTEM_VERSION="15.0"
@@ -83,6 +87,7 @@ APP_HELPERS="$APP_CONTENTS/Helpers"
 APP_BINARY="$APP_MACOS/$APP_EXECUTABLE"
 CLI_BINARY="$APP_SHARED_BIN/$CLI_PRODUCT"
 HOOK_HELPER_BINARY="$APP_HELPERS/$HOOK_HELPER_PRODUCT"
+MEETINGS_WORKER_BINARY="$APP_HELPERS/$MEETINGS_WORKER_PRODUCT"
 MEDIA_FRAMEWORK_CACHE="$ROOT_DIR/.build/rafu-media"
 INFO_PLIST="$APP_CONTENTS/Info.plist"
 APP_ICON_NAME="Rafu.icns"
@@ -103,12 +108,14 @@ read -ra SDK_LINK_FLAGS <<<"$("$ROOT_DIR/script/sdk_link_flags.sh" "$MIN_SYSTEM_
 swift build --product "$GUI_PRODUCT" "${SDK_LINK_FLAGS[@]}"
 swift build --product "$CLI_PRODUCT" "${SDK_LINK_FLAGS[@]}"
 swift build --product "$HOOK_HELPER_PRODUCT" "${SDK_LINK_FLAGS[@]}"
+swift build --product "$MEETINGS_WORKER_PRODUCT" "${SDK_LINK_FLAGS[@]}"
 swift build --product "$WIDGET_PRODUCT" "${SDK_LINK_FLAGS[@]}"
 
 BUILD_BIN_DIR="$(swift build --show-bin-path)"
 BUILD_APP_BINARY="$BUILD_BIN_DIR/$GUI_PRODUCT"
 BUILD_CLI_BINARY="$BUILD_BIN_DIR/$CLI_PRODUCT"
 BUILD_HOOK_HELPER_BINARY="$BUILD_BIN_DIR/$HOOK_HELPER_PRODUCT"
+BUILD_MEETINGS_WORKER_BINARY="$BUILD_BIN_DIR/$MEETINGS_WORKER_PRODUCT"
 BUILD_WIDGET_BINARY="$BUILD_BIN_DIR/$WIDGET_PRODUCT"
 
 rm -rf "$APP_BUNDLE"
@@ -119,7 +126,9 @@ cp "$BUILD_CLI_BINARY" "$CLI_BINARY"
 # Agent hook helper (X11). Settings > Agents copies it to Application Support
 # on Connect; hooks never run it from inside the bundle.
 cp "$BUILD_HOOK_HELPER_BINARY" "$HOOK_HELPER_BINARY"
-chmod +x "$APP_BINARY" "$CLI_BINARY" "$HOOK_HELPER_BINARY"
+# Meetings speech helper. Started by the app only for a Meetings job.
+cp "$BUILD_MEETINGS_WORKER_BINARY" "$MEETINGS_WORKER_BINARY"
+chmod +x "$APP_BINARY" "$CLI_BINARY" "$HOOK_HELPER_BINARY" "$MEETINGS_WORKER_BINARY"
 
 # SPIKE: WidgetKit extension. SwiftPM cannot emit an .appex, so the script
 # assembles one around the RafuWidgets executable (its @main WidgetBundle
@@ -250,7 +259,9 @@ cat >"$INFO_PLIST" <<PLIST
   <key>CFBundleVersion</key>
   <string>1</string>
   <key>NSMicrophoneUsageDescription</key>
-  <string>Rafu listens only while you hold ⌃⌥Space or keep a voice session open. Audio goes to OpenAI GPT-Live with your own API key.</string>
+  <string>Rafu listens to your microphone only while you use Voice or record a meeting that you started.</string>
+  <key>NSAudioCaptureUsageDescription</key>
+  <string>Rafu records the sound that this Mac plays only while you record a meeting that you started.</string>
   <key>NSAppleEventsUsageDescription</key>
   <string>Rafu asks Music and Spotify what is playing, and sends them play, pause, next, and previous, only when you use Now Playing in the notch.</string>
   <key>LSMinimumSystemVersion</key>
@@ -387,6 +398,7 @@ sign_item() {
     ${CODESIGN_KEYCHAIN_ARGS[@]+"${CODESIGN_KEYCHAIN_ARGS[@]}"} --timestamp=none "$@"
 }
 sign_item "$HOOK_HELPER_BINARY"
+sign_item "$MEETINGS_WORKER_BINARY"
 sign_item --entitlements "$WIDGET_ENTITLEMENTS" "$WIDGET_APPEX"
 if [[ -d "$APP_HELPERS/MediaRemoteAdapter.framework" ]]; then
   sign_item "$APP_HELPERS/MediaRemoteAdapter.framework"
@@ -407,16 +419,20 @@ plutil -lint "$INFO_PLIST" >/dev/null
 test -x "$APP_BINARY"
 test -x "$CLI_BINARY"
 test -x "$HOOK_HELPER_BINARY"
+test -x "$MEETINGS_WORKER_BINARY"
 test -x "$WIDGET_APPEX/Contents/MacOS/$WIDGET_PRODUCT"
 # Every shipped Mach-O must be stamped with the selected SDK and the declared
 # minimum OS. Fails when the SDK stamp falls back to the deployment target.
 RAFU_EXPECT_MINOS="$MIN_SYSTEM_VERSION" "$ROOT_DIR/script/check_sdk_stamp.sh" \
-  "$APP_BINARY" "$CLI_BINARY" "$HOOK_HELPER_BINARY" \
+  "$APP_BINARY" "$CLI_BINARY" "$HOOK_HELPER_BINARY" "$MEETINGS_WORKER_BINARY" \
   "$WIDGET_APPEX/Contents/MacOS/$WIDGET_PRODUCT"
 test "$(plutil -extract NSExtension.NSExtensionPointIdentifier raw "$WIDGET_APPEX/Contents/Info.plist")" = "com.apple.widgetkit-extension"
 codesign -d --entitlements - --xml "$WIDGET_APPEX" 2>/dev/null | grep -F "com.apple.security.app-sandbox" >/dev/null
 test -s "$APP_ICON"
 test "$(plutil -extract CFBundleIconFile raw "$INFO_PLIST")" = "$APP_ICON_NAME"
+# Meetings: the microphone and system-audio usage texts must be present.
+plutil -extract NSMicrophoneUsageDescription raw "$INFO_PLIST" >/dev/null
+plutil -extract NSAudioCaptureUsageDescription raw "$INFO_PLIST" >/dev/null
 # The widget link scheme (`RafuDeepLink`): one scheme per variant, so a
 # Lightning widget never opens the release app.
 test "$(plutil -extract CFBundleURLTypes.0.CFBundleURLSchemes.0 raw "$INFO_PLIST")" = "$URL_SCHEME"

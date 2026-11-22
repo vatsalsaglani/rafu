@@ -1,4 +1,5 @@
 import Foundation
+import RafuCore
 
 /// Window-only tabs. They never enter the restorable file/terminal layout.
 nonisolated enum WorkspaceAuxiliaryTab: Hashable, Identifiable {
@@ -8,6 +9,8 @@ nonisolated enum WorkspaceAuxiliaryTab: Hashable, Identifiable {
     /// The window's one open Git diff. It sits on its group's shelf beside
     /// the file tabs instead of replacing them.
     case gitDiff(GitDiffTabReference)
+    /// One meeting, opened from the Meetings navigator. Never restored.
+    case meeting(MeetingID)
 
     var id: Self { self }
 
@@ -16,6 +19,7 @@ nonisolated enum WorkspaceAuxiliaryTab: Hashable, Identifiable {
         case .settings: "Settings"
         case .agentSession(let reference): reference.title
         case .gitDiff(let reference): reference.title
+        case .meeting: "Meeting"
         }
     }
 
@@ -24,6 +28,7 @@ nonisolated enum WorkspaceAuxiliaryTab: Hashable, Identifiable {
         case .settings: "gearshape"
         case .agentSession: "bubble.left.and.text.bubble.right"
         case .gitDiff: "arrow.left.arrow.right"
+        case .meeting: "waveform.and.person.filled"
         }
     }
 
@@ -61,6 +66,9 @@ extension WorkspaceSession {
             auxiliaryTabs.contains(.agentSession(reference))
         {
             return .agentSession(reference)
+        }
+        if let meeting = visibleMeetingTab, auxiliaryTabs.contains(.meeting(meeting)) {
+            return .meeting(meeting)
         }
         return nil
     }
@@ -108,6 +116,7 @@ extension WorkspaceSession {
         case .settings: settingsVisible = true
         case .agentSession(let reference): agentHistory.visibleSession = reference
         case .gitDiff: isGitDiffSelected = true
+        case .meeting(let meeting): visibleMeetingTab = meeting
         }
         selectedDocumentID = nil
         selectedTreePath = nil
@@ -124,6 +133,18 @@ extension WorkspaceSession {
         settingsVisible = false
         agentHistory.visibleSession = nil
         isGitDiffSelected = false
+        visibleMeetingTab = nil
+    }
+
+    /// Opens `meeting` as a tab in the focused group, or selects its tab
+    /// when it is open. Works with no folder open.
+    func openMeetingTab(_ meeting: MeetingID) {
+        let tab = WorkspaceAuxiliaryTab.meeting(meeting)
+        if !auxiliaryTabs.contains(tab) {
+            auxiliaryTabs.append(tab)
+            auxiliaryTabGroups[tab] = editorLayout.focusedGroupID
+        }
+        selectAuxiliaryTab(tab)
     }
 
     /// Shows `openDiff` as the window's one diff tab in the focused group.

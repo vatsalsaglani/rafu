@@ -1076,7 +1076,13 @@ private struct WorkspaceWelcomeView: View {
                     WorkspacesListView(model: .shared, session: session, placement: .welcome)
                         .frame(height: 230)
                 }
-                welcomeCard(title: "Shortcuts") { WelcomeShortcutHints() }
+                VStack(alignment: .leading, spacing: 16) {
+                    welcomeCard(title: "Shortcuts") { WelcomeShortcutHints() }
+                    // Meetings slot: the Meetings Welcome hook, or an
+                    // "Open Meetings" button. It never makes the Meetings
+                    // feature, because Welcome shows at launch.
+                    welcomeCard(title: "Meetings") { MeetingsWelcomeCardSlot(session: session) }
+                }
             }
         }
         .padding(40)
@@ -1116,6 +1122,7 @@ private struct WelcomeShortcutHints: View {
             hint("Search Workspace", keys: "⌘⇧F")
             hint("Source Control", keys: "⌘⇧G")
             hint("All Workspaces", keys: "⌘⇧1")
+            hint("Meetings", keys: "⌘⇧M")
         }
     }
 

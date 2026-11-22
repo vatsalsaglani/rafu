@@ -4,13 +4,13 @@ import Testing
 
 @Suite("Navigator mode shortcuts")
 struct WorkspaceNavigatorModeShortcutTests {
-    @Test("Digits are one to six, in rail order")
-    func digitsAreOneToSixInRailOrder() {
+    @Test("Digits are one to seven, in rail order")
+    func digitsAreOneToSevenInRailOrder() {
         let digits = WorkspaceNavigatorMode.allCases.map(\.shortcutDigit)
-        #expect(digits == ["1", "2", "3", "4", "5", "6"])
+        #expect(digits == ["1", "2", "3", "4", "5", "6", "7"])
         #expect(
             WorkspaceNavigatorMode.allCases == [
-                .files, .search, .sourceControl, .terminals, .ensemble, .history,
+                .files, .search, .sourceControl, .terminals, .ensemble, .history, .meetings,
             ])
     }
 
@@ -19,6 +19,7 @@ struct WorkspaceNavigatorModeShortcutTests {
         #expect(WorkspaceNavigatorMode.files.shortcutLabel == "⌘1")
         #expect(WorkspaceNavigatorMode.history.shortcutLabel == "⌘6")
         #expect(WorkspaceNavigatorMode.terminals.shortcutHint == "Command 4")
+        #expect(WorkspaceNavigatorMode.meetings.shortcutLabel == "⌘7")
     }
 
     @Test("The rail tooltip names the shortcut for a usable icon only")
