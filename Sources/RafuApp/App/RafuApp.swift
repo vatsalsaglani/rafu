@@ -40,6 +40,17 @@ struct RafuApplication: App {
         .defaultSize(width: 560, height: 480)
         .commandsRemoved()
 
+        // Meetings (an app-level feature, not tied to a workspace). Opened
+        // by Meetings > Open Meetings (⇧⌘M); the content makes the Meetings
+        // feature on first appear, never at launch. The scene's automatic
+        // Window-menu item is removed so the Meetings menu is the one path.
+        Window("Meetings", id: MeetingsWindowRoot.windowID) {
+            MeetingsWindowRoot()
+                .rafuMotionScope()
+        }
+        .defaultSize(width: 900, height: 620)
+        .commandsRemoved()
+
         Settings {
             RafuSettingsView()
                 .rafuMotionScope()

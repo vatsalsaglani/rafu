@@ -468,6 +468,7 @@ struct CompanionSectionHost: View {
                     case .upNext: CompanionUpNextSectionView(model: model, host: host)
                     case .nowPlaying: CompanionNowPlayingSectionView(model: model)
                     case .usage: CompanionUsageSectionView(model: model, host: host)
+                    case .meetings: MeetingsCompanionSectionHost()
                     }
                 }
             }
@@ -613,7 +614,7 @@ struct CompanionTabBar: View {
             let waiting = model.upNextRows(for: host).count
             return waiting > 0
                 ? Badge(text: "\(waiting)", spoken: "\(waiting) waiting", isAttention: true) : nil
-        case .nowPlaying, .usage:
+        case .nowPlaying, .usage, .meetings:
             return nil
         }
     }

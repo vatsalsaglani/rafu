@@ -13,6 +13,11 @@ let package = Package(
         .executable(name: "rafu", targets: ["RafuCLI"]),
         // The agent hook helper (X11), staged into Contents/Helpers.
         .executable(name: "rafu-agent-events", targets: ["RafuAgentEventHelper"]),
+        // The Meetings speech helper, staged into Contents/Helpers. It is the
+        // only product that links FluidAudio and argmax-oss-swift; the app
+        // binary links neither (the decision record about meeting capture
+        // and on-device speech, ADR 0048).
+        .executable(name: "RafuMeetingsWorker", targets: ["RafuMeetingsWorker"]),
         // SPIKE: the WidgetKit extension executable. build_and_run.sh wraps
         // it in Contents/PlugIns/RafuWidgets.appex.
         .executable(name: "RafuWidgets", targets: ["RafuWidgets"]),
@@ -93,6 +98,21 @@ let package = Package(
         .package(
             url: "https://github.com/vatsalsaglani/swift-json-render.git",
             exact: "0.22.0-alpha.3"
+        ),
+        // Meetings on-device speech, linked by RafuMeetingsWorker only.
+        // FluidAudio 0.18.4 (commit e0c6103bc87a88d25276cad491c86e757f58c865),
+        // Apache-2.0: Nemotron English text and Nemotron 3 speakers. The
+        // Diarizer trait is required for the Nemotron 3 diarizer API.
+        .package(
+            url: "https://github.com/FluidInference/FluidAudio.git",
+            exact: "0.18.4",
+            traits: ["Diarizer"]
+        ),
+        // argmax-oss-swift 1.1.1 (commit 1bbc57cb7fe6410248a685b1c5a3c6d56adc2ed4),
+        // MIT: WhisperKit text and SpeakerKit speakers.
+        .package(
+            url: "https://github.com/argmaxinc/argmax-oss-swift.git",
+            exact: "1.1.1"
         ),
         // NOTE: elk-swift (the ELK layout port) is a transitive dependency of
         // beautiful-mermaid-swift and is deliberately NOT declared here.
@@ -193,6 +213,18 @@ let package = Package(
         .executableTarget(
             name: "RafuAgentEventHelper",
             dependencies: ["RafuCore"]
+        ),
+        // Meetings speech helper. No defaultIsolation (nonisolated by
+        // default, like the other helpers). No other target may depend on
+        // FluidAudio, SpeakerKit or WhisperKit.
+        .executableTarget(
+            name: "RafuMeetingsWorker",
+            dependencies: [
+                "RafuCore",
+                .product(name: "FluidAudio", package: "FluidAudio"),
+                .product(name: "SpeakerKit", package: "argmax-oss-swift"),
+                .product(name: "WhisperKit", package: "argmax-oss-swift"),
+            ]
         ),
         .testTarget(
             name: "RafuCoreTests",

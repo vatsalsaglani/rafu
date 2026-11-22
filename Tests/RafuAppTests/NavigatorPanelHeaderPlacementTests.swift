@@ -101,6 +101,7 @@ struct NavigatorPanelHeaderPlacementTests {
         case .terminals: "Sources/RafuApp/Views/WorkspaceTerminalsPanelView.swift"
         case .ensemble: "Sources/RafuApp/Canvas/Views/CanvasNavigatorPanelView.swift"
         case .history: "Sources/RafuApp/AgentHistory/AgentHistoryPanelView.swift"
+        case .meetings: "Sources/RafuApp/Meetings/Placeholders/MeetingsHookHosts.swift"
         }
     }
 
@@ -112,6 +113,7 @@ struct NavigatorPanelHeaderPlacementTests {
         case .terminals: "WorkspaceTerminalsPanelView"
         case .ensemble: "CanvasNavigatorPanelView"
         case .history: "AgentHistoryPanelView"
+        case .meetings: "MeetingsNavigatorPanelView"
         }
     }
 

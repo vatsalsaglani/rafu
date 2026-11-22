@@ -47,6 +47,9 @@ struct WindowTitlebarRow: View {
             HStack(spacing: 0) {
                 leading
                 Spacer(minLength: 0)
+                // Meetings record button slot: draws nothing until the
+                // Meetings feature registers a record button hook.
+                MeetingsRecordButtonSlot(session: session)
                 searchButton
                     .padding(.trailing, RafuMetrics.space2)
             }

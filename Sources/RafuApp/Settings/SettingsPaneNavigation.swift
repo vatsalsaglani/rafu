@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The eight Settings panes, in toolbar order.
+/// The nine Settings panes, in toolbar order.
 ///
 /// The standard `Settings` scene hosts them as a `TabView`, which macOS
 /// renders as toolbar-style panes (symbol above label). Lifted out of
@@ -17,6 +17,7 @@ nonisolated enum SettingsPane: String, CaseIterable, Identifiable, Hashable {
     case usage
     case agents
     case ensemble
+    case meetings
 
     var id: String { rawValue }
 
@@ -30,6 +31,7 @@ nonisolated enum SettingsPane: String, CaseIterable, Identifiable, Hashable {
         case .usage: "Usage"
         case .agents: "Agents"
         case .ensemble: "Ensemble"
+        case .meetings: "Meetings"
         }
     }
 
@@ -43,6 +45,7 @@ nonisolated enum SettingsPane: String, CaseIterable, Identifiable, Hashable {
         case .usage: "gauge.medium"
         case .agents: "person.2.badge.gearshape"
         case .ensemble: "circle.hexagongrid"
+        case .meetings: "waveform.and.person.filled"
         }
     }
 }

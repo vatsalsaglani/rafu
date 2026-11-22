@@ -83,6 +83,9 @@ struct RafuSettingsView: View {
                 AgentHistorySettingsSection()
             case .ensemble:
                 EnsembleSettingsSection()
+            case .meetings:
+                // Settings ▸ Meetings: the Meetings feature's settings hook.
+                MeetingsSettingsPaneHost()
             }
         }
         .formStyle(.grouped)

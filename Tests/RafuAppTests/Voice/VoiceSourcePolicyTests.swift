@@ -66,7 +66,10 @@ struct VoiceSourcePolicyTests {
             contentsOf: Self.repositoryRoot().appending(path: "script/build_and_run.sh"),
             encoding: .utf8)
         #expect(script.contains("<key>NSMicrophoneUsageDescription</key>"))
-        #expect(script.contains("Rafu listens only while you hold ⌃⌥Space"))
+        #expect(
+            script.contains(
+                "Rafu listens to your microphone only while you use Voice or record a meeting that you started."
+            ))
     }
 
     // MARK: Helpers

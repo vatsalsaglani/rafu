@@ -492,6 +492,8 @@ struct RafuAppCommands: Commands {
 
         terminalGroupCommands
 
+        meetingsCommands
+
         // `after: .help`, never `replacing: .help` — replacing deletes the
         // system Help menu item entirely.
         CommandGroup(after: .help) {
@@ -500,7 +502,37 @@ struct RafuAppCommands: Commands {
                 FirstLaunchExperienceModel.shared.replay(hostedBy: workspaceSession)
             }
             .disabled(workspaceSession == nil)
+            meetingsExportDiagnosticsButton
         }
+    }
+
+    /// The Meetings menu: Open Meetings (⇧⌘M, an app shortcut, not a
+    /// system-wide key) and Export Meeting Diagnostics…. Opening the window
+    /// makes the Meetings feature; the menu itself does not.
+    private var meetingsCommands: some Commands {
+        CommandMenu("Meetings") {
+            Button("Open Meetings") {
+                openWindow(id: MeetingsWindowRoot.windowID)
+            }
+            .keyboardShortcut("m", modifiers: [.command, .shift])
+            Divider()
+            meetingsExportDiagnosticsButton
+        }
+    }
+
+    /// Export Meeting Diagnostics…, in the Meetings menu and the Help menu.
+    /// Not active on a Mac without Meetings or when no exporter is
+    /// registered. Before the feature is made the item stays active; the
+    /// first use makes the feature and runs its exporter.
+    private var meetingsExportDiagnosticsButton: some View {
+        let factory = MeetingsFeatureFactory.shared
+        let isAvailable = factory.availability.isAvailable
+        let isEnabled =
+            isAvailable && (factory.feature.map { $0.canExportDiagnostics } ?? true)
+        return Button("Export Meeting Diagnostics…") {
+            factory.resolve().exportDiagnostics()
+        }
+        .disabled(!isEnabled)
     }
 
     private func soleHunk(in session: WorkspaceSession, scope: GitDiffScope) -> GitDiffHunk? {
