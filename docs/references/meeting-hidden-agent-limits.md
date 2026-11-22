@@ -14,7 +14,7 @@ Last verified: 2026-11-22, macOS 27.2.1 (26B8132, arm64), Swift 6.4.2. Claude Co
 Status: a throw-away harness produced these results (Swift `Process` runner + Python matrix driver, in
 `Spikes/MeetingHiddenAgent/` on the spike branch, not merged). Every row below has a result file there until the
 advisor review. Codex evidence that the model stream cannot show (sandbox denials, the 277-directory write sweep,
-the exit 134 without `:minimal`, the hook spool counts) was re-run without a model and saved in
+the exit 134 without `:minimal`) was re-run without a model, and the hook spool counts (saved from the model runs) were written out; both are in
 `work/results/evidence/` (`sandbox-check.txt`, `hook-spool-counts.txt`, `claude-user-hook-counts.json`,
 `codex-user-hook-counts.json`); the script is `Spikes/MeetingHiddenAgent/sandbox-check.sh`.
 
@@ -170,9 +170,9 @@ Attempt rows 8 and 10 decide Codex: the decision record forbids any shell comman
 
 | CLI | Case | Exit | Error class | First stdout byte | Total | Hang | Prompts |
 |---|---|---|---|---|---|---|---|
-| Claude Code | signed in, selected array, new folder (37 runs: attempts 1–15 and 17; runs ended by the harness excluded) | 0 | – | median 158 ms (max 173) | median 6.3 s (4.4–17.9 s) | none within 120 s, except attempt 17 | no trust prompt (`-p`) |
+| Claude Code | signed in, selected array, new folder (37 runs: attempts 1–12 and 17; runs ended by the harness excluded) | 0 | – | median 158 ms (max 173) | median 6.3 s (4.4–17.9 s) | none within 120 s, except attempt 17 | no trust prompt (`-p`) |
 | Claude Code | `HOME` = empty folder (not signed in) | 1 | result event `is_error: true`, text "Not logged in · Please run /login" (note: `subtype` is still `"success"`); stderr empty | 184 ms | 0.64 s | no | none |
-| Codex | signed in, strict array, new folder (42 runs: attempts 1–15, 17–20; signal runs excluded) | 0 | – | median 131 ms (max 1075) | median 12.7 s (6.0–23.4 s) | none | none; stderr always has "Reading additional input from stdin..." even with `/dev/null` |
+| Codex | signed in, strict array, new folder (42 runs: attempts 1–12, 17–20; signal runs excluded) | 0 | – | median 131 ms (max 1075) | median 12.7 s (6.0–23.4 s) | none | none; stderr always has "Reading additional input from stdin..." even with `/dev/null` |
 | Codex | `HOME` = empty folder (not signed in) | 1 | `error` events "Reconnecting... n/5 (unexpected status 401 Unauthorized …)" | 113 ms | 15.5 s | no, but 5 retries on WebSocket, then 5 on HTTPS | none |
 | Codex | Read-only array without `--skip-git-repo-check`, folder not in Git | 1 | stderr "Not inside a trusted directory and --skip-git-repo-check was not specified." | none | 42 ms | no | none |
 
