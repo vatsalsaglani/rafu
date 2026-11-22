@@ -1,0 +1,45 @@
+Them1	Daniel	Let's circle back on the data pipeline after lunch.	0.000
+Them2	Samantha	The numbers for the customer ticket look better this week.	1.423
+Them1	Daniel	Can we push the API migration to next sprint instead?	1.142
+Them2	Samantha	Sorry, go ahead.	0.941
+Them1	Daniel	We closed 20 tickets this week.	0.572
+Them2	Samantha	Let's park that and move to the next item.	1.619
+Them1	Daniel	I have a question about the latency regression.	0.312
+Them2	Samantha	What is the status of the mobile release?	0.446
+Them1	Daniel	The team spent 5 hours on the data pipeline last week.	0.498
+Them2	Samantha	Sorry, go ahead.	0.387
+Them1	Daniel	Can everyone hear me okay?	0.855
+Them2	Samantha	Actually, I disagree with that approach for the data pipeline.	1.901
+Them1	Daniel	The latency regression dropped by 3 percent after the fix.	1.048
+Them2	Samantha	Let's circle back on the auth module after lunch.	0.311
+Them1	Daniel	Got it.	0.743
+Them2	Samantha	Let's take five minutes and come back to the mobile release.	1.857
+Them1	Daniel	The latency regression dropped by 8 percent after the fix.	0.754
+Them2	Samantha	We should assign an owner for the latency regression.	1.168
+Them1	Daniel	Yes.	1.398
+Them2	Samantha	Let's circle back on the backlog grooming after lunch.	0.509
+Them1	Daniel	Agreed.	1.820
+Them2	Samantha	Got it.	1.574
+Them1	Daniel	Yes.	1.336
+Them2	Samantha	Got it.	1.447
+Them1	Daniel	Can we push the customer ticket to next sprint instead?	1.272
+Them2	Samantha	Let's park that and move to the next item.	0.795
+Them1	Daniel	Let's take five minutes and come back to the sprint review.	1.978
+Them2	Samantha	Mm-hm.	1.672
+Them1	Daniel	Let's circle back on the latency regression after lunch.	1.677
+Them2	Samantha	The team spent 5 hours on the backlog grooming last week.	1.569
+Them1	Daniel	We still need sign off on the auth module.	1.538
+Them2	Samantha	Let's make a decision on the auth module before we move on.	1.570
+Them1	Daniel	I'll take the action item on the API migration.	1.349
+Them2	Samantha	Let's take five minutes and come back to the dashboard redesign.	1.694
+Them1	Daniel	Let's make a decision on the staging deploy before we move on.	1.767
+Them2	Samantha	Can we push the mobile release to next sprint instead?	0.787
+Them1	Daniel	I think we should ship the billing service before the review on Thursday.	0.731
+Them2	Samantha	I think we should ship the dashboard redesign before the review on Thursday.	0.680
+Them1	Daniel	We closed 25 tickets this week.	1.620
+Them2	Samantha	Let's take five minutes and come back to the dashboard redesign.	1.043
+Them1	Daniel	Actually, I disagree with that approach for the auth module.	1.077
+Them2	Samantha	We closed 42 tickets this week.	0.513
+Them1	Daniel	Sorry, go ahead.	0.371
+Them2	Samantha	I think we should ship the QA checklist before the review on Thursday.	0.741
+Them1	Daniel	Let's take five minutes and come back to the latency regression.	1.390

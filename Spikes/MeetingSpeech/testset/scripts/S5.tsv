@@ -1,0 +1,132 @@
+Them1	Samantha	This is Priya, joining from the mobile team.	0.000
+Them2	Daniel	Can we push the staging deploy to next sprint instead?	0.887
+Them3	Rishi	I'll take the action item on the search fix.	-0.295
+Them4	Karen	Sorry, go ahead.	0.611
+Them5	Moira	We should assign an owner for the backlog grooming.	0.986
+Them1	Samantha	I think we should ship the backlog grooming before the review on Thursday.	0.487
+Them2	Daniel	Let's park that and move to the next item.	0.606
+Them3	Rishi	I'll send the notes after the call.	0.507
+Them4	Karen	Okay.	1.151
+Them5	Moira	Let's park that and move to the next item.	0.584
+Them1	Samantha	I have a question about the sprint review.	0.339
+Them2	Daniel	The numbers for the customer ticket look better this week.	1.362
+Them3	Rishi	Okay.	0.637
+Them4	Karen	Let's take five minutes and come back to the backlog grooming.	1.446
+Them5	Moira	I have a question about the billing service.	0.530
+Them1	Samantha	We should assign an owner for the search fix.	0.830
+Them2	Daniel	The latency regression dropped by 25 percent after the fix.	0.442
+Them3	Rishi	I think we should ship the Q3 roadmap before the review on Thursday.	1.336
+Them4	Karen	Okay.	0.435
+Them5	Moira	We closed 30 tickets this week.	0.415
+Them1	Samantha	The latency regression dropped by 7 percent after the fix.	0.567
+Them2	Daniel	Can everyone hear me okay?	0.541
+Them3	Rishi	Let's take five minutes and come back to the API migration.	0.703
+Them4	Karen	I have a question about the mobile release.	0.520
+Them5	Moira	I think we should ship the search fix before the review on Thursday.	-0.760
+Them1	Samantha	I'll take the action item on the QA checklist.	0.634
+Them2	Daniel	Agreed.	0.747
+Them3	Rishi	I'll take the action item on the onboarding flow.	1.447
+Them4	Karen	Let's circle back on the billing service after lunch.	0.421
+Them5	Moira	That sounds good to me.	1.235
+Them1	Samantha	We closed 3 tickets this week.	0.527
+Them2	Daniel	I think we should ship the billing service before the review on Thursday.	0.506
+Them3	Rishi	Actually, I disagree with that approach for the customer ticket.	0.997
+Them4	Karen	I have a question about the latency regression.	1.472
+Them5	Moira	I'll take the action item on the search fix.	0.897
+Them1	Samantha	Sorry, go ahead.	-0.601
+Them2	Daniel	That sounds good to me.	1.131
+Them3	Rishi	Let's make a decision on the data pipeline before we move on.	-0.672
+Them4	Karen	Agreed.	0.888
+Them5	Moira	We closed 30 tickets this week.	0.375
+Them1	Samantha	Agreed.	1.045
+Them2	Daniel	Actually, I disagree with that approach for the API migration.	1.430
+Them3	Rishi	I have a question about the dashboard redesign.	1.217
+Them4	Karen	What is the status of the customer ticket?	-0.770
+Them5	Moira	The team spent 7 hours on the latency regression last week.	0.629
+Them1	Samantha	Let's circle back on the customer ticket after lunch.	1.400
+Them2	Daniel	Agreed.	-0.212
+Them3	Rishi	That sounds good to me.	0.965
+Them4	Karen	We still need sign off on the latency regression.	0.969
+Them5	Moira	Let's take five minutes and come back to the latency regression.	1.032
+Them1	Samantha	Can everyone hear me okay?	1.388
+Them2	Daniel	Sorry, go ahead.	1.204
+Them3	Rishi	That sounds good to me.	0.707
+Them4	Karen	Let's park that and move to the next item.	1.041
+Them5	Moira	Sorry, go ahead.	-0.454
+Them1	Samantha	Got it.	-0.688
+Them2	Daniel	We closed 12 tickets this week.	1.215
+Them3	Rishi	I'll take the action item on the onboarding flow.	0.427
+Them4	Karen	Sure.	0.906
+Them5	Moira	Let's take five minutes and come back to the onboarding flow.	0.327
+Them1	Samantha	Actually, I disagree with that approach for the dashboard redesign.	0.433
+Them2	Daniel	Let's take five minutes and come back to the mobile release.	1.441
+Them3	Rishi	Agreed.	0.663
+Them4	Karen	Let's take five minutes and come back to the sprint review.	1.434
+Them5	Moira	That sounds good to me.	0.954
+Them1	Samantha	I'll send the notes after the call.	1.151
+Them2	Daniel	Got it.	-0.200
+Them3	Rishi	Can we push the latency regression to next sprint instead?	0.556
+Them4	Karen	What is the status of the latency regression?	-0.333
+Them5	Moira	Got it.	1.014
+Them1	Samantha	I'll send the notes after the call.	1.378
+Them2	Daniel	Actually, I disagree with that approach for the data pipeline.	0.580
+Them3	Rishi	I'll send the notes after the call.	0.520
+Them4	Karen	We closed 42 tickets this week.	0.887
+Them5	Moira	I'll send the notes after the call.	1.004
+Them1	Samantha	What is the status of the mobile release?	0.673
+Them2	Daniel	I'll take the action item on the backlog grooming.	0.716
+Them3	Rishi	I have a question about the QA checklist.	0.860
+Them4	Karen	Let's make a decision on the mobile release before we move on.	0.568
+Them5	Moira	Yes.	0.852
+Them1	Samantha	Actually, I disagree with that approach for the Q3 roadmap.	1.476
+Them2	Daniel	Let's circle back on the search fix after lunch.	1.248
+Them3	Rishi	Can we push the auth module to next sprint instead?	0.771
+Them4	Karen	What is the status of the billing service?	1.242
+Them5	Moira	The numbers for the customer ticket look better this week.	0.329
+Them1	Samantha	I'll send the notes after the call.	0.498
+Them2	Daniel	The numbers for the customer ticket look better this week.	1.114
+Them3	Rishi	The latency regression dropped by 25 percent after the fix.	-0.314
+Them4	Karen	The team spent 15 hours on the mobile release last week.	-0.383
+Them5	Moira	That sounds good to me.	0.703
+Them1	Samantha	The team spent 42 hours on the onboarding flow last week.	1.091
+Them2	Daniel	I have a question about the staging deploy.	0.948
+Them3	Rishi	Can everyone hear me okay?	0.655
+Them4	Karen	I think we should ship the search fix before the review on Thursday.	1.313
+Them5	Moira	The team spent 15 hours on the dashboard redesign last week.	1.156
+Them1	Samantha	Mm-hm.	0.342
+Them2	Daniel	Let's park that and move to the next item.	1.110
+Them3	Rishi	Let's take five minutes and come back to the staging deploy.	-0.726
+Them4	Karen	The numbers for the backlog grooming look better this week.	0.343
+Them5	Moira	Sorry, go ahead.	0.632
+Them1	Samantha	Let's park that and move to the next item.	-0.709
+Them2	Daniel	Can everyone hear me okay?	0.838
+Them3	Rishi	The latency regression dropped by 30 percent after the fix.	0.352
+Them4	Karen	The latency regression dropped by 25 percent after the fix.	1.171
+Them5	Moira	We still need sign off on the backlog grooming.	0.636
+Them1	Samantha	Let's park that and move to the next item.	1.349
+Them2	Daniel	I think we should ship the customer ticket before the review on Thursday.	0.325
+Them3	Rishi	Actually, I disagree with that approach for the latency regression.	0.321
+Them4	Karen	I have a question about the search fix.	1.406
+Them5	Moira	Can everyone hear me okay?	0.621
+Them1	Samantha	I think we should ship the backlog grooming before the review on Thursday.	1.186
+Them2	Daniel	I think we should ship the API migration before the review on Thursday.	0.646
+Them3	Rishi	Sorry, go ahead.	0.905
+Them4	Karen	The latency regression dropped by 8 percent after the fix.	1.426
+Them5	Moira	The numbers for the customer ticket look better this week.	1.341
+Them1	Samantha	I'll take the action item on the onboarding flow.	0.477
+Them2	Daniel	The numbers for the auth module look better this week.	1.479
+Them3	Rishi	I'll send the notes after the call.	0.881
+Them4	Karen	The numbers for the staging deploy look better this week.	-0.480
+Them5	Moira	Let's make a decision on the mobile release before we move on.	1.272
+Them1	Samantha	That sounds good to me.	0.837
+Them2	Daniel	We still need sign off on the dashboard redesign.	1.257
+Them3	Rishi	Let's circle back on the data pipeline after lunch.	-0.260
+Them4	Karen	We still need sign off on the dashboard redesign.	0.923
+Them5	Moira	Let's circle back on the staging deploy after lunch.	1.480
+Them1	Samantha	I'll take the action item on the search fix.	0.966
+Them2	Daniel	Mm-hm.	0.676
+Them3	Rishi	The team spent 25 hours on the search fix last week.	1.068
+Them4	Karen	Sorry, go ahead.	1.144
+Them5	Moira	Can everyone hear me okay?	1.103
+Them1	Samantha	Let's make a decision on the backlog grooming before we move on.	0.703
+Them2	Daniel	The latency regression dropped by 3 percent after the fix.	1.420

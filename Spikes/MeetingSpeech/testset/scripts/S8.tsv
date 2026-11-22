@@ -1,0 +1,133 @@
+Them1	Samantha	I have a question about the customer ticket.	0.000
+Them2	Daniel	Let's park that and move to the next item.	0.726
+Them3	Rishi	Let's park that and move to the next item.	0.724
+Them4	Karen	I have a question about the onboarding flow.	1.428
+Them5	Moira	The latency regression dropped by 25 percent after the fix.	0.845
+Them6	Tessa	I'll send the notes after the call.	0.766
+Them7	Aman	Right.	-0.614
+Them8	Tara	Sorry, go ahead.	0.519
+Them1	Samantha	Yes.	0.394
+Them2	Daniel	I'll send the notes after the call.	1.042
+Them3	Rishi	I'll take the action item on the API migration.	1.160
+Them4	Karen	Sure.	-0.310
+Them5	Moira	Mm-hm.	0.728
+Them6	Tessa	I'll send the notes after the call.	0.457
+Them7	Aman	Sure.	1.258
+Them8	Tara	The team spent 30 hours on the auth module last week.	1.182
+Them1	Samantha	The latency regression dropped by 5 percent after the fix.	1.156
+Them2	Daniel	The numbers for the QA checklist look better this week.	0.942
+Them3	Rishi	I have a question about the Q3 roadmap.	0.889
+Them4	Karen	That sounds good to me.	0.382
+Them5	Moira	Got it.	1.172
+Them6	Tessa	Let's park that and move to the next item.	0.502
+Them7	Aman	We closed 3 tickets this week.	1.306
+Them8	Tara	That sounds good to me.	0.581
+Them1	Samantha	Right.	0.755
+Them2	Daniel	Got it.	0.666
+Them3	Rishi	I'll send the notes after the call.	0.995
+Them4	Karen	Let's circle back on the backlog grooming after lunch.	1.009
+Them5	Moira	Let's park that and move to the next item.	0.576
+Them6	Tessa	I think we should ship the mobile release before the review on Thursday.	1.276
+Them7	Aman	I'll take the action item on the data pipeline.	1.314
+Them8	Tara	Can we push the Q3 roadmap to next sprint instead?	1.389
+Them1	Samantha	Let's take five minutes and come back to the staging deploy.	1.110
+Them2	Daniel	Let's circle back on the QA checklist after lunch.	0.974
+Them3	Rishi	Let's make a decision on the Q3 roadmap before we move on.	1.079
+Them4	Karen	We should assign an owner for the API migration.	0.914
+Them5	Moira	Actually, I disagree with that approach for the customer ticket.	0.948
+Them6	Tessa	Sorry, go ahead.	1.279
+Them7	Aman	The latency regression dropped by 42 percent after the fix.	0.612
+Them8	Tara	Let's take five minutes and come back to the mobile release.	1.083
+Them1	Samantha	Mm-hm.	1.303
+Them2	Daniel	Mm-hm.	1.401
+Them3	Rishi	Let's take five minutes and come back to the onboarding flow.	-0.379
+Them4	Karen	Can we push the onboarding flow to next sprint instead?	0.326
+Them5	Moira	We should assign an owner for the dashboard redesign.	1.436
+Them6	Tessa	We still need sign off on the backlog grooming.	0.736
+Them7	Aman	The team spent 20 hours on the data pipeline last week.	0.643
+Them8	Tara	The numbers for the latency regression look better this week.	0.382
+Them1	Samantha	I'll take the action item on the dashboard redesign.	1.496
+Them2	Daniel	That sounds good to me.	0.740
+Them3	Rishi	We should assign an owner for the dashboard redesign.	0.739
+Them4	Karen	We still need sign off on the mobile release.	1.420
+Them5	Moira	The latency regression dropped by 15 percent after the fix.	0.754
+Them6	Tessa	We still need sign off on the latency regression.	-0.312
+Them7	Aman	The latency regression dropped by 3 percent after the fix.	1.204
+Them8	Tara	Let's park that and move to the next item.	0.788
+Them1	Samantha	Let's take five minutes and come back to the customer ticket.	0.847
+Them2	Daniel	Can we push the auth module to next sprint instead?	1.025
+Them3	Rishi	Can everyone hear me okay?	0.318
+Them4	Karen	Can we push the billing service to next sprint instead?	0.920
+Them5	Moira	I have a question about the auth module.	0.914
+Them6	Tessa	I'll take the action item on the billing service.	0.992
+Them7	Aman	Let's park that and move to the next item.	1.272
+Them8	Tara	We still need sign off on the auth module.	1.144
+Them1	Samantha	Yes.	-0.618
+Them2	Daniel	We closed 25 tickets this week.	0.366
+Them3	Rishi	Let's circle back on the backlog grooming after lunch.	1.301
+Them4	Karen	The latency regression dropped by 8 percent after the fix.	0.780
+Them5	Moira	Can everyone hear me okay?	1.026
+Them6	Tessa	The latency regression dropped by 7 percent after the fix.	1.051
+Them7	Aman	What is the status of the staging deploy?	0.476
+Them8	Tara	Let's park that and move to the next item.	1.087
+Them1	Samantha	I have a question about the latency regression.	0.568
+Them2	Daniel	Got it.	-0.493
+Them3	Rishi	We still need sign off on the customer ticket.	0.759
+Them4	Karen	I'll take the action item on the customer ticket.	1.315
+Them5	Moira	What is the status of the search fix?	0.661
+Them6	Tessa	Got it.	0.736
+Them7	Aman	Mm-hm.	0.860
+Them8	Tara	We still need sign off on the Q3 roadmap.	0.589
+Them1	Samantha	Let's park that and move to the next item.	1.130
+Them2	Daniel	The team spent 7 hours on the mobile release last week.	0.623
+Them3	Rishi	What is the status of the onboarding flow?	1.259
+Them4	Karen	Yes.	0.614
+Them5	Moira	Let's make a decision on the backlog grooming before we move on.	1.294
+Them6	Tessa	The numbers for the Q3 roadmap look better this week.	0.588
+Them7	Aman	The numbers for the onboarding flow look better this week.	-0.336
+Them8	Tara	I think we should ship the QA checklist before the review on Thursday.	0.347
+Them1	Samantha	Got it.	0.714
+Them2	Daniel	The numbers for the onboarding flow look better this week.	0.546
+Them3	Rishi	I'll take the action item on the backlog grooming.	1.116
+Them4	Karen	What is the status of the auth module?	1.339
+Them5	Moira	Can we push the search fix to next sprint instead?	1.458
+Them6	Tessa	I have a question about the auth module.	1.491
+Them7	Aman	The numbers for the auth module look better this week.	0.597
+Them8	Tara	Actually, I disagree with that approach for the data pipeline.	0.551
+Them1	Samantha	Let's take five minutes and come back to the auth module.	0.630
+Them2	Daniel	I'll take the action item on the auth module.	0.303
+Them3	Rishi	Can everyone hear me okay?	0.556
+Them4	Karen	I'll take the action item on the backlog grooming.	0.431
+Them5	Moira	Can everyone hear me okay?	0.789
+Them6	Tessa	We should assign an owner for the staging deploy.	1.487
+Them7	Aman	Can everyone hear me okay?	-0.578
+Them8	Tara	What is the status of the latency regression?	-0.568
+Them1	Samantha	We should assign an owner for the QA checklist.	0.526
+Them2	Daniel	What is the status of the auth module?	0.615
+Them3	Rishi	We closed 30 tickets this week.	-0.266
+Them4	Karen	Let's park that and move to the next item.	1.186
+Them5	Moira	What is the status of the backlog grooming?	1.137
+Them6	Tessa	Let's park that and move to the next item.	0.358
+Them7	Aman	I'll take the action item on the staging deploy.	1.072
+Them8	Tara	Can everyone hear me okay?	-0.509
+Them1	Samantha	Can everyone hear me okay?	1.421
+Them2	Daniel	Let's make a decision on the API migration before we move on.	0.421
+Them3	Rishi	Agreed.	0.727
+Them4	Karen	Let's circle back on the onboarding flow after lunch.	0.420
+Them5	Moira	I'll take the action item on the onboarding flow.	0.323
+Them6	Tessa	The team spent 20 hours on the staging deploy last week.	0.661
+Them7	Aman	Okay.	0.483
+Them8	Tara	That sounds good to me.	0.410
+Them1	Samantha	We closed 12 tickets this week.	0.496
+Them2	Daniel	Let's make a decision on the auth module before we move on.	1.437
+Them3	Rishi	Yes.	0.422
+Them4	Karen	The team spent 8 hours on the search fix last week.	1.312
+Them5	Moira	The team spent 42 hours on the sprint review last week.	1.247
+Them6	Tessa	Okay.	0.857
+Them7	Aman	Actually, I disagree with that approach for the staging deploy.	0.859
+Them8	Tara	Actually, I disagree with that approach for the QA checklist.	1.015
+Them1	Samantha	What is the status of the auth module?	1.494
+Them2	Daniel	I have a question about the auth module.	0.384
+Them3	Rishi	Let's park that and move to the next item.	0.684
+Them4	Karen	I have a question about the mobile release.	0.573
+Them5	Moira	Yes.	1.134

@@ -1,0 +1,43 @@
+Them1	Eddy (English (US))	We closed 5 tickets this week.	0.000
+Them2	Reed (English (US))	Can everyone hear me okay?	0.897
+Them1	Eddy (English (US))	Sorry, go ahead.	1.792
+Them2	Reed (English (US))	I'll take the action item on the data pipeline.	0.736
+Them1	Eddy (English (US))	Can everyone hear me okay?	1.422
+Them2	Reed (English (US))	We closed 20 tickets this week.	1.464
+Them1	Eddy (English (US))	Let's circle back on the mobile release after lunch.	1.726
+Them2	Reed (English (US))	Okay.	1.436
+Them1	Eddy (English (US))	Let's take five minutes and come back to the Q3 roadmap.	0.982
+Them2	Reed (English (US))	We should assign an owner for the sprint review.	1.474
+Them1	Eddy (English (US))	Sorry, go ahead.	0.972
+Them2	Reed (English (US))	We should assign an owner for the backlog grooming.	0.809
+Them1	Eddy (English (US))	Let's take five minutes and come back to the QA checklist.	0.848
+Them2	Reed (English (US))	Sure.	0.852
+Them1	Eddy (English (US))	Actually, I disagree with that approach for the API migration.	1.364
+Them2	Reed (English (US))	I'll send the notes after the call.	0.834
+Them1	Eddy (English (US))	Actually, I disagree with that approach for the onboarding flow.	0.358
+Them2	Reed (English (US))	I'll take the action item on the data pipeline.	1.517
+Them1	Eddy (English (US))	Let's circle back on the API migration after lunch.	1.130
+Them2	Reed (English (US))	We still need sign off on the backlog grooming.	1.161
+Them1	Eddy (English (US))	Let's make a decision on the onboarding flow before we move on.	1.885
+Them2	Reed (English (US))	Actually, I disagree with that approach for the staging deploy.	0.479
+Them1	Eddy (English (US))	What is the status of the latency regression?	1.882
+Them2	Reed (English (US))	Can everyone hear me okay?	1.703
+Them1	Eddy (English (US))	The team spent 25 hours on the API migration last week.	1.324
+Them2	Reed (English (US))	I'll take the action item on the latency regression.	0.704
+Them1	Eddy (English (US))	I think we should ship the API migration before the review on Thursday.	0.689
+Them2	Reed (English (US))	I have a question about the billing service.	1.097
+Them1	Eddy (English (US))	The numbers for the QA checklist look better this week.	1.274
+Them2	Reed (English (US))	I'll send the notes after the call.	1.700
+Them1	Eddy (English (US))	Let's take five minutes and come back to the backlog grooming.	1.537
+Them2	Reed (English (US))	The latency regression dropped by 3 percent after the fix.	0.854
+Them1	Eddy (English (US))	Let's park that and move to the next item.	0.853
+Them2	Reed (English (US))	What is the status of the customer ticket?	0.927
+Them1	Eddy (English (US))	I'll take the action item on the QA checklist.	1.627
+Them2	Reed (English (US))	Mm-hm.	1.251
+Them1	Eddy (English (US))	Actually, I disagree with that approach for the mobile release.	1.696
+Them2	Reed (English (US))	Let's park that and move to the next item.	0.520
+Them1	Eddy (English (US))	We should assign an owner for the data pipeline.	0.458
+Them2	Reed (English (US))	Let's make a decision on the QA checklist before we move on.	1.147
+Them1	Eddy (English (US))	Let's park that and move to the next item.	1.353
+Them2	Reed (English (US))	I think we should ship the sprint review before the review on Thursday.	1.986
+Them1	Eddy (English (US))	I think we should ship the auth module before the review on Thursday.	1.122
