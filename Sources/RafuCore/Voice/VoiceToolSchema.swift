@@ -37,8 +37,12 @@ public nonisolated enum VoiceToolSchema {
     /// Ensemble tools the voice backend does not see under their MCP names.
     /// Voice gets `show_view` instead: one tool for render and update, with a
     /// flat spec so its arguments can stream into a spec decoder.
+    /// Voice must not read meetings in version 1, so the three meeting tools
+    /// are hidden too.
     public static let hiddenEnsembleTools: Set<String> = [
         CanvasAgentTool.viewRender.rawValue, CanvasAgentTool.viewUpdate.rawValue,
+        CanvasAgentTool.meetingAccess.rawValue, CanvasAgentTool.meetingSearch.rawValue,
+        CanvasAgentTool.meetingRead.rawValue,
     ]
     public static let showViewName = "show_view"
     public static let composeViewName = "compose_view"

@@ -85,6 +85,11 @@ nonisolated struct ConductorBundledSkillCatalog: Sendable {
                 .init(pathComponents: ["references", "choosing.md"]),
                 .init(pathComponents: ["references", "security.md"]),
             ]),
+        // The read-only meeting tools (meeting_access, meeting_search,
+        // meeting_read). They answer only when the user allows it in Settings.
+        ConductorBundledSkill(
+            identifier: "rafu-meetings",
+            files: [.init(pathComponents: ["SKILL.md"])]),
     ]
 
     let resourceRootURL: URL

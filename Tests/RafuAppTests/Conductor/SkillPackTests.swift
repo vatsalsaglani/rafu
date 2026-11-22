@@ -37,13 +37,22 @@ func bundledAgentSkillResolves() async throws {
 }
 
 @MainActor
-@Test("The agent skill names every orchestration tool")
+@Test("The agent skills name every orchestration tool")
 func bundledAgentSkillCoversEveryTool() throws {
     let catalog = try ConductorBundledSkillCatalog.bundled()
     let reference = try catalog.data(for: .init(pathComponents: ["references", "tools.md"]))
     let text = String(decoding: reference, as: UTF8.self)
+    // The meeting tools have their own skill, rafu-meetings.
+    let meetingTools: Set<CanvasAgentTool> = [.meetingAccess, .meetingSearch, .meetingRead]
+    let meetings = try #require(
+        try ConductorBundledSkillCatalog.bundledSkills().first { $0.skill == "rafu-meetings" })
+    let meetingsText = String(
+        decoding: try meetings.data(for: .init(pathComponents: ["SKILL.md"])), as: UTF8.self)
     for tool in CanvasAgentTool.allCases {
-        #expect(text.contains("`\(tool.rawValue)`"), "tools.md does not name \(tool.rawValue)")
+        let source = meetingTools.contains(tool) ? meetingsText : text
+        #expect(
+            source.contains("`\(tool.rawValue)`"),
+            "the skill does not name \(tool.rawValue)")
     }
 }
 
