@@ -1,38 +1,77 @@
 // RafuMeetingsWorker: the Meetings speech helper, staged into
-// Contents/Helpers. This is the stub that the shared contracts package lands.
-// The speech worker package replaces it with the three modes (live text,
-// final text, speakers) and the bounded JSON-lines protocol.
+// Contents/Helpers. One process does one job and exits:
 //
-// Rules that hold from this stub on:
-// - No network use. No URLSession, no model download, no Hugging Face call.
-//   The app downloads models; the helper only gets a folder path.
+//   RafuMeetingsWorker --mode <live-text|final-text|speakers> --protocol 1
+//
+// The request is the first line of standard input (JSON, at most 16 KB).
+// Results are JSON lines on standard output (`MeetingWorkerEvent`). The wire
+// is in `Sources/RafuCore/Meetings/Worker/`; the reference note is
+// `docs/references/meeting-speech-worker.md`.
+//
+// Rules:
+// - No network use. No URL session, no model download, no Hugging Face
+//   call; each library is configured with "download: false" or a local
+//   folder load. The app downloads models; the helper gets a folder path.
+// - No file write. No speaker embedding and no audio is written to disk.
 // - The process is started by the app with an executable and an argument
-//   array, never a shell string.
-import FluidAudio
+//   array, never a shell string. Standard error is discarded by the app.
+// - It exits when its job ends, when standard input closes (in the file
+//   modes that means "cancel"), and when the app that started it ends.
 import Foundation
 import RafuCore
-import SpeakerKit
-import WhisperKit
 
-/// The version line printed for `--version`.
-let workerVersionLine = #"{"worker":"stub","protocol":1}"#
-
-/// `EX_USAGE` from sysexits(3).
-let usageExitCode: Int32 = 64
-
-if CommandLine.arguments.count > 1_000_000 {
-    // Never taken. Keeps one type from each speech module in the binary so
-    // the link of both packages into this helper (and not the app) is proven.
-    let fluidType: Nemotron3Models.Type = Nemotron3Models.self
-    let speakerType: PyannoteConfig.Type = PyannoteConfig.self
-    let whisperType: WhisperKitConfig.Type = WhisperKitConfig.self
-    let contractsType: MeetingID.Type = MeetingID.self
-    print("\(fluidType) \(speakerType) \(whisperType) \(contractsType)")
-}
-
-let arguments = Array(CommandLine.arguments.dropFirst())
-if arguments == ["--version"] {
-    print(workerVersionLine)
+let workerArguments = Array(CommandLine.arguments.dropFirst())
+if workerArguments == ["--version"] {
+    print(#"{"worker":"RafuMeetingsWorker","protocol":\#(MeetingWorkerProtocol.version)}"#)
     exit(0)
 }
-exit(usageExitCode)
+
+let workerMode: MeetingWorkerMode
+do {
+    workerMode = try MeetingWorkerArguments.parse(workerArguments)
+} catch {
+    exitWorker(.usage)
+}
+
+let workerOutput = WorkerOutput()
+let parentWatch = exitWhenParentEnds()
+
+guard let requestInput = readRequestLine() else {
+    workerOutput.fail(
+        .request, code: MeetingWorkerRequestError.tooLarge.wireCode, exit: .badRequest)
+}
+
+let workerRequest: MeetingWorkerRequest
+do {
+    let decoded = try MeetingWorkerRequest.decode(line: requestInput.line)
+    try decoded.validate(for: workerMode)
+    workerRequest = decoded
+} catch {
+    workerOutput.fail(
+        error == .modelMissing ? .model : .request, code: error.wireCode, exit: error.exitCode)
+}
+
+let exitCode: MeetingWorkerExitCode
+switch (workerMode, workerRequest.engine, workerRequest.audioFile) {
+case (.liveText, .nemotronEnglish, _):
+    exitCode = await runLiveText(workerRequest, leftover: requestInput.rest, output: workerOutput)
+case (.finalText, .nemotronEnglish, let audioFile?):
+    exitWhenInputCloses(workerOutput)
+    exitCode = await runNemotronFinalText(workerRequest, audioFile: audioFile, output: workerOutput)
+case (.finalText, .whisperKit, let audioFile?):
+    exitWhenInputCloses(workerOutput)
+    exitCode = await runWhisperKitFinalText(
+        workerRequest, audioFile: audioFile, output: workerOutput)
+case (.speakers, .nemotron3, let audioFile?):
+    exitWhenInputCloses(workerOutput)
+    exitCode = await runNemotron3Speakers(workerRequest, audioFile: audioFile, output: workerOutput)
+case (.speakers, .speakerKit, let audioFile?):
+    exitWhenInputCloses(workerOutput)
+    exitCode = await runSpeakerKitSpeakers(
+        workerRequest, audioFile: audioFile, output: workerOutput)
+default:
+    workerOutput.fail(
+        .request, code: MeetingWorkerRequestError.engineNotForMode.wireCode, exit: .badRequest)
+}
+withExtendedLifetime(parentWatch) {}
+exitWorker(exitCode)
