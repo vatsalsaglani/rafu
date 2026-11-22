@@ -211,7 +211,7 @@ nonisolated enum EnsembleSkillCopy {
         "Teaches Claude Code and Codex to use an Ensemble: read the board, start a peer agent, link it, delegate work, share notes, draw and export diagrams, open and check apps, and show native views."
 
     static let footer =
-        "One install writes four skills: rafu-ensemble, rafu-view, json-render-swift-use (the view spec language, Apache-2.0) and rafu-meetings. Claude Code reads them in ~/.claude/skills/<name>; Codex reads ~/.codex/skills/<name>. For another agent, choose its skills folder; Rafu does not guess other vendor folders. Install again after a Rafu update to refresh the skills."
+        "One install writes four skills: rafu-ensemble, rafu-view, json-render-swift-use (the view spec language, Apache-2.0) and rafu-meetings. Claude Code reads them in ~/.claude/skills/rafu-ensemble, ~/.claude/skills/rafu-view, ~/.claude/skills/json-render-swift-use and ~/.claude/skills/rafu-meetings; Codex reads ~/.codex/skills/rafu-ensemble, ~/.codex/skills/rafu-view, ~/.codex/skills/json-render-swift-use and ~/.codex/skills/rafu-meetings. For another agent, choose its skills folder; Rafu does not guess other vendor folders. Install again after a Rafu update to refresh the skills."
 }
 
 @MainActor
