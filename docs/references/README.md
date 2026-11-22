@@ -129,6 +129,7 @@ A task that discovers a reusable platform, SDK, toolchain, lifecycle, concurrenc
 | [`ensemble-terminal-focus-restore.md`](ensemble-terminal-focus-restore.md) | An Ensemble terminal losing the keys after a Space or app switch: the occlusion `pause()` root cause, the remembered card that `windowBecameAvailable()` focuses again, and the board-key gate while a restore is pending |
 | [`direct-touch-events.md`](direct-touch-events.md) | A finger on a Mac touch screen (macOS 27): why a tap on an Ensemble card header froze the window (`clickCount` raised on a direct-touch `NSApp.currentEvent` inside a SwiftUI gesture, and AppKit swallowed the exception), `EventClickCount` as the only way to read a click count, how AppKit routes touches to SwiftUI gesture recognizers or to mouse and scroll emulation, and the log query that finds the exception |
 | [`microphone-permission-listing.md`](microphone-permission-listing.md) | Why Rafu is absent from Privacy ▸ Microphone until `requestAccess` runs, and the "Allow Microphone…" button in Settings ▸ Voice |
+| [`meeting-hidden-agent-limits.md`](meeting-hidden-agent-limits.md) | The hidden meeting agent (no visible terminal, read-only, one meeting's files): the exact Claude Code 2.1.330 argument array that held all escape attempts, why Codex 0.171.0 is not offered in version 1 (it needs a shell to read files; its read-only sandbox read a dummy secret; it applied an `AGENTS.md` in the meeting folder), first-run behaviour with no terminal, and how to repeat the check after a CLI update |
 
 ## Reference-note template
 

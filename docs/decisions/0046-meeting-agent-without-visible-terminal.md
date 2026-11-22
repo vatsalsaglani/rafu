@@ -1,7 +1,7 @@
 # ADR 0046: A meeting agent with no visible terminal
 
 - **Status:** Accepted in principle on the user's direction (2026-11-22). The argument arrays are not verified; see
-  the note about hidden meeting agent limits (`docs/references/meeting-hidden-agent-limits.md`, to come).
+  the note about hidden meeting agent limits ([`docs/references/meeting-hidden-agent-limits.md`](../references/meeting-hidden-agent-limits.md); checked 2026-11-22: Claude Code 2.1.330 held with the selected array, Codex 0.171.0 not held and not offered in version 1).
 - **Date:** 2026-11-22
 - **Related:** the decision about external agent CLIs in the Ensemble
   ([`0018-conductor-external-agent-orchestration.md`](0018-conductor-external-agent-orchestration.md)), the decision
@@ -88,6 +88,6 @@ Nothing here is decided.
 
 ## Related paths
 
-- `docs/references/meeting-hidden-agent-limits.md` (to come, from the check)
+- [`docs/references/meeting-hidden-agent-limits.md`](../references/meeting-hidden-agent-limits.md) (checked 2026-11-22)
 - `Sources/RafuCore/Meetings/` and `Sources/RafuApp/Meetings/` (planned; see the Meetings phase)
 - `AGENTS.md` (mission paragraph)
