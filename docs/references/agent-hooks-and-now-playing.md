@@ -23,6 +23,9 @@
   login. Cursor runtime events and persistent installation into personal
   settings remain unverified.
 
+Helper refresh (2026-11-22, merge 7c13d32): the implementor's parallel run
+passed 4,144 tests in 339 suites. Coordinator on `main` (merge 7c13d32): `./script/test.sh` and `./script/test.sh --no-parallel` both passed (4,144 tests in 339 suites and 726 tests in 50 suites). Manual check on Rafu Lightning: the installed helper was made stale on purpose (the 2026-11-21 copy, 6,269,392 bytes); after `./script/build_and_run.sh --verify` the launch refresh replaced it, and `cmp` with `Contents/Helpers/rafu-agent-events` showed the same bytes (6,447,760).
+
 ## Mac runtime verification (2026-10-18)
 
 - The actual bundled helper returned exit 0 with no output for malformed,
@@ -178,8 +181,9 @@ build OK; 466 tests in 33 suites (parallel) and 3726 tests in 301 suites
 
 11. Connect and Disconnect are explicit and two-step: `AgentHookInstaller.prepare`
     reads the file and builds an `AgentHookChange` (exact path and the exact
-    entries as JSON); the review sheet shows it; only Confirm writes. Nothing
-    runs at launch. `refresh()` on the Settings pane only reads.
+    entries as JSON); the review sheet shows it; only Confirm writes. No
+    provider file is written at launch. `refresh()` on the Settings pane reads
+    the provider files; its only write is the helper refresh in rule 15a.
 12. Files: Claude Code `$CLAUDE_CONFIG_DIR` or `~/.claude/settings.json`;
     Codex `$CODEX_HOME` or `~/.codex/hooks.json` (as Cider); Cursor
     `~/.cursor/hooks.json` (flat entries, `"version": 1`). A relative
@@ -206,6 +210,47 @@ build OK; 466 tests in 33 suites (parallel) and 3726 tests in 301 suites
     the new file is written to a hidden temporary file and `rename(2)`d over
     the old one, keeping its permission bits. `rename` also lets a running
     helper keep its old inode.
+15a. Refresh of the installed helper (2026-11-22). The helper holds RafuCore
+    code (`AgentHookEvent`, `AgentPermissionRequestSummary`, `AgentHookSpool`,
+    `AgentAnswerChannel`), so an old copy behaves like an old app. Connect was
+    the only copy, so an app update left the old helper in place. Now
+    `AgentHookInstaller.refreshHelper` replaces it:
+    - Triggers: at launch, after `AgentActivityStore.shared.start()`, and only
+      when a provider is recorded as connected
+      (`AgentHookSetupModel.refreshHelperAtLaunch`); and at the end of the
+      Settings ▸ Agents status read (`refresh()`), which does not use that
+      gate, so a stale recorded state is repaired there.
+    - Only when a provider file refers to this variant's helper:
+      `AgentHookConfiguration.referencesHelper` is true when any hook command
+      starts with this variant's quoted helper path. It uses the same
+      traversal as `hasRafuEntries` and covers Cursor. It does not need every
+      event entry, so a future hook event cannot make a connected helper look
+      "not connected". With no such file the result is `notConnected` and
+      nothing is written or created.
+    - Compare, then copy: file size first, then a byte comparison. Not a hash
+      and not a version stamp: a Rafu Lightning rebuild keeps the version
+      number while the helper bytes change (ad hoc signing), so a stamp can
+      disagree with the real file. A missing installed helper is copied too.
+    - The copy is `stageHelper`: 0700, symbolic-link refusal, hidden
+      temporary file, atomic `rename`. A running helper keeps its old inode.
+    - Results: `notConnected`, `bundledHelperMissing` (raw `swift run` or a
+      test; a quiet skip), `current`, `updated`.
+    - It never writes a provider file and never touches the other app
+      variant's helper. The rule that provider files change only after review
+      (rule 11) is unchanged, so no new decision record was needed.
+    - Failure: one log line with the result name only, one fixed sentence in
+      Settings, no alert. No message on success.
+    - Cost: a Lightning rebuild changes the helper bytes, so the next launch
+      copies about 6 MB once. A downgrade puts the older helper back on
+      purpose: the helper must match the app that reads the spool.
+    - Evidence: on 2026-11-22 a Claude Code `mcp__` request showed "Answer in
+      the terminal" in Up next instead of a card in the approval peek. The
+      installed helper dated 2026-11-21 was older than the MCP summaries, so
+      in `--answer` mode it exited without spooling. Release users updating
+      from 0.1.24 to 0.1.25-beta had the same fault.
+    - Diagnostic: `cmp` the installed helper against the bundled one:
+      `cmp "$HOME/Library/Application Support/<App>/AgentTracking/bin/rafu-agent-events" "<App>.app/Contents/Helpers/rafu-agent-events"`.
+      No output means the same bytes.
 
 ### System Now Playing (MediaRemote adapter)
 

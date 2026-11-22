@@ -272,6 +272,30 @@ Applies to: `AgentPermissionRequestSummary.swift` (`ToolCall`, `mcpParts(of:)`, 
   tool, which makes the form probable but does not prove it. If the form differs, the name rule gives no row and
   the terminal dialog stays.
 
+## A stale installed helper hides a row (2026-11-22)
+
+Applies to: `AgentHookInstaller.refreshHelper`, `AgentHookConfiguration.referencesHelper`. The full rule is rule 15a in
+[`agent-hooks-and-now-playing.md`](agent-hooks-and-now-playing.md).
+
+- **Symptom.** The Up next row says "Answer in the terminal" for a tool that Rafu summarizes, for example the MCP tool
+  `mcp__claude_ai_Claude_Docs__guide`. No card shows in the approval peek.
+- **Cause.** The answer-mode helper is `AgentTracking/bin/rafu-agent-events`. The request summary is compiled into it
+  from RafuCore. Before this fix the helper was copied only at Connect, so a copy that predates a summary kind
+  exits without spooling the request. Seen on 2026-11-22 with a copy dated 2026-11-21, which predated the MCP
+  summaries. Each app update left the old helper.
+- **Diagnostic.** Compare the installed helper with the bundled one. No output means the same bytes:
+
+  ```sh
+  cmp "$HOME/Library/Application Support/<App>/AgentTracking/bin/rafu-agent-events" \
+      "<App>.app/Contents/Helpers/rafu-agent-events"
+  ```
+
+- **Fix.** Rafu now replaces a stale helper at launch (when a provider is connected) and when Settings > Agents reads
+  its status. To repair by hand, Disconnect and Connect again. Do not copy the file in place over a running helper;
+  the app uses an atomic rename.
+- A Claude Code session that is already running picks up the new helper at its next hook event, because the agent
+  starts the helper for each event.
+
 ## Claude Code questions use a different hook
 
 Verified with Claude Code 2.1.329 and Haiku in an interactive terminal on
