@@ -156,7 +156,9 @@ struct AgentRequestStoreTests {
             questions: [
                 .init(
                     id: "theme", header: "", text: "Which theme?",
-                    choices: [.init(label: "Indigo", detail: ""), .init(label: "Khadi", detail: "")],
+                    choices: [
+                        .init(label: "Indigo", detail: ""), .init(label: "Khadi", detail: ""),
+                    ],
                     allowsFreeText: true),
                 .init(
                     id: "parts", header: "", text: "Which parts?",

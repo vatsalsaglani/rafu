@@ -471,7 +471,7 @@ nonisolated enum ApprovalPeekText {
             guard !request.terminalOnly, let command = request.command else {
                 return "\(agent) needs approval: Run command. Open the terminal to answer."
             }
-            return "\(agent) needs approval: \(command)"
+            return "\(agent) needs approval: \(command)" + spokenLines(request)
         case .toolCall:
             guard !request.terminalOnly, let reason = request.reason,
                 let identity = AgentPermissionRequestSummary.toolIdentity(fromReason: reason)
@@ -514,8 +514,14 @@ nonisolated enum ApprovalPeekText {
         request.command ?? fileChangeText(request)
     }
 
+    /// The grant lines of a command (a network target, "Network: https
+    /// example.com"), as one spoken sentence each. Empty for none.
+    static func spokenLines(_ request: CanvasAgentRequest) -> String {
+        request.permissions.map { ". \($0)" }.joined()
+    }
+
     /// What VoiceOver reads for the box: all of it, with the path and the
-    /// kind of body ("New content" or "Diff").
+    /// kind of body ("New content" or "Diff"), and a command's network target.
     static func spokenBox(agent: String, request: CanvasAgentRequest) -> String? {
         if request.kind == .toolCall, let arguments = request.command {
             // The raw name is part of what is read: it is the real target.
@@ -526,7 +532,9 @@ nonisolated enum ApprovalPeekText {
                 "\(agent) asks to use tool \(identity.tool) of \(identity.server), "
                 + "named \(identity.name), with arguments \(arguments)"
         }
-        if let command = request.command { return "\(agent) asks to run \(command)" }
+        if let command = request.command {
+            return "\(agent) asks to run \(command)" + spokenLines(request)
+        }
         guard request.kind == .fileChange, !request.fileChanges.isEmpty else { return nil }
         return request.fileChanges.map { change in
             let lead: String

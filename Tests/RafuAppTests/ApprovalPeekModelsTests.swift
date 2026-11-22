@@ -575,6 +575,30 @@ func approvalPeekAnnouncement() {
     #expect(
         ApprovalPeekText.announcement(for: notice)
             == "Codex needs you: Network request. Open the terminal to answer.")
+    // A Codex notice reason already says where to answer: not said twice.
+    let codexNotice = ApprovalPeekEntry(
+        controllerID: UUID(), title: "t", cli: .codex,
+        request: CanvasAgentRequest(
+            kind: .notice,
+            reason: "Codex asks you to sign in with a browser. Open the terminal to answer.",
+            text: "Sign in to GitHub"))
+    #expect(
+        ApprovalPeekText.announcement(for: codexNotice)
+            == "Codex needs you: Codex asks you to sign in with a browser. "
+            + "Open the terminal to answer.")
+    // A network command approval speaks its target.
+    let network = ApprovalPeekEntry(
+        controllerID: UUID(), title: "t", cli: .codex,
+        request: CanvasAgentRequest(
+            kind: .command, command: "curl https://example.com",
+            permissions: ["Network: https example.com"]))
+    #expect(network.request.permissions == ["Network: https example.com"])
+    #expect(
+        ApprovalPeekText.announcement(for: network)
+            == "Codex needs approval: curl https://example.com. Network: https example.com")
+    #expect(
+        ApprovalPeekText.spokenBox(agent: "Codex", request: network.request)
+            == "Codex asks to run curl https://example.com. Network: https example.com")
     let bare = ApprovalPeekEntry(
         controllerID: UUID(), title: "t", cli: .codex,
         request: CanvasAgentRequest(kind: .notice))

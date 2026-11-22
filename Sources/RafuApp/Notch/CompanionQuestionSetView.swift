@@ -286,7 +286,8 @@ struct CompanionQuestionSetView: View {
         .focused($focus, equals: .choice(index))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(
-            choice.detail.isEmpty ? choice.label : "\(choice.label), \(choice.detail)")
+            choice.detail.isEmpty ? choice.label : "\(choice.label), \(choice.detail)"
+        )
         .accessibilityValue(question.allowsMultiple ? (chosen ? "Checked" : "Not checked") : "")
         .accessibilityAddTraits(chosen ? [.isButton, .isSelected] : .isButton)
         .modifier(PreviewContent(preview: choice.preview))
@@ -425,7 +426,8 @@ struct CompanionPlanView: View {
                 }
                 .frame(
                     height: min(
-                        ApprovalPeekGeometry.expandedBoxHeight(lines: lines), maxBoxHeight))
+                        ApprovalPeekGeometry.expandedBoxHeight(lines: lines), maxBoxHeight)
+                )
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("Plan: \(text)")
             }

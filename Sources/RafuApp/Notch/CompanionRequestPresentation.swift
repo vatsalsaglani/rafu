@@ -46,12 +46,19 @@ struct CompanionRequestPresentation {
         }
     }
 
-    /// The first line of a notice's reason, or nil when it has none.
+    nonisolated static let openTerminalSentence = "Open the terminal to answer."
+
+    /// The first line of a notice's reason with no closing "Open the
+    /// terminal to answer." and no final full stop, or nil when it has none.
     nonisolated static func noticeKind(_ request: CanvasAgentRequest) -> String? {
         guard request.kind == .notice, let reason = request.reason else { return nil }
-        let first = reason.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? ""
-        let trimmed = first.trimmingCharacters(in: .whitespaces)
-        return trimmed.isEmpty ? nil : trimmed
+        var line = reason.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? ""
+        // The supervisor may end the reason with where to answer; every
+        // surface adds that itself, so it is not said twice.
+        if line.hasSuffix(openTerminalSentence) { line.removeLast(openTerminalSentence.count) }
+        line = line.trimmingCharacters(in: .whitespaces)
+        if line.hasSuffix(".") { line.removeLast() }
+        return line.isEmpty ? nil : line
     }
 
     static func message(for result: AgentRequestStore.ChooseResult) -> String? {
