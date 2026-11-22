@@ -1,7 +1,11 @@
 # ADR 0046: A meeting agent with no visible terminal
 
-- **Status:** Accepted in principle on the user's direction (2026-11-22). The argument arrays are not verified; see
-  the note about hidden meeting agent limits ([`docs/references/meeting-hidden-agent-limits.md`](../references/meeting-hidden-agent-limits.md); checked 2026-11-22: Claude Code 2.1.330 held with the selected array, Codex 0.171.0 not held and not offered in version 1).
+- **Status:** Accepted in principle on the user's direction (2026-11-22), amended 2026-11-23. Claude Code 2.1.330 is
+  held with the selected array; see the note about hidden meeting agent limits
+  ([`docs/references/meeting-hidden-agent-limits.md`](../references/meeting-hidden-agent-limits.md); checked
+  2026-11-22). Codex is offered in version 1 by the user's decision of 2026-11-23, with a different limit (decision
+  11). The Codex 0.171.0 file-reading design was not held in the check of 2026-11-22. The new Codex design (the
+  meeting text on standard input) is not tested yet; it needs the re-check in "Open".
 - **Date:** 2026-11-22
 - **Related:** the decision about external agent CLIs in the Ensemble
   ([`0018-conductor-external-agent-orchestration.md`](0018-conductor-external-agent-orchestration.md)), the decision
@@ -30,8 +34,8 @@ Meetings scope, 0047).
 
 1. **One narrow exception.** For a question about one meeting, or for speaker-name suggestions, Rafu may start the
    user's Claude Code or Codex with no visible terminal.
-2. **Limit.** The run is read-only and sees only the files of that one meeting. It has no write access, no shell
-   command, no web tools and no MCP tools.
+2. **Limit, for Claude Code.** The run is read-only and sees only the files of that one meeting. It has no write
+   access, no shell command, no web tools and no MCP tools. Codex has a different limit (decision 11).
 3. **Each run starts from one explicit user action.** Rafu starts no run at Stop, at launch or on a timer.
 4. **No questions during a live meeting in version 1.** A question can be asked only after the meeting has stopped
    and its transcript exists.
@@ -46,6 +50,27 @@ Meetings scope, 0047).
 9. **Name suggestions are suggestions.** The user confirms each speaker name. Rafu never applies a name by itself.
 10. **This record permits this one use only.** Each other hidden process needs its own decision record.
 
+Amendment of 2026-11-23. The user decided that Codex is offered in version 1. The design below is decided by the
+advisor for the user on 2026-11-23, to be confirmed. The user can change it.
+
+11. **A different limit for Codex.** For Codex, Rafu sends the text of one meeting on standard input. Codex runs in an
+    empty private folder, with its shell tool off, a strict permission profile, no user configuration and no
+    network. Codex gets no file of the user. The built-in tools that stay are listed in the limits note. The Codex
+    choice is active only for a Codex version that passed the re-check. Until a version passes, the ask box shows
+    Codex as "not available yet" with the reason. If the re-check fails, the ask box shows "Not available with this
+    Codex version", and Claude Code works. Rafu never puts a file named `AGENTS.md` in the Codex folder, because
+    Codex applies it without being asked. Decision 2 (read-only access to the files of one meeting) applies to
+    Claude Code. Decision 11 replaces it for Codex.
+12. **No summary is made at Stop.** The first item in the conversation column is a local overview made with no AI
+    (date, length, speakers, talk time). A "Summarize" chip is a normal question: one user action, the hidden agent,
+    and the answer is kept in the meeting. The line on the approved artboard becomes "Rafu writes the transcript on
+    this Mac". This follows decision 3 (no run at Stop) and "keep AI explicit". (Decided by the advisor for the user
+    on 2026-11-23, to be confirmed.)
+13. **The question text is never a process argument.** For Claude Code, the question is in a file in a frozen copy of
+    the meeting, and the prompt argument is a fixed text with no private words. For Codex, the question is on
+    standard input with the meeting text. Each run has a time limit of 120 s and a limit on the size of the reply.
+    "Not signed in" is read from the Claude Code `is_error` field and from the Codex 401 events.
+
 ## Alternatives considered
 
 - **A visible terminal in a workspace window.** Rejected. It ties the meeting to a folder and a window, which the
@@ -55,6 +80,8 @@ Meetings scope, 0047).
 - **An embedded agent.** Rejected. It breaks the non-goal "embedded coding agent".
 - **No questions.** Rejected. It removes a core use of Meetings.
 - **A hidden agent with write access to a hand-off folder.** Rejected. It gives more access than the use needs.
+- **Codex with a sandboxed shell in an empty folder**, if the standard-input re-check fails. Not chosen. The safe
+  default is no: Codex then shows "not available". The user can decide this later.
 
 ## Consequences
 
@@ -79,12 +106,11 @@ A CLI release that changes its permission flags. The start of the API-key stage.
 
 ## Open
 
-Nothing here is decided.
+- The result of the Codex standard-input re-check. It must show that the Codex design of decision 11 holds each
+  escape attempt, and it gives the exact Codex argument array. Until it passes, Codex is "not available yet".
 
-- Who writes the summary, and when. An automatic send at Stop is against "keep AI explicit". The approved artboard
-  says "Rafu writes the transcript and the summary on this Mac". These two do not agree yet.
-- The exact argument arrays for each CLI. They come from the hidden agent limits check.
-- Whether a stricter run is the default: no tools at all, with the meeting text on standard input.
+The summary question is answered (decision 12). The Claude Code array is in the limits note. The stricter run
+(the meeting text on standard input) is the Codex design; Claude Code keeps the file-reading design.
 
 ## Related paths
 

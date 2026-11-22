@@ -1,6 +1,9 @@
 # ADR 0047: Meetings: scope, app-data storage and agent access
 
-- **Status:** Proposed (2026-11-22). The user decisions are recorded. Open items are listed in "Open".
+- **Status:** Accepted (2026-11-23). The user said on 2026-11-23: build the rest of the meeting note-taker. The six
+  items that were open on 2026-11-22 are now answered. The advisor answered all six for the user (decisions 10 to
+  15). The user decided the diagnostics log (decision 16). Each advisor answer says "decided by the advisor for the
+  user on 2026-11-23, to be confirmed". The user can change it.
 - **Date:** 2026-11-22
 - **Related:** the decision about a meeting agent with no visible terminal
   ([`0046-meeting-agent-without-visible-terminal.md`](0046-meeting-agent-without-visible-terminal.md)), the decision
@@ -37,11 +40,50 @@ control for agent access, and the agent needs a way to know that it has no acces
 9. **The HUD shows only during a recording.** An idle start comes from the menu bar item, the island or notch card,
    the Welcome view and Command-Shift-M.
 
+Answers of 2026-11-23 to the six items that were open. Each answer was decided by the advisor for the user on
+2026-11-23, to be confirmed.
+
+10. **Which terminals get the Rafu tools for meetings.** Ensemble terminals only, as today. "Any agent" means each
+    agent that has the Rafu tools. The bridge does not change. Only the Ensemble terminal bootstrap sets the
+    `RAFU_CANVAS_*` variables, and the terminal child environment removes inherited ones. A wider bridge is a
+    separate security change.
+11. **No switch for each meeting in Share.** The Settings switch only. The Share sidebar shows one status line
+    ("Agents can read your meetings" or "Agents cannot read your meetings") with a button that opens Settings ▸
+    Meetings. A grant for each agent was already rejected.
+12. **"Open Folder..." in the Meetings window opens a workspace window** beside the Meetings window. The Meetings
+    window does not change. A meeting belongs to the app, each workspace window owns one `WorkspaceSession`, and
+    Meetings is a scene of its own.
+13. **Retention.** Transcripts stay until the user deletes the meeting. Audio: Settings ▸ Meetings ▸ "Keep audio" has
+    three values: "Until I delete" (the default), 30 days and 7 days. The meeting list shows the size of each
+    meeting. Rafu never deletes audio that the user did not ask it to delete, because a deletion cannot be undone and
+    the audio is needed to make the text again with the second engine.
+14. **Command-Shift-M is a menu command.** It is active only when Rafu is in front. It is not system-wide. A start
+    from another app comes from the menu bar item and the island or notch card. Reason: Microsoft Teams uses
+    Command-Shift-M for mute, and a system-wide key would take it during a call. No other Rafu command uses
+    Command-Shift-M.
+15. **Meetings on macOS 15.** The entry points show. They are not active and say "Meetings needs macOS 26". There is
+    no capture, no helper and no permission prompt.
+
+Decided by the user on 2026-11-23:
+
+16. **Meeting diagnostics, built in from the start.** The user tests on another Mac and sends the logs back. Each
+    meeting has one diagnostics file in the app data (JSON lines, bounded in size, rotated, and kept for the newest 20
+    meetings), and `Logger` with the subsystem `dev.vatsalsaglani.rafu` and the category `meetings`. A user action,
+    "Export Meeting Diagnostics...", writes one bundle through a save panel. Nothing is written or sent without the
+    save panel. The log has no transcript text, title, speaker name, question, answer or audio path. Its events are
+    typed: numbers, enums, ids, error codes, device facts and model ids. A device name can hold a person's name, so
+    the export sheet says what the bundle holds: "Device names, app identifiers, error codes and timings. No
+    transcript, no audio." Deleting a meeting deletes its diagnostics file.
+
 ## Alternatives considered
 
 - **Store meetings in the workspace `.rafu/` folder.** Rejected. It shows in Git and search, and it needs a
   workspace, which a meeting does not have.
 - **One grant for each agent.** Rejected. The user chose one switch.
+- **A switch for each meeting in Share.** Rejected on 2026-11-23 (decision 11).
+- **A system-wide Command-Shift-M.** Rejected on 2026-11-23 (decision 14).
+- **A bridge that gives the Rafu tools to every terminal.** Rejected on 2026-11-23 (decision 10).
+- **Hide Meetings on macOS 15.** Rejected on 2026-11-23 (decision 15).
 - **More export formats.** Rejected. The user chose Markdown.
 - **A database as the source of truth.** Rejected. Plain files with a rebuildable index are simpler to recover after
   a crash or a corrupt index.
@@ -58,23 +100,17 @@ control for agent access, and the agent needs a way to know that it has no acces
 
 - Workspace identity rules.
 - Secrets stay in Keychain.
-- No transcript text goes into logs.
+- No transcript text goes into logs or into the diagnostics export.
 
 ## Revisit trigger
 
 A request for a second export format. A wish to link a meeting to a workspace. A change of the access model, for
-example a grant for each meeting.
+example a grant for each meeting. A wish to give the Rafu tools to terminals outside the Ensemble. A wish for a
+shorter default audio retention.
 
 ## Open
 
-Nothing here is decided.
-
-- A per-meeting switch "Let agents read this meeting" in Share, or the Settings switch only.
-- "Open Folder..." in the Meetings window: does it open a new window, or change the same one?
-- How long to keep audio and transcripts.
-- Whether Command-Shift-M works only from the menu, or system-wide.
-- How Meetings looks on macOS 15: a "Needs macOS 26" message, or hidden.
-- Which Rafu terminals get the Rafu tools for meetings.
+Nothing is open. The six items of 2026-11-22 are answered in the Decision list (decisions 10 to 15).
 
 ## Related paths
 
