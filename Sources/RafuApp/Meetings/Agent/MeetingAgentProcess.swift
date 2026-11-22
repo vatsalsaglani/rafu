@@ -37,6 +37,13 @@ nonisolated protocol MeetingAgentProcessHandle: AnyObject, Sendable {
     func terminate()
     /// Waits until the process has ended.
     func termination() async -> MeetingAgentTermination
+    /// SIGKILL now when the process still runs (the quit path).
+    func forceKill()
+}
+
+nonisolated extension MeetingAgentProcessHandle {
+    /// A handle with no process of its own (a test fake) ends as on terminate.
+    func forceKill() { terminate() }
 }
 
 /// The seam that starts processes. Tests inject a fake and never start a CLI.
@@ -67,6 +74,39 @@ nonisolated final class MeetingAgentProcessRegistry: Sendable {
         for handle in all { handle.terminate() }
     }
 
+    /// The quit path, all in this one call: SIGTERM each process, wait at
+    /// most `grace` for them to end, SIGKILL each one that still runs, then
+    /// run the folder clean-ups. The app exits right after, so a delayed
+    /// SIGKILL would never run. Returns true when each process ended before
+    /// the grace time.
+    @discardableResult
+    func terminateAllForQuit(grace: DispatchTimeInterval = .seconds(2)) -> Bool {
+        let all = handles.withLock { Array($0.values) }
+        var ended = true
+        if !all.isEmpty {
+            for handle in all { handle.terminate() }
+            let done = DispatchSemaphore(value: 0)
+            Task.detached(priority: .userInitiated) {
+                for handle in all { _ = await handle.termination() }
+                done.signal()
+            }
+            if done.wait(timeout: .now() + grace) == .timedOut {
+                ended = false
+                for handle in all { handle.forceKill() }
+            }
+        }
+        for cleanup in quitCleanups.withLock({ $0 }) { cleanup() }
+        return ended
+    }
+
+    private let quitCleanups = Mutex<[@Sendable () -> Void]>([])
+
+    /// Work that runs at quit after the processes ended (for example,
+    /// removing the run and snapshot folders of this app variant).
+    func addQuitCleanup(_ work: @escaping @Sendable () -> Void) {
+        quitCleanups.withLock { $0.append(work) }
+    }
+
     /// Ends each process at quit. Installed one time.
     func observeQuit() {
         let first = observing.withLock { observing -> Bool in
@@ -77,7 +117,7 @@ nonisolated final class MeetingAgentProcessRegistry: Sendable {
         _ = NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification, object: nil, queue: nil
         ) { [self] _ in
-            terminateAll()
+            terminateAllForQuit()
         }
     }
 }
@@ -242,6 +282,10 @@ nonisolated final class MeetingAgentSystemProcess: MeetingAgentProcessHandle {
         DispatchQueue.global().asyncAfter(deadline: .now() + Self.killDelay) {
             if exitBox.isRunning { kill(pid, SIGKILL) }
         }
+    }
+
+    func forceKill() {
+        if exitBox.isRunning { kill(pid, SIGKILL) }
     }
 
     func termination() async -> MeetingAgentTermination {

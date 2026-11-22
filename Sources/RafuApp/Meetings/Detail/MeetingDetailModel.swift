@@ -294,6 +294,15 @@ final class MeetingDetailModel {
         suggestState = .idle
     }
 
+    /// Ends each agent run of this view when the view goes away (another
+    /// meeting is selected, the tab or the window closes): a hidden run
+    /// never goes on with no visible sign. The consent that waits is dropped.
+    func cancelRunsOnDisappear() {
+        pendingConsent = nil
+        if runTask != nil || askState.isRunning { cancelAsk() }
+        if suggestTask != nil || suggestState.isRunning { cancelSuggestions() }
+    }
+
     private nonisolated static func state(after error: any Error) -> MeetingAskState {
         if error is CancellationError { return .idle }
         if let agentError = error as? MeetingAgentError {

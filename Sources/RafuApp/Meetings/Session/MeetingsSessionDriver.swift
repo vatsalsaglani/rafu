@@ -25,6 +25,9 @@ final class MeetingsSessionDriver {
     private var live: MeetingsLiveText?
     /// The meeting of the running recording, from `.started` until `.stopped`.
     private var activeMeeting: MeetingID?
+    /// Meetings whose `.stopped` event was handled. A start result that
+    /// comes later (a busy main actor) must not make one live again.
+    private var stoppedMeetings: Set<MeetingID> = []
     private var isStarting = false
     private var controlChain: Task<Void, Never>?
     private var timerTask: Task<Void, Never>?
@@ -49,6 +52,7 @@ final class MeetingsSessionDriver {
         self.preferences = preferences
         self.runner = MeetingProcessingRunner(
             feature: feature, session: feature.session, preferences: preferences)
+        runner.isLiveMeeting = { [weak self] meeting in self?.activeMeeting == meeting }
     }
 
     /// Installs the handlers and starts reading the recorder. Opens no
@@ -200,7 +204,7 @@ final class MeetingsSessionDriver {
     }
 
     private func recordingStarted(_ meeting: MeetingID) {
-        guard activeMeeting != meeting else { return }
+        guard activeMeeting != meeting, !stoppedMeetings.contains(meeting) else { return }
         activeMeeting = meeting
         rules = MeetingLiveWarningRules()
         recordedBefore = .zero
@@ -227,6 +231,7 @@ final class MeetingsSessionDriver {
     private func recordingStopped(_ meeting: MeetingID) {
         guard activeMeeting == meeting else { return }
         activeMeeting = nil
+        stoppedMeetings.insert(meeting)
         stopLive()
         session.noteLibraryChanged()
         runner.enqueue(meeting)

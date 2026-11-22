@@ -11,9 +11,12 @@ struct MeetingAgentRegistrationAndPolicyTests {
     func registration() throws {
         let runsRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("rafu-agent-reg-\(UUID().uuidString)", isDirectory: true)
+        // A temporary snapshot root too: registration removes each folder
+        // in both roots, and the real roots belong to a running app.
+        let snapshotRoot = runsRoot.appendingPathComponent("Snapshots", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: runsRoot) }
         let feature = MeetingsFeature(availability: .available)
-        feature.registerAgentParts(runsRoot: runsRoot)
+        feature.registerAgentParts(runsRoot: runsRoot, snapshotRoot: snapshotRoot)
         #expect(feature.registeredKinds == [.agentRunner])
         let runner = try #require(feature.agentRunner)
         #expect(runner is MeetingAgentRunner)
@@ -21,7 +24,7 @@ struct MeetingAgentRegistrationAndPolicyTests {
         #expect(MeetingAgentProcessRegistry.shared.count == 0)
 
         let unavailable = MeetingsFeature(availability: .needsMacOS26)
-        unavailable.registerAgentParts(runsRoot: runsRoot)
+        unavailable.registerAgentParts(runsRoot: runsRoot, snapshotRoot: snapshotRoot)
         #expect(unavailable.agentRunner == nil)
     }
 
