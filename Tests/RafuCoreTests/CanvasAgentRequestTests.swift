@@ -10,8 +10,9 @@ private let userInputMethod = "item/tool/requestUserInput"
 private let elicitationMethod = "mcpServer/elicitation/request"
 
 /// A Codex tool approval elicitation. The schema fields (mode, requestedSchema,
-/// serverName) follow the Codex 0.171.0 generated schema. The `_meta` keys are
-/// INFERRED from the Codex binary, not captured from a live request.
+/// serverName) follow the Codex 0.171.0 generated schema. The `_meta` keys
+/// follow `build_mcp_tool_approval_elicitation_meta` in the Codex 0.171.0
+/// source (tag `rust-v0.171.0`); none was captured from a live request.
 private func elicitationParams(
     server: Any = "atlassian", mode: Any = "form",
     schema: Any? = ["type": "object", "properties": [String: Any]()] as [String: Any],
@@ -374,7 +375,7 @@ struct CanvasAgentRequestTests {
         #expect(CanvasAgentRequest.fileChanges(fromPatchUpdated: [:]) == nil)
     }
 
-    @Test("A command approval with a network context needs the terminal")
+    @Test("A command approval with a network context shows the target and has no session allow")
     func networkApproval() throws {
         let network = try #require(
             CanvasAgentRequest.parse(
@@ -383,13 +384,127 @@ struct CanvasAgentRequestTests {
                     "command": "curl example.com", "kind": "command",
                     "networkApprovalContext": ["host": "example.com", "protocol": "https"],
                 ]))
-        #expect(network.terminalOnly)
-        #expect(network.options.isEmpty)
+        #expect(!network.terminalOnly)
+        #expect(network.permissions == ["Network: https example.com"])
+        #expect(!network.offersSessionAllow)
+        #expect(network.options.map(\.id) == ["accept", "decline", "cancel"])
+        #expect(network.result(for: .accept) as? [String: String] == ["decision": "accept"])
+        #expect(network.result(for: .decline) as? [String: String] == ["decision": "decline"])
+        #expect(network.result(for: .cancel) as? [String: String] == ["decision": "cancel"])
+        #expect(network.result(for: .acceptForSession) == nil)
+        #expect(try roundTrip(network) == network)
         let none = try #require(
             CanvasAgentRequest.parse(
                 method: commandMethod,
                 params: ["command": "ls", "kind": "command", "networkApprovalContext": NSNull()]))
         #expect(!none.terminalOnly)
+        #expect(none.permissions.isEmpty)
+        #expect(none.offersSessionAllow)
+    }
+
+    @Test("A network context Rafu cannot show whole needs the terminal")
+    func networkApprovalNeedsWholeContext() throws {
+        let contexts: [(String, Any)] = [
+            ("unknown protocol", ["host": "example.com", "protocol": "ftp"]),
+            ("no protocol", ["host": "example.com"]),
+            ("empty host", ["host": "", "protocol": "https"]),
+            ("host number", ["host": 1, "protocol": "https"]),
+            ("host with bidi", ["host": "a\u{202E}b", "protocol": "https"]),
+            ("a string", "example.com"),
+        ]
+        for (name, context) in contexts {
+            let request = try #require(
+                CanvasAgentRequest.parse(
+                    method: commandMethod,
+                    params: ["command": "curl x", "networkApprovalContext": context]),
+                "\(name)")
+            #expect(request.terminalOnly, "\(name)")
+            #expect(request.options.isEmpty, "\(name)")
+        }
+        for networkProtocol in ["http", "https", "socks5Tcp", "socks5Udp"] {
+            let request = try #require(
+                CanvasAgentRequest.parse(
+                    method: commandMethod,
+                    params: [
+                        "command": "curl x",
+                        "networkApprovalContext": ["host": "h.test", "protocol": networkProtocol],
+                    ]))
+            #expect(!request.terminalOnly, "\(networkProtocol)")
+        }
+    }
+
+    // MARK: Command prefix rule
+
+    private static func prefixRequest(_ amendment: Any?, kind: String = "command") throws
+        -> CanvasAgentRequest
+    {
+        var params: [String: Any] = ["command": "touch y.txt", "kind": kind]
+        if let amendment { params["proposedExecpolicyAmendment"] = amendment }
+        return try #require(CanvasAgentRequest.parse(method: commandMethod, params: params))
+    }
+
+    @Test("A command prefix is offered only through the policy, and sends the exact amendment")
+    func commandPrefixRule() throws {
+        let request = try Self.prefixRequest(["touch", "y.txt"])
+        #expect(request.persistChoices.map(\.kind) == [.rule])
+        #expect(
+            request.persistChoices.first?.line
+                == "Always allow commands that start with touch y.txt")
+        // Off today: not offered, not permitted, no result.
+        #expect(request.options.map(\.id) == ["accept", "acceptForSession", "decline", "cancel"])
+        #expect(!request.permits(.acceptAndRemember(.rule)))
+        let words = ["touch", "y.txt"]
+        #expect(request.result(for: .acceptAndRemember(.rule), execpolicyAmendment: words) == nil)
+        // On for a test: the option sits after the two accepts, before Deny.
+        #expect(
+            request.options(policy: .all).map(\.id) == [
+                "accept", "acceptForSession", "acceptAndRemember.rule", "decline", "cancel",
+            ])
+        let result = try #require(
+            request.result(
+                for: .acceptAndRemember(.rule), execpolicyAmendment: words, policy: .all))
+        #expect(
+            jsonText(result)
+                == #"{"decision":{"acceptWithExecpolicyAmendment":{"execpolicy_amendment":["touch","y.txt"]}}}"#
+        )
+        // Words other than the ones shown are refused.
+        #expect(
+            request.result(
+                for: .acceptAndRemember(.rule), execpolicyAmendment: ["rm", "-rf"], policy: .all)
+                == nil)
+        #expect(request.result(for: .acceptAndRemember(.rule), policy: .all) == nil)
+        // The session and always kinds never apply to a command.
+        #expect(request.result(for: .acceptAndRemember(.session), policy: .all) == nil)
+    }
+
+    @Test("A command prefix Rafu cannot show whole is not offered")
+    func commandPrefixNeedsWholeWords() throws {
+        let long = String(repeating: "a", count: 257)
+        let many = (0..<17).map { "w\($0)" }
+        let cases: [(String, Any?)] = [
+            ("missing", nil), ("null", NSNull()), ("empty list", [String]()),
+            ("not strings", [1, 2]), ("empty word", ["a", ""]), ("space in a word", ["a b"]),
+            ("tab in a word", ["a\tb"]), ("bidi", ["a\u{202E}b"]), ("too long", [long]),
+            ("too many words", many),
+        ]
+        for (name, amendment) in cases {
+            let request = try Self.prefixRequest(amendment)
+            #expect(request.persistChoices.isEmpty, "\(name)")
+            #expect(!request.terminalOnly, "\(name)")
+        }
+        // 256 bytes exactly fits.
+        let fits = try Self.prefixRequest([String(repeating: "a", count: 256)])
+        #expect(fits.persistChoices.count == 1)
+        // A network approval, a stdin approval and a checkpoint never offer it.
+        let network: [String: Any] = [
+            "command": "curl x", "proposedExecpolicyAmendment": ["curl"],
+            "networkApprovalContext": ["host": "h.test", "protocol": "https"],
+        ]
+        let withNetwork = try #require(
+            CanvasAgentRequest.parse(method: commandMethod, params: network))
+        #expect(withNetwork.persistChoices.isEmpty)
+        #expect(try Self.prefixRequest(["curl"], kind: "writeStdin").persistChoices.isEmpty)
+        #expect(try Self.prefixRequest(["curl"], kind: "humanCommand").persistChoices.isEmpty)
     }
 
     @Test("A permissions request lists its grants and echoes the asked profile")
@@ -435,11 +550,149 @@ struct CanvasAgentRequestTests {
         #expect(empty.terminalOnly)
     }
 
-    @Test("Unknown methods are not requests")
-    func unknownMethod() {
-        // An elicitation with no params is not a tool approval: the rule gives nil.
-        #expect(CanvasAgentRequest.parse(method: elicitationMethod, params: [:]) == nil)
-        #expect(CanvasAgentRequest.parse(method: "execCommandApproval", params: [:]) == nil)
+    @Test("A Codex request that is not a prompt for the user gives no row")
+    func notUserPrompt() {
+        for method in [
+            "item/tool/call", "account/chatgptAuthTokens/refresh", "attestation/generate",
+        ] {
+            let parsed = CanvasAgentRequest.parseCodex(method: method, params: ["threadId": "t"])
+            #expect(parsed.request == nil, "\(method)")
+            #expect(parsed.shape == nil, "\(method)")
+        }
+    }
+
+    @Test("Every other Codex method gives a row, never nil")
+    func everyPromptGivesARow() throws {
+        let methods = [
+            commandMethod, fileChangeMethod, permissionsMethod, userInputMethod,
+            elicitationMethod, "applyPatchApproval", "execCommandApproval",
+            "item/invented/requestSomething",
+        ]
+        for method in methods {
+            #expect(CanvasAgentRequest.parse(method: method, params: [:]) != nil, "\(method)")
+        }
+    }
+
+    // MARK: Notices and the shape record
+
+    @Test("An unknown method is a notice that names the method's last word and records its shape")
+    func unknownMethodNotice() throws {
+        let parsed = CanvasAgentRequest.parseCodex(
+            method: "item/invented/requestSomething",
+            params: ["threadId": "t", "secret": "SECRET-VALUE", "count": 3])
+        let request = try #require(parsed.request)
+        #expect(request.kind == .notice)
+        #expect(request.terminalOnly && request.options.isEmpty)
+        #expect(
+            request.reason
+                == "Codex sent a request named requestSomething. Open the terminal to answer.")
+        #expect(request.text == nil)
+        let shape = try #require(parsed.shape)
+        #expect(shape.hasPrefix("item/invented/requestSomething "))
+        #expect(shape.contains("secret:string") && shape.contains("count:number"))
+        #expect(!shape.contains("SECRET-VALUE"))
+        // A last word with other characters gives the plain line.
+        let odd = try #require(
+            CanvasAgentRequest.parse(method: "item/a b/request me!", params: [:]))
+        #expect(
+            odd.reason
+                == "Codex sent a request that Rafu does not know. Open the terminal to answer.")
+    }
+
+    @Test("An older approval is a notice with the agent's reason and a recorded shape")
+    func legacyApprovalNotice() throws {
+        let command = CanvasAgentRequest.parseCodex(
+            method: "execCommandApproval",
+            params: [
+                "conversationId": "t", "callId": "c", "command": ["rm", "-rf", "x"],
+                "cwd": "/work", "reason": "Needs write access", "parsedCmd": [Any](),
+            ])
+        let request = try #require(command.request)
+        #expect(request.kind == .notice && request.terminalOnly)
+        #expect(request.reason == "Codex asks to run a command. Open the terminal to answer.")
+        #expect(request.text == "Needs write access")
+        let shape = try #require(command.shape)
+        #expect(shape.hasPrefix("execCommandApproval "))
+        #expect(shape.contains("command:array[3]"))
+        #expect(!shape.contains("rm") && !shape.contains("Needs write access"))
+        let patch = try #require(
+            CanvasAgentRequest.parse(method: "applyPatchApproval", params: ["conversationId": "t"]))
+        #expect(patch.reason == "Codex asks to change files. Open the terminal to answer.")
+        #expect(patch.text == nil)
+    }
+
+    private static let secret = "SECRET-TOKEN-123"
+
+    @Test("An elicitation that is not a tool approval is a notice with the server's message")
+    func elicitationNotices() throws {
+        let form: [String: Any] = [
+            "serverName": "files", "mode": "form", "message": "Enter your email \(Self.secret)",
+            "requestedSchema": [
+                "type": "object", "properties": ["email": ["type": "string"]],
+                "required": ["email"],
+            ] as [String: Any], "_meta": NSNull(),
+        ]
+        let messageOnly = elicitationParams(
+            meta: ["foo": Self.secret] as [String: Any])
+        var link = elicitationParams(mode: "url", meta: NSNull())
+        link["url"] = "https://example.com/\(Self.secret)"
+        link["elicitationId"] = "e1"
+        let auth = elicitationParams(
+            mode: "url", meta: ["codex_approval_kind": "browser_auth"] as [String: Any])
+        let suggestion = elicitationParams(
+            mode: "url", meta: ["codex_approval_kind": "tool_suggestion"] as [String: Any])
+        let cases: [(String, [String: Any], String)] = [
+            ("form", form, "An MCP server asks for information."),
+            ("message only", messageOnly, "An MCP server asks for approval."),
+            ("link", link, "An MCP server asks you to open a link."),
+            ("browser auth", auth, "Codex asks you to sign in with a browser."),
+            ("tool suggestion", suggestion, "Codex suggests an app or tool."),
+        ]
+        for (name, params, reason) in cases {
+            let parsed = CanvasAgentRequest.parseCodex(method: elicitationMethod, params: params)
+            let request = try #require(parsed.request, "\(name)")
+            #expect(request.kind == .notice, "\(name)")
+            #expect(request.terminalOnly && request.options.isEmpty, "\(name)")
+            #expect(request.reason == reason + " Open the terminal to answer.", "\(name)")
+            #expect(request.text == params["message"] as? String, "\(name)")
+            let shape = try #require(parsed.shape, "\(name)")
+            #expect(shape.hasPrefix(elicitationMethod + " "), "\(name)")
+            #expect(!shape.contains(Self.secret), "\(name)")
+            #expect(try roundTrip(request) == request, "\(name)")
+        }
+        // The server's message is bounded and marked when cut.
+        var long = form
+        long["message"] = String(repeating: "m", count: 600)
+        let cut = try #require(CanvasAgentRequest.parse(method: elicitationMethod, params: long))
+        #expect(cut.text?.utf8.count == CanvasAgentRequest.Limits.noticeBytes)
+        #expect(cut.textIsCut)
+    }
+
+    @Test("A tool approval question has no arguments, so it is a terminal-only notice")
+    func toolApprovalQuestionIsANotice() throws {
+        let approval: [String: Any] = [
+            "id": "mcp_tool_call_approval_call-1", "header": "Approve app tool call?",
+            "question": "Allow the Google Calendar app to run \"create_event\"?",
+            "isOther": false, "isSecret": false,
+            "options": [
+                ["label": "Allow", "description": "Run the tool and continue."],
+                ["label": "Allow for this session", "description": "Remember."],
+                ["label": "Cancel", "description": "Cancel this tool call."],
+            ],
+        ]
+        let parsed = CanvasAgentRequest.parseCodex(
+            method: userInputMethod,
+            params: ["threadId": "t", "questions": [approval, question("other")]])
+        let request = try #require(parsed.request)
+        #expect(request.kind == .notice)
+        #expect(request.terminalOnly && request.options.isEmpty && request.questions.isEmpty)
+        #expect(request.reason == "Tool approval: open the terminal to see the arguments.")
+        #expect(request.text == "Allow the Google Calendar app to run \"create_event\"?")
+        #expect(!request.permits(.answers(["mcp_tool_call_approval_call-1": "Allow"])))
+        #expect(parsed.shape?.hasPrefix(userInputMethod) == true)
+        // Any other id is an ordinary question.
+        let ordinary = try userInput([question("approval_1"), question("mcp_tool_call")])
+        #expect(ordinary.kind == .userInput && !ordinary.terminalOnly)
     }
 
     // MARK: Codex MCP tool approval
@@ -453,7 +706,51 @@ struct CanvasAgentRequestTests {
         }
         """
 
-    @Test("A Codex tool approval becomes a tool call card")
+    /// The `_meta` that `build_mcp_tool_approval_elicitation_meta` writes for
+    /// a tool of the `codex_apps` server (Codex 0.171.0 source, tag
+    /// `rust-v0.171.0`): every key it can write, including the three that an
+    /// earlier build did not know (`tool_annotations`, `link_id`,
+    /// `link_is_implicit`).
+    private static var codexAppsMeta: [String: Any] {
+        [
+            "codex_approval_kind": "mcp_tool_call", "persist": ["session", "always"],
+            "tool_name": "google_calendar_create_event",
+            "tool_annotations": [
+                "readOnlyHint": false, "destructiveHint": false, "idempotentHint": false,
+                "openWorldHint": true,
+            ] as [String: Any],
+            "tool_title": "Create event", "tool_description": "Creates a calendar event.",
+            "source": "connector", "connector_id": "connector_google_calendar",
+            "link_id": "link_123", "link_is_implicit": false,
+            "connector_name": "Google Calendar", "connector_description": "Plan your day",
+            "tool_params": ["summary": "test", "start": "2026-11-23T10:00:00"] as [String: Any],
+            "tool_params_display": [
+                ["name": "summary", "value": "test", "display_name": "summary"]
+            ],
+        ]
+    }
+
+    @Test("A connector tool approval with every Codex 0.171.0 key becomes an answerable card")
+    func connectorToolApproval() throws {
+        let params = elicitationParams(server: "codex_apps", meta: Self.codexAppsMeta)
+        let parsed = CanvasAgentRequest.parseCodex(method: elicitationMethod, params: params)
+        let request = try #require(parsed.request)
+        #expect(request.kind == .toolCall)
+        #expect(!request.terminalOnly)
+        #expect(parsed.shape == nil)
+        #expect(request.options.map(\.id) == ["accept", "decline", "cancel"])
+        // The implicit link flag does not matter.
+        var implicit = Self.codexAppsMeta
+        implicit["link_id"] = "implicit_link::abc"
+        implicit["link_is_implicit"] = true
+        let other = try #require(
+            CanvasAgentRequest.parse(
+                method: elicitationMethod,
+                params: elicitationParams(server: "codex_apps", meta: implicit)))
+        #expect(!other.terminalOnly)
+    }
+
+    @Test("A Codex tool approval becomes a tool call card with no Deny and stop")
     func elicitationToolApproval() throws {
         let request = try #require(
             CanvasAgentRequest.parse(method: elicitationMethod, params: elicitationParams()))
@@ -463,7 +760,10 @@ struct CanvasAgentRequestTests {
         #expect(request.command == Self.sortedArguments)
         #expect(request.cwd == nil)
         #expect(!request.offersSessionAllow)
+        // Cancel skips the tool call; it does not stop the turn.
+        #expect(!request.stopsTurnOnCancel)
         #expect(request.options.map(\.id) == ["accept", "decline", "cancel"])
+        #expect(request.options.map(\.label) == ["Allow", "Deny", "Cancel tool call"])
         let identity = try #require(
             AgentPermissionRequestSummary.toolIdentity(fromReason: request.reason ?? ""))
         #expect(identity.server == "atlassian")
@@ -491,8 +791,8 @@ struct CanvasAgentRequestTests {
         #expect(!request.terminalOnly)
     }
 
-    @Test("A request that is not a tool approval gives no row")
-    func elicitationRecognitionRule() {
+    @Test("A request that is not a tool approval becomes a notice, never a tool call")
+    func elicitationRecognitionRule() throws {
         let longTool = String(repeating: "a", count: 200)
         let oneProperty: [String: Any] = [
             "type": "object", "properties": ["email": ["type": "string"]],
@@ -525,26 +825,38 @@ struct CanvasAgentRequestTests {
             ("params array", elicitationParams(metaOverrides: ["tool_params": [1]])),
         ]
         for (name, params) in cases {
-            #expect(
-                CanvasAgentRequest.parse(method: elicitationMethod, params: params) == nil,
-                "\(name)")
+            let parsed = CanvasAgentRequest.parseCodex(method: elicitationMethod, params: params)
+            let request = try #require(parsed.request, "\(name)")
+            #expect(request.kind == .notice, "\(name)")
+            #expect(request.terminalOnly && request.options.isEmpty, "\(name)")
+            #expect(parsed.shape != nil, "\(name)")
         }
+        // The empty request is a notice too.
+        #expect(
+            CanvasAgentRequest.parse(method: elicitationMethod, params: [:])?.kind == .notice)
     }
 
     @Test("A tool approval Rafu cannot show whole needs the terminal")
     func elicitationTerminalOnly() throws {
         let long = String(repeating: "x", count: 3_000)
-        let cases: [(String, [String: Any])] = [
+        var cases: [(String, [String: Any])] = [
             ("over 2 KiB", elicitationParams(metaOverrides: ["tool_params": ["body": long]])),
-            (
-                "unknown meta key",
-                elicitationParams(metaOverrides: ["codex_sensitive_action": true])
-            ),
             (
                 "zero-width character",
                 elicitationParams(metaOverrides: ["tool_params": ["a": "b\u{200B}c"]])
             ),
+            ("unknown meta key", elicitationParams(metaOverrides: ["codex_new_key": true])),
         ]
+        // Each key that changes what an approval means, whatever its value.
+        for forcing in [
+            "codex_sensitive_action", "codex_requires_user_input", "codex_strict_auto_review",
+            "approvals_reviewer",
+        ] {
+            for value: Any in [true, false, "guardian"] {
+                cases.append(
+                    ("\(forcing)=\(value)", elicitationParams(metaOverrides: [forcing: value])))
+            }
+        }
         for (name, params) in cases {
             let request = try #require(
                 CanvasAgentRequest.parse(method: elicitationMethod, params: params), "\(name)")
@@ -553,35 +865,119 @@ struct CanvasAgentRequestTests {
             #expect(request.options.isEmpty, "\(name)")
             for decision in [
                 CanvasAgentRequestDecision.accept, .decline, .cancel, .acceptForSession,
+                .acceptAndRemember(.session), .acceptAndRemember(.always),
             ] {
-                #expect(request.result(for: decision) == nil, "\(name)")
+                #expect(request.result(for: decision, policy: .all) == nil, "\(name)")
             }
         }
     }
 
-    @Test("A persist value in the request changes nothing and is never sent back")
-    func elicitationPersistIsIgnored() throws {
-        for persist: Any in ["session", ["session", "always"], "always"] {
+    @Test("Only an unknown meta key is recorded as a shape, and the shape holds no value")
+    func elicitationShapeRecord() throws {
+        var meta = Self.codexAppsMeta
+        meta["codex_new_key"] = Self.secret
+        let parsed = CanvasAgentRequest.parseCodex(
+            method: elicitationMethod,
+            params: elicitationParams(server: "codex_apps", meta: meta))
+        let request = try #require(parsed.request)
+        #expect(request.kind == .toolCall && request.terminalOnly)
+        let shape = try #require(parsed.shape)
+        #expect(shape.contains("codex_new_key:string"))
+        #expect(shape.hasPrefix(elicitationMethod + " "))
+        for value in [Self.secret, "test", "Google Calendar", "connector_google_calendar"] {
+            #expect(!shape.contains(value), "\(value)")
+        }
+        // The argument keys are chosen by the tool, so they are not named.
+        #expect(!shape.contains("summary"))
+        // A key that forces the terminal is known, so it is not recorded.
+        let forced = CanvasAgentRequest.parseCodex(
+            method: elicitationMethod,
+            params: elicitationParams(metaOverrides: ["codex_sensitive_action": true]))
+        #expect(forced.request?.terminalOnly == true)
+        #expect(forced.shape == nil)
+        // A card Rafu can answer records nothing.
+        let plain = CanvasAgentRequest.parseCodex(
+            method: elicitationMethod, params: elicitationParams())
+        #expect(plain.shape == nil)
+    }
+
+    @Test("The remember choices of a tool approval follow `persist` and stay off by policy")
+    func elicitationPersistChoices() throws {
+        let cases: [(String, Any?, [CanvasAgentRequest.PersistChoice.Kind])] = [
+            ("absent", nil, []), ("session", "session", [.session]),
+            ("always", "always", [.always]), ("both", ["session", "always"], [.session, .always]),
+            ("reversed", ["always", "session"], [.session, .always]),
+            ("unknown word", "forever", []), ("unknown in list", ["session", "x"], [.session]),
+            ("number", 3, []), ("null", NSNull(), []),
+        ]
+        for (name, persist, kinds) in cases {
             let request = try #require(
                 CanvasAgentRequest.parse(
                     method: elicitationMethod,
-                    params: elicitationParams(metaOverrides: ["persist": persist])))
-            #expect(!request.terminalOnly)
-            #expect(request.options.map(\.id) == ["accept", "decline", "cancel"])
-            #expect(!request.permits(.acceptForSession))
+                    params: elicitationParams(metaOverrides: ["persist": persist])),
+                "\(name)")
+            #expect(!request.terminalOnly, "\(name)")
+            #expect(request.persistChoices.map(\.kind) == kinds, "\(name)")
+            // Off today: the same buttons as without `persist`.
+            #expect(request.options.map(\.id) == ["accept", "decline", "cancel"], "\(name)")
+            for kind in kinds {
+                #expect(!request.permits(.acceptAndRemember(kind)), "\(name)")
+                #expect(request.result(for: .acceptAndRemember(kind)) == nil, "\(name)")
+            }
+            #expect(!request.permits(.acceptForSession), "\(name)")
         }
+        let both = try #require(
+            CanvasAgentRequest.parse(method: elicitationMethod, params: elicitationParams()))
+        #expect(
+            both.persistChoices.map(\.line) == [
+                "Allow getJiraIssue of atlassian for this Codex session",
+                "Always allow getJiraIssue of atlassian in Codex",
+            ])
+        // A policy turns each kind on, and never as the first button.
+        #expect(
+            both.options(policy: .all).map(\.id) == [
+                "accept", "acceptAndRemember.session", "acceptAndRemember.always", "decline",
+                "cancel",
+            ])
+        let session = CanvasAgentRequest.PersistPolicy(allowsSession: true, allowsLasting: false)
+        #expect(
+            both.options(policy: session).map(\.id) == [
+                "accept", "acceptAndRemember.session", "decline", "cancel",
+            ])
+        #expect(try roundTrip(both) == both)
     }
 
     @Test("A Codex tool approval answers with the exact elicitation results")
     func elicitationResults() throws {
         let request = try #require(
             CanvasAgentRequest.parse(method: elicitationMethod, params: elicitationParams()))
-        #expect(jsonText(request.result(for: .accept)) == #"{"action":"accept","content":{}}"#)
+        #expect(
+            jsonText(request.result(for: .accept)) == #"{"action":"accept","content":null}"#)
         #expect(jsonText(request.result(for: .decline)) == #"{"action":"decline"}"#)
-        #expect(jsonText(request.result(for: .cancel)) == #"{"action":"cancel"}"#)
+        #expect(
+            jsonText(request.result(for: .cancel))
+                == #"{"_meta":{"codex_approval_cancellation_reason":"user"},"action":"cancel","content":null}"#
+        )
         #expect(request.result(for: .acceptForSession) == nil)
         #expect(request.result(for: .answers([:])) == nil)
-        for decision in [CanvasAgentRequestDecision.accept, .decline, .cancel] {
+        // `persist` goes out only when the policy allows it.
+        #expect(request.result(for: .acceptAndRemember(.session)) == nil)
+        #expect(
+            jsonText(request.result(for: .acceptAndRemember(.session), policy: .all))
+                == #"{"_meta":{"persist":"session"},"action":"accept","content":null}"#)
+        #expect(
+            jsonText(request.result(for: .acceptAndRemember(.always), policy: .all))
+                == #"{"_meta":{"persist":"always"},"action":"accept","content":null}"#)
+        let session = CanvasAgentRequest.PersistPolicy(allowsSession: true, allowsLasting: false)
+        #expect(request.result(for: .acceptAndRemember(.always), policy: session) == nil)
+        #expect(request.result(for: .acceptAndRemember(.rule), policy: .all) == nil)
+        // A kind the tool did not offer is refused.
+        let sessionOnly = try #require(
+            CanvasAgentRequest.parse(
+                method: elicitationMethod,
+                params: elicitationParams(metaOverrides: ["persist": "session"])))
+        #expect(sessionOnly.result(for: .acceptAndRemember(.always), policy: .all) == nil)
+        for decision in [CanvasAgentRequestDecision.accept, .decline] {
             #expect(request.result(for: decision)?["_meta"] == nil)
         }
     }
@@ -790,7 +1186,16 @@ struct CanvasAgentRequestTests {
                 $0["isHumanCheckpoint"] = true
                 $0["kind"] = "fileChange"
             })
-        #expect(try !decodes { $0["permissions"] = ["Network access"] })
+        // A command carries the facts the row shows beside it (a network
+        // target); no other kind than a permissions request carries them.
+        #expect(try decodes { $0["permissions"] = ["Network: https example.com"] })
+        #expect(try !decodes { $0["permissions"] = ["Network access\u{202E}"] })
+        #expect(
+            try !decodes {
+                $0["permissions"] = ["Network access"]
+                $0["kind"] = "toolCall"
+                $0["reason"] = "A: b\nmcp__a__b"
+            })
         // A file change cannot arrive marked answerable.
         #expect(
             try !decodes {
