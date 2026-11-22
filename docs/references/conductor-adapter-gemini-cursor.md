@@ -51,7 +51,7 @@ a shared-contract change; C4 does not read a value and put it into an
 
 `gemini` was not installed anywhere visible during C4 implementation. It is
 now discoverable at
-`/Users/vatsalsaglani/.nvm/versions/node/v22.0.0/bin/gemini`, and
+`~saglani/.nvm/versions/node/v22.0.0/bin/gemini`, and
 `--version` reports `0.52.0`. This Cursor-focused re-verification did not probe
 Gemini's help, authentication lookup, model availability, autonomy mappings,
 or an actual headless run, so all adapter-runtime claims below retain their
@@ -93,8 +93,8 @@ line is test data, not a claim about an installed or current release.
 ### Cursor Agent CLI: authenticated runtime verified; adapter has drifted
 
 The current installed executable is
-`/Users/vatsalsaglani/.local/bin/cursor-agent`, version
-`2026.07.23-e383d2b`. `/Users/vatsalsaglani/.local/bin/agent` resolves to the
+`~saglani/.local/bin/cursor-agent`, version
+`2026.07.23-e383d2b`. `~saglani/.local/bin/agent` resolves to the
 same versioned binary, but `cursor-agent` remains a backward-compatible alias
 and is still the name Rafu discovers. Local help exits zero and now advertises:
 
@@ -191,29 +191,29 @@ The local discovery and Cursor probes were:
 
 ```console
 $ command -v gemini
-/Users/vatsalsaglani/.nvm/versions/node/v22.0.0/bin/gemini
+~saglani/.nvm/versions/node/v22.0.0/bin/gemini
 
-$ /Users/vatsalsaglani/.nvm/versions/node/v22.0.0/bin/gemini --version </dev/null
+$ ~saglani/.nvm/versions/node/v22.0.0/bin/gemini --version </dev/null
 0.52.0
 # exit 0
 
 $ command -v cursor-agent
-/Users/vatsalsaglani/.local/bin/cursor-agent
+~saglani/.local/bin/cursor-agent
 
-$ /Users/vatsalsaglani/.local/bin/cursor-agent --version </dev/null
+$ ~saglani/.local/bin/cursor-agent --version </dev/null
 2026.07.23-e383d2b
 # exit 0
 
-$ /Users/vatsalsaglani/.local/bin/cursor-agent --help </dev/null
+$ ~saglani/.local/bin/cursor-agent --help </dev/null
 # included --print, --output-format, plan/ask modes, resume/continue, model
 # listing and parameters, force, trust, workspace, login/status, and sessions
 # exit 0
 
-$ /Users/vatsalsaglani/.local/bin/cursor-agent status </dev/null
+$ ~saglani/.local/bin/cursor-agent status </dev/null
 # reported a logged-in account; account identifier omitted here
 # exit 0
 
-$ /Users/vatsalsaglani/.local/bin/cursor-agent models </dev/null
+$ ~saglani/.local/bin/cursor-agent models </dev/null
 # 190 catalog rows; included auto, did not include exact gpt-5
 # exit 0
 ```
@@ -267,11 +267,11 @@ The local help/status/model evidence can be reproduced without exposing a
 token:
 
 ```bash
-/Users/vatsalsaglani/.local/bin/cursor-agent --version </dev/null
-/Users/vatsalsaglani/.local/bin/cursor-agent --help </dev/null
-/Users/vatsalsaglani/.local/bin/cursor-agent status </dev/null
+~saglani/.local/bin/cursor-agent --version </dev/null
+~saglani/.local/bin/cursor-agent --help </dev/null
+~saglani/.local/bin/cursor-agent status </dev/null
 printf 'status-exit=%s\n' "$?"
-/Users/vatsalsaglani/.local/bin/cursor-agent models </dev/null
+~saglani/.local/bin/cursor-agent models </dev/null
 ```
 
 Verify write and plan autonomy only in scratch repositories:
@@ -280,7 +280,7 @@ Verify write and plan autonomy only in scratch repositories:
 cursor_probe_dir="$(mktemp -d /tmp/rafu-cursor-c4.XXXXXX)"
 cd "$cursor_probe_dir"
 /usr/bin/git init -q
-/Users/vatsalsaglani/.local/bin/cursor-agent \
+~saglani/.local/bin/cursor-agent \
   -p \
   --output-format json \
   --force \
@@ -292,7 +292,7 @@ cd "$cursor_probe_dir"
 cursor_plan_dir="$(mktemp -d /tmp/rafu-cursor-plan.XXXXXX)"
 cd "$cursor_plan_dir"
 /usr/bin/git init -q
-/Users/vatsalsaglani/.local/bin/cursor-agent \
+~saglani/.local/bin/cursor-agent \
   -p \
   --output-format json \
   --trust \

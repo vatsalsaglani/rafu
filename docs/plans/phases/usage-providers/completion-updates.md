@@ -37,8 +37,8 @@ W2 is not fully production-connected: its specification also requires the creden
 
 W2 is blocked by contradictory source-of-truth requirements:
 
-- [W2](</Users/vatsalsaglani/.codex/worktrees/cfca/rafu/docs/plans/phases/usage-providers/W2-exact-percent-oauth.md>) requires a `UsageRegistryReader` credential bridge and ADR 0017.
-- [README](</Users/vatsalsaglani/.codex/worktrees/cfca/rafu/docs/plans/phases/usage-providers/README.md>) forbids editing shared files, Settings, or documentation—only provider stubs and provider tests are owned.
+- [W2](<~saglani/.codex/worktrees/cfca/rafu/docs/plans/phases/usage-providers/W2-exact-percent-oauth.md>) requires a `UsageRegistryReader` credential bridge and ADR 0017.
+- [README](<~saglani/.codex/worktrees/cfca/rafu/docs/plans/phases/usage-providers/README.md>) forbids editing shared files, Settings, or documentation—only provider stubs and provider tests are owned.
 
 The allowed implementation is committed as `3468252`; all headless gates pass and the branch is clean. Completing W2 exactly requires either authorizing those shared/documentation paths or assigning the bridge and ADR to a separate owning phase.
 
@@ -49,7 +49,7 @@ W4 implementation is complete in its four owned paths, but I stopped before comm
 - Focused W4 tests: 14/14 pass.
 - `swift build`: passes, zero warnings on the warm gate.
 - Format/lint: clean.
-- Both full test modes fail only at [UsageStoreTests.swift:99](/Users/vatsalsaglani/.codex/worktrees/9093/rafu/Tests/RafuAppTests/Usage/UsageStoreTests.swift:99). It expects only Claude/Codex rows, but W4 correctly adds Cline/OpenRouter/Qwen per the fixed-strategy-count contract.
+- Both full test modes fail only at [UsageStoreTests.swift:99](~saglani/.codex/worktrees/9093/rafu/Tests/RafuAppTests/Usage/UsageStoreTests.swift:99). It expects only Claude/Codex rows, but W4 correctly adds Cline/OpenRouter/Qwen per the fixed-strategy-count contract.
 
 May I update that unowned assertion to expect all five visible providers, then rerun both gates and commit?
 
@@ -62,13 +62,13 @@ Verification:
 - W4 focused tests: 15/15 pass
 - Full parallel and serial tests: 1,109/1,110 pass
 
-The sole failure is a stale shared W0 assertion in [UsageStoreTests.swift](/Users/vatsalsaglani/.codex/worktrees/9093/rafu/Tests/RafuAppTests/Usage/UsageStoreTests.swift:99). It expects only Claude/Codex, but W4 correctly adds Cline/OpenRouter/Qwen.
+The sole failure is a stale shared W0 assertion in [UsageStoreTests.swift](~saglani/.codex/worktrees/9093/rafu/Tests/RafuAppTests/Usage/UsageStoreTests.swift:99). It expects only Claude/Codex, but W4 correctly adds Cline/OpenRouter/Qwen.
 
 I have not edited that unowned file or committed a red branch. Please explicitly authorize adding `UsageStoreTests.swift` to W4 ownership for the one-line expectation update; I’ll then rerun both full gates and commit.
 
 W4 is now formally blocked by the ownership contract.
 
-The mandatory full gates fail only at [UsageStoreTests.swift:99](/Users/vatsalsaglani/.codex/worktrees/9093/rafu/Tests/RafuAppTests/Usage/UsageStoreTests.swift:99), an unowned shared W0 test. W4’s four owned files remain cleanly scoped, and its 15 focused tests pass.
+The mandatory full gates fail only at [UsageStoreTests.swift:99](~saglani/.codex/worktrees/9093/rafu/Tests/RafuAppTests/Usage/UsageStoreTests.swift:99), an unowned shared W0 test. W4’s four owned files remain cleanly scoped, and its 15 focused tests pass.
 
 To unblock completion and commit, authorize updating that assertion to include `.cline`, `.openRouter`, and `.qwen`.
 
@@ -80,7 +80,7 @@ Implemented W5 and committed it locally as `16da983` on `codex/usage-w5-local-to
 - Kimi: reads its CLI credential and optional device ID; calls `https://api.kimi.com/coding/v1/usages`.
 - Copilot: stable unavailable stub. CodexBar has no discoverable local CLI/`gh` token; cookie-only budget enrichment was not implemented.
 - Source basis: CodexBar commit `cc8da27cec92029a6435bfee4a703a719290234e`.
-- Changed only the three [provider files](/Users/vatsalsaglani/.codex/worktrees/7db3/rafu/Sources/RafuApp/Usage/Providers/GeminiCLIProvider.swift) and [W5 tests](/Users/vatsalsaglani/.codex/worktrees/7db3/rafu/Tests/RafuAppTests/Usage/LocalTokenProvidersTests.swift).
+- Changed only the three [provider files](~saglani/.codex/worktrees/7db3/rafu/Sources/RafuApp/Usage/Providers/GeminiCLIProvider.swift) and [W5 tests](~saglani/.codex/worktrees/7db3/rafu/Tests/RafuAppTests/Usage/LocalTokenProvidersTests.swift).
 
 Verification:
 
@@ -110,13 +110,13 @@ Verification:
 - `swift build`: passed, zero warnings.
 - W3 tests parallel and serial: 9/9 passed.
 - Formatting lint and diff checks: passed.
-- Full parallel and serial suites: 1105 tests, one shared-test failure in [UsageStoreTests.swift](/Users/vatsalsaglani/.codex/worktrees/1931/rafu/Tests/RafuAppTests/Usage/UsageStoreTests.swift:99). It hard-codes `[.claude, .codex]`, but W3 correctly exposes three additional non-stub providers. Updating that W0-owned path is prohibited by the phase contract, so the coordinator must update the assertion before repository-wide gates can be green.
+- Full parallel and serial suites: 1105 tests, one shared-test failure in [UsageStoreTests.swift](~saglani/.codex/worktrees/1931/rafu/Tests/RafuAppTests/Usage/UsageStoreTests.swift:99). It hard-codes `[.claude, .codex]`, but W3 correctly exposes three additional non-stub providers. Updating that W0-owned path is prohibited by the phase contract, so the coordinator must update the assertion before repository-wide gates can be green.
 
 CodexBar’s current OpenCode provider is web-cookie based; only OpenCode Go currently provides this SQLite schema. Following W3’s explicit scope, the local reader was adapted for non-Go OpenCode rows while excluding `providerID='opencode-go'` to prevent duplicate accounting.
 
 Goal recorded as blocked after three consecutive confirmations.
 
-The committed W3 implementation is clean at `a400cb4`. Completion requires a coordinator-owned update to [UsageStoreTests.swift:99](/Users/vatsalsaglani/.codex/worktrees/1931/rafu/Tests/RafuAppTests/Usage/UsageStoreTests.swift:99), whose expected visible-provider list predates W3. The ownership rules prohibit fixing it on this branch.
+The committed W3 implementation is clean at `a400cb4`. Completion requires a coordinator-owned update to [UsageStoreTests.swift:99](~saglani/.codex/worktrees/1931/rafu/Tests/RafuAppTests/Usage/UsageStoreTests.swift:99), whose expected visible-provider list predates W3. The ownership rules prohibit fixing it on this branch.
 
 After that shared assertion is updated, resume this goal to rerun both complete test modes and finish verification.
 
@@ -134,8 +134,8 @@ Delivered:
 - 17 fixture-only tests; no real browser or Keychain access.
 - MIT attribution from the studied CodexBar/SweetCookieKit implementation.
 
-Primary API: [BrowserCookieImporter.swift](/Users/vatsalsaglani/.codex/worktrees/0e78/rafu/Sources/RafuApp/Usage/Cookies/BrowserCookieImporter.swift:304)  
-Cache API: [CookieHeaderCache.swift](/Users/vatsalsaglani/.codex/worktrees/0e78/rafu/Sources/RafuApp/Usage/Cookies/CookieHeaderCache.swift:101)
+Primary API: [BrowserCookieImporter.swift](~saglani/.codex/worktrees/0e78/rafu/Sources/RafuApp/Usage/Cookies/BrowserCookieImporter.swift:304)  
+Cache API: [CookieHeaderCache.swift](~saglani/.codex/worktrees/0e78/rafu/Sources/RafuApp/Usage/Cookies/CookieHeaderCache.swift:101)
 
 Coordinator wiring remains the requested one-liner:
 

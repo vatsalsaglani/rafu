@@ -449,6 +449,45 @@ or a built-in tool.
 4. Run `sandbox-check-stdin.sh` (no model): every read outside `<E>`, every write and both `curl` calls must fail.
 5. With the account: `matrix.sh` (45 runs) and `sizes_quality.sh` (12 runs), then `analyze_stdin.py cxs-m-`.
 
+## Findings from the Meetings build (2026-11-23)
+
+Found when the runner was built and the app was integrated. Versions: Claude Code 2.1.330, codex-cli 0.171.0. The
+handoff does not restate the macOS version of these live checks.
+
+- **Start Codex by its resolved path, not by the link.** `/opt/homebrew/bin/codex` is a link to
+  `/opt/homebrew/Caskroom/codex/0.171.0/bin/codex`. Started through the link, under the `meeting` permission
+  profile, Codex's file-system sandbox helper fails with "sandbox-exec: execvp() … Operation not permitted". Started
+  by the resolved path, it works. Checked live on 2026-11-23 from `$TMPDIR`.
+- **Claude Code 2.1.330 works from `$TMPDIR`.** `/var` is a link there. No problem was seen.
+- **The Claude Code `init` event is not always the first line of the stream.** A `system` line with the subtype
+  `ui_invalidate` can come first. A reader must not read only the first line. `ClaudeStreamParser` checks each
+  `system`/`init` line wherever it comes, and a `result` line before an accepted `init` line is never an answer.
+
+### Where the saved event-shape evidence lives
+
+Both folders are untracked and may be deleted later. Do not delete them before a later reader no longer needs them.
+
+- `<repo>/.claude/worktrees/agent-a3d369789e2861338/Spikes/MeetingHiddenAgent/work-stdin/results`
+  (the Codex standard-input runs).
+- `<repo>/.claude/worktrees/meetings-hidden-agent-check` (the hidden agent check worktree).
+
+### Event shapes that the runner relies on
+
+Source: `Sources/RafuCore/Meetings/Agent/MeetingAgentStreamParsing.swift` (read on 2026-11-23). The reader splits
+standard output at new lines, with a limit for one line and a limit for the whole output. A line that is not a JSON
+object is skipped.
+
+| CLI | Event | Fields used | What the runner does |
+|---|---|---|---|
+| Claude Code | `{"type":"system","subtype":"init"}` | `tools`, `mcp_servers`, `permissionMode`, `claude_code_version` | Accepts only when `tools` is exactly `Glob`, `Grep`, `Read`, `mcp_servers` is empty and `permissionMode` is `dontAsk`. Else it stops the process. A second `init` cannot undo a refusal. |
+| Claude Code | `{"type":"result"}` | `is_error`, `result` | The answer is `result` when `is_error` is false and `init` was accepted. A missing `is_error` counts as an error. "Not logged in" in `result` with `is_error` true means not signed in (the `subtype` is still `success`). |
+| Codex | `{"type":"turn.started"}` | | Clears the last message. |
+| Codex | `{"type":"item.completed","item":{"type":"agent_message","text":…}}` | `item.text` | Keeps the text. The answer is the last one of the completed turn. |
+| Codex | `{"type":"item.completed","item":{"type":"error","message":…}}` | `item.message` | "unrecognized configuration setting" means that a `-c` key is no longer known. Stops, and no answer counts. |
+| Codex | `{"type":"turn.completed"}` | | The answer counts only after it. |
+| Codex | `{"type":"turn.failed","error":{"message":…}}` | `error.message` | Stops. "401 Unauthorized" means not signed in. |
+| Codex | `{"type":"error","message":…}` | `message` | "401 Unauthorized" means not signed in. Stops at the first one. |
+
 ## Why it matters
 
 - One wrong flag gives a hidden run the user's whole tool set: shell, file writes, and account connectors such as

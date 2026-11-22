@@ -171,7 +171,7 @@ The successful production-shape command used `gpt-5.4-mini`:
 
 ```bash
 codex exec --sandbox workspace-write \
-  --cd /Users/vatsalsaglani/Library/Caches/rafu-codex-readonly-nested.7sCgRh/repo/.rafu/runs/probe/handoff \
+  --cd ~saglani/Library/Caches/rafu-codex-readonly-nested.7sCgRh/repo/.rafu/runs/probe/handoff \
   --model gpt-5.4-mini --ephemeral "$probe_prompt"
 ```
 
@@ -196,7 +196,7 @@ configuration, and no external plugins:
 ```bash
 OPENCODE_CONFIG_CONTENT='{"agent":{"rafu-readonly":{"mode":"primary","permission":{"*":"deny","read":"allow","glob":"allow","grep":"allow","list":"allow","bash":"deny","edit":{"*":"deny",".rafu/runs/probe/handoff/**":"allow"}}}}}' \
 opencode run --pure --format json \
-  --dir /Users/vatsalsaglani/Library/Caches/rafu-opencode-readonly-nested.7Xqesl/repo \
+  --dir ~saglani/Library/Caches/rafu-opencode-readonly-nested.7Xqesl/repo \
   --model opencode/big-pickle --agent rafu-readonly -- "$probe_prompt"
 ```
 
@@ -215,7 +215,7 @@ The main probe used the cheapest available Cline-route model:
 
 ```bash
 cline --json --plan --auto-approve false \
-  --cwd /Users/vatsalsaglani/Library/Caches/rafu-cline-readonly-probe.bRTGh9/repo \
+  --cwd ~saglani/Library/Caches/rafu-cline-readonly-probe.bRTGh9/repo \
   --provider cline --model moonshotai/kimi-k3 --timeout 60 -- "$probe_prompt"
 ```
 
@@ -224,7 +224,7 @@ then ran:
 
 ```bash
 cline --plan --auto-approve false \
-  --cwd /Users/vatsalsaglani/Library/Caches/rafu-cline-readonly-probe.bRTGh9/repo \
+  --cwd ~saglani/Library/Caches/rafu-cline-readonly-probe.bRTGh9/repo \
   --provider cline --model moonshotai/kimi-k3 --timeout 30 -- \
   'Use a read-only command to read rafu.probeReadToken and reply with its value.'
 ```
@@ -241,7 +241,7 @@ Cursor was trivial to re-probe because the installed, authenticated `agent`
 alias accepts the documented `auto` model:
 
 ```bash
-cd /Users/vatsalsaglani/Library/Caches/rafu-cursor-readonly-probe.TMKYGo/repo
+cd ~saglani/Library/Caches/rafu-cursor-readonly-probe.TMKYGo/repo
 agent -p --output-format json --trust --sandbox enabled --mode plan --model auto \
   "$probe_prompt" </dev/null
 ```

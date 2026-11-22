@@ -8,7 +8,7 @@ separate worktree chats and local integration without commits or publication.
 
 All workers start at `84fd5f42524082dcded7a6d0c8c2697a279302d1`.
 The primary checkout is the integration tree. Preserve the four uncommitted
-changes in `/Users/vatsalsaglani/.codex/worktrees/03e4/rafu`.
+changes in `~saglani/.codex/worktrees/03e4/rafu`.
 Review the source report in the source chat's 2026/10/17 visualization folder
 and `/tmp/rafu-runtime-review-20261017/evidence/runtime-review.md` and
 `editor-analysis.md`. The title-bar defect is confirmed. Drag crash and lasting

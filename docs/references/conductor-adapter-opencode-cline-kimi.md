@@ -37,7 +37,7 @@ rather than guessing.
 ## OpenCode 1.18.4
 
 The executable resolved to
-`/Users/vatsalsaglani/.opencode/bin/opencode`, outside the curated Ensemble
+`~saglani/.opencode/bin/opencode`, outside the curated Ensemble
 `PATH`. The installed help verified the `run` subcommand and its `--format`,
 `--dir`, `--model`, and `--auto` options. Rafu constructs this argv:
 
@@ -75,11 +75,11 @@ Exact locally executed probes:
 
 ```sh
 /usr/bin/which -a opencode
-/Users/vatsalsaglani/.opencode/bin/opencode --version
-/Users/vatsalsaglani/.opencode/bin/opencode run --help --pure
-/Users/vatsalsaglani/.opencode/bin/opencode models --pure
-/Users/vatsalsaglani/.opencode/bin/opencode auth list --pure
-/usr/bin/env -i HOME=/Users/vatsalsaglani PATH=/Users/vatsalsaglani/.opencode/bin:/usr/local/bin:/opt/homebrew/bin:/Users/vatsalsaglani/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin LC_ALL=C NO_COLOR=1 /Users/vatsalsaglani/.opencode/bin/opencode auth list --pure
+~saglani/.opencode/bin/opencode --version
+~saglani/.opencode/bin/opencode run --help --pure
+~saglani/.opencode/bin/opencode models --pure
+~saglani/.opencode/bin/opencode auth list --pure
+/usr/bin/env -i HOME=~saglani PATH=~saglani/.opencode/bin:/usr/local/bin:/opt/homebrew/bin:~saglani/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin LC_ALL=C NO_COLOR=1 ~saglani/.opencode/bin/opencode auth list --pure
 ```
 
 Re-run those metadata-only commands after upgrading OpenCode. Do not infer
@@ -89,7 +89,7 @@ filesystem access-control guarantee.
 ## Cline 3.0.46
 
 The executable resolved to
-`/Users/vatsalsaglani/.nvm/versions/node/v22.0.0/bin/cline`. This is an NVM
+`~saglani/.nvm/versions/node/v22.0.0/bin/cline`. This is an NVM
 installation, so its directory must be prepended to the curated child `PATH`
 for the executable's Node shebang to resolve.
 
@@ -119,11 +119,11 @@ Exact locally executed probes:
 
 ```sh
 /usr/bin/which -a cline
-/Users/vatsalsaglani/.nvm/versions/node/v22.0.0/bin/cline --version
-/Users/vatsalsaglani/.nvm/versions/node/v22.0.0/bin/cline --help
-/Users/vatsalsaglani/.nvm/versions/node/v22.0.0/bin/cline auth --help
-/Users/vatsalsaglani/.nvm/versions/node/v22.0.0/bin/cline config --help
-/usr/bin/env -i HOME=/Users/vatsalsaglani PATH=/Users/vatsalsaglani/.nvm/versions/node/v22.0.0/bin:/usr/local/bin:/opt/homebrew/bin:/Users/vatsalsaglani/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin LC_ALL=C NO_COLOR=1 /Users/vatsalsaglani/.nvm/versions/node/v22.0.0/bin/cline --version
+~saglani/.nvm/versions/node/v22.0.0/bin/cline --version
+~saglani/.nvm/versions/node/v22.0.0/bin/cline --help
+~saglani/.nvm/versions/node/v22.0.0/bin/cline auth --help
+~saglani/.nvm/versions/node/v22.0.0/bin/cline config --help
+/usr/bin/env -i HOME=~saglani PATH=~saglani/.nvm/versions/node/v22.0.0/bin:/usr/local/bin:/opt/homebrew/bin:~saglani/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin LC_ALL=C NO_COLOR=1 ~saglani/.nvm/versions/node/v22.0.0/bin/cline --version
 ```
 
 Re-run those help/version probes after upgrading Cline. Do not run `cline

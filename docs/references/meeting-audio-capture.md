@@ -163,6 +163,20 @@ Observations:
   median), not by stream count: Them gave the same numbers alone and next to Me.
 - `NSSpeechRecognitionUsageDescription` is not needed: see the Info.plist table.
 
+### Findings from the Meetings build (2026-11-23)
+
+Found while the capture, Apple speech and integration packages were built. Both test modes were green on the merged
+tree, and the app launched. macOS 27.2 as before; the handoff gives no other version.
+
+- **`AVAudioConverter` takes at most 4096 input frames in one call and drops the rest.** Feed it pieces of 1024 frames.
+- **An actor that appends to its own optional stored collection while it reads that collection in the same call
+  crashes at run time** with an exclusivity access conflict.
+- **Apple speech asset status on macOS 27.2.** `AssetInventory.status(forModules:)` reports `.supported` for a
+  `SpeechTranscriber` made with no reporting options, while en-US is installed. Rafu treats `installedLocales` as
+  the truth for "installed".
+- **Final audio files start at meeting time 0.** The speech adapters rely on this.
+- **A level alone cannot clear a "no audio" warning.** When no audio arrives, the recorder keeps the last level.
+
 ## Why it matters
 
 - The process tap is the only way to get the Them track without a virtual audio driver. It needs its own privacy key

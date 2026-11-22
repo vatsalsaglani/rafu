@@ -95,6 +95,9 @@ Decided by the user on 2026-11-23:
 - Agent tools take meeting ids, never file paths. A tool never builds a path from agent input.
 - The app checks the access switch on every tool call, not once at start. A change of the switch takes effect at
   the next call.
+- From the security review of 2026-11-23: the access switch (`meetings.agentAccess`) is a `UserDefaults` value. It
+  controls the tool path only. It does not stop a process of the same user from reading the meeting files in the app
+  data.
 
 ### What stays true
 
