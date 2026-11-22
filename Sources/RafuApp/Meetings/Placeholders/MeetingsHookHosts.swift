@@ -14,6 +14,7 @@ import SwiftUI
 struct MeetingsWindowRoot: View {
     static let windowID = "meetings"
 
+    @Environment(\.openWindow) private var openWindow
     private let factory = MeetingsFeatureFactory.shared
 
     var body: some View {
@@ -25,7 +26,10 @@ struct MeetingsWindowRoot: View {
             }
         }
         .frame(minWidth: 520, minHeight: 360)
-        .onAppear { factory.resolve() }
+        .onAppear {
+            factory.resolve()
+            MeetingsWindowOpener.shared.capture(openWindow)
+        }
     }
 }
 
@@ -35,6 +39,7 @@ struct MeetingsWindowRoot: View {
 struct MeetingsNavigatorPanelView: View {
     let session: WorkspaceSession
 
+    @Environment(\.openWindow) private var openWindow
     private let factory = MeetingsFeatureFactory.shared
 
     var body: some View {
@@ -52,7 +57,10 @@ struct MeetingsNavigatorPanelView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .onAppear { factory.resolve() }
+        .onAppear {
+            factory.resolve()
+            MeetingsWindowOpener.shared.capture(openWindow)
+        }
     }
 }
 
@@ -61,6 +69,7 @@ struct MeetingsTabHost: View {
     let session: WorkspaceSession
     let meeting: MeetingID
 
+    @Environment(\.openWindow) private var openWindow
     private let factory = MeetingsFeatureFactory.shared
 
     var body: some View {
@@ -72,12 +81,16 @@ struct MeetingsTabHost: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .onAppear { factory.resolve() }
+        .onAppear {
+            factory.resolve()
+            MeetingsWindowOpener.shared.capture(openWindow)
+        }
     }
 }
 
 /// The Settings ▸ Meetings pane body, inside the pane's grouped `Form`.
 struct MeetingsSettingsPaneHost: View {
+    @Environment(\.openWindow) private var openWindow
     private let factory = MeetingsFeatureFactory.shared
 
     var body: some View {
@@ -93,7 +106,10 @@ struct MeetingsSettingsPaneHost: View {
                 }
             }
         }
-        .onAppear { factory.resolve() }
+        .onAppear {
+            factory.resolve()
+            MeetingsWindowOpener.shared.capture(openWindow)
+        }
     }
 }
 
@@ -107,23 +123,26 @@ struct MeetingsWelcomeCardSlot: View {
     private let factory = MeetingsFeatureFactory.shared
 
     var body: some View {
-        if let feature = factory.feature, let hook = feature.welcomeCard {
-            hook(feature, session)
-        } else {
-            VStack(alignment: .leading, spacing: 8) {
-                if let reason = MeetingsAvailability.current.unavailableReason {
-                    Text(reason)
-                        .font(.caption)
-                        .foregroundStyle(theme.palette.textMuted)
-                } else {
-                    Button("Open Meetings", systemImage: "waveform.and.person.filled") {
-                        openWindow(id: MeetingsWindowRoot.windowID)
+        Group {
+            if let feature = factory.feature, let hook = feature.welcomeCard {
+                hook(feature, session)
+            } else {
+                VStack(alignment: .leading, spacing: 8) {
+                    if let reason = MeetingsAvailability.current.unavailableReason {
+                        Text(reason)
+                            .font(.caption)
+                            .foregroundStyle(theme.palette.textMuted)
+                    } else {
+                        Button("Open Meetings", systemImage: "waveform.and.person.filled") {
+                            openWindow(id: MeetingsWindowRoot.windowID)
+                        }
+                        .buttonStyle(RafuSecondaryButtonStyle(compact: true))
+                        .help("Open Meetings (⌘⇧M)")
                     }
-                    .buttonStyle(RafuSecondaryButtonStyle(compact: true))
-                    .help("Open Meetings (⌘⇧M)")
                 }
             }
         }
+        .onAppear { MeetingsWindowOpener.shared.capture(openWindow) }
     }
 }
 
