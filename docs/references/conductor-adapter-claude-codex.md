@@ -53,7 +53,7 @@ The verified installed binaries are:
 
 | CLI | Absolute executable | Version | Install observation |
 |---|---|---|---|
-| Claude Code | `/Users/vatsalsaglani/.local/bin/claude` | `2.1.218 (Claude Code)` | native arm64 executable reached through a symlinked install |
+| Claude Code | `~saglani/.local/bin/claude` | `2.1.218 (Claude Code)` | native arm64 executable reached through a symlinked install |
 | Codex | `/Applications/ChatGPT.app/Contents/Resources/codex` | `codex-cli 0.146.0-alpha.3` | native arm64 executable bundled with ChatGPT |
 
 Discovery runs `/usr/bin/which` with `["claude"]` or `["codex"]`, never a
@@ -158,7 +158,7 @@ These metadata-only commands reproduce the verified CLI surface:
 
 ```sh
 /usr/bin/which claude
-file /Users/vatsalsaglani/.local/bin/claude
+file ~saglani/.local/bin/claude
 claude --version
 claude --help
 claude auth --help

@@ -1,8 +1,10 @@
 # Meetings
 
-- **Status:** Planned (2026-11-22), amended 2026-11-23. The three decision records are accepted. Session 1 of the
-  capture check is done (see the note about meeting audio capture). The Codex standard-input re-check is open. No
-  Meetings code exists yet.
+- **Status:** Version 1 implemented on 2026-11-23 (shared contracts, wave 1, wave 2 and integration are merged on
+  `main`; both test modes were green; the launch was verified). The hand checks for the user and the "fix soon" list
+  are in "Status log" below. The three decision records are accepted. Session 1 of the capture check is done (see the
+  note about meeting audio capture). The Codex standard-input re-check is done and passed (see the note about hidden
+  meeting agent limits).
 - **Depends on:** the three decision records listed below; the checks in the first stage.
 - **Gate:** the proof stage at the end of this document.
 
@@ -137,7 +139,8 @@ before any fan-out (see `docs/plans/phases/README.md`, "Source-path mapping and 
      access to one folder, and a test per CLI version; the result goes into a reference note about hidden meeting
      agent limits. Done on 2026-11-22.
    - Codex standard-input limits re-check: a result for the Codex design (the meeting text on standard input, an
-     empty private folder, shell tool off). It is a new section of the note about hidden meeting agent limits. Open.
+     empty private folder, shell tool off). It is a new section of the note about hidden meeting agent limits. Done
+     on 2026-11-23 (passed).
 2. **Shared contracts and wiring points.** One package. It lands the shared models (meeting, track, turn, speaker),
    the engine protocols and ids for text and speakers, the speech preferences, the store interface, the access
    switch interface, the settings key, the diagnostics contract with a no-op recorder, the menu and command entries
@@ -218,6 +221,38 @@ before any fan-out (see `docs/plans/phases/README.md`, "Source-path mapping and 
 - Crash-safe audio: a crash during a recording keeps the audio written so far.
 - Process cleanup on quit: the hidden agent and the speech helper end when the app quits.
 
+## Status log
+
+**2026-11-23: version 1 implemented.** The shared contracts, wave 1, wave 2 and the integration are merged. Both test
+modes (parallel and `--no-parallel`) were green on the merged tree, and the launch was verified. The handoff did not
+give the test counts of the two runs. New nuances are in
+[`repository-policy-tests.md`](../../references/repository-policy-tests.md),
+[`meeting-audio-capture.md`](../../references/meeting-audio-capture.md),
+[`meeting-speech-worker.md`](../../references/meeting-speech-worker.md) and
+[`meeting-hidden-agent-limits.md`](../../references/meeting-hidden-agent-limits.md). One consequence was added to the
+decision about Meetings scope and agent access
+([`0047`](../../decisions/0047-meetings-scope-app-data-storage-and-agent-access.md)).
+
+Left as hand checks for the user (no agent can do them):
+
+- Real calls in Zoom, Teams, Google Meet and FaceTime.
+- The permission prompts after a rebuild.
+- AirPods for output with the Mac microphone as input.
+- One real question with each CLI (Claude Code and Codex) from the app.
+- VoiceOver and keyboard use in the Meetings window.
+- How the Settings ▸ Meetings pane looks.
+
+"Fix soon" list from the security review of 2026-11-23 (none of these blocks version 1):
+
+1. The hidden agent is signalled as one process. Signal its process group, so child processes end too.
+2. Open the journal, diagnostics and hidden agent writers with `O_NOFOLLOW`, and check the owner and the mode in
+   `MeetingFileIO`.
+3. Run the `init` check of the Claude Code stream also on `skills`, `slash_commands` and `plugins`.
+4. Give the speech helper a sandbox profile with no network.
+5. Show the SpeakerKit warning for a meeting longer than 2.5 hours (the limit is in the note about the speech
+   worker).
+6. The live diagnostics events have no meeting id.
+
 ## Open questions
 
 The questions of 2026-11-22 are closed: the user or the advisor answered them (see the decisions above and the three
@@ -225,7 +260,7 @@ decision records). Only what is not measured is open. The owner closes each one 
 
 | Question | Closes it |
 |---|---|
-| The result of the Codex standard-input re-check | The re-check section of the note about hidden meeting agent limits |
+| The result of the Codex standard-input re-check | Closed 2026-11-23: passed (the re-check section of the note about hidden meeting agent limits) |
 | Behaviour on macOS 26 | A Mac on macOS 26 (not available on the development machine) |
 | The permission rule after a rebuild (rebuild 1 kept the grants, rebuild 2 asked again) | Capture check session 3 (hand check) |
 | Real calls in each call app, and a device change during a call | Capture check session 2 (hand check) |
@@ -238,14 +273,13 @@ decision records). Only what is not measured is open. The owner closes each one 
 The note about meeting audio capture exists: [`docs/references/meeting-audio-capture.md`](../../references/meeting-audio-capture.md)
 (session 1 measured; the rows for real calls and the rebuild rule are "not measured"). The note about hidden meeting
 agent limits exists: [`docs/references/meeting-hidden-agent-limits.md`](../../references/meeting-hidden-agent-limits.md)
-(checked 2026-11-22; the Codex standard-input re-check is not in it yet).
+(checked 2026-11-22; the Codex standard-input re-check of 2026-11-23 and the findings of the build are in it).
 
-Notes to come:
-
-- `docs/references/meeting-diagnostics.md`: the diagnostics events, files, export and the privacy tests. The
-  diagnostics package writes it.
-- `docs/references/meeting-speech-worker.md`: the helper, its modes, the wire types, the memory numbers at 2 hours.
-  The speech worker package writes it.
+Notes that exist: [`meeting-diagnostics.md`](../../references/meeting-diagnostics.md) (the diagnostics events, files,
+export and the privacy tests), [`meeting-speech-worker.md`](../../references/meeting-speech-worker.md) (the helper,
+its modes, the wire types, the memory numbers) and
+[`repository-policy-tests.md`](../../references/repository-policy-tests.md) (source rules that a test enforces, and the
+duplicate type name check after a merge).
 
 Speech spike results (summary of the measurements; the full results file is not tracked in the repository):
 

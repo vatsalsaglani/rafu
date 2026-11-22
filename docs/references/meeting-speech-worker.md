@@ -194,6 +194,9 @@ Audio: L30 (1,526.7 s, "25 min"), H1 (3,600 s), H2 (7,200 s). Each number is one
   `ffmpeg -stream_loop 2 -i L30/them.wav -t 3600` and `-stream_loop 4 … -t 7200`. Never commit audio.
 - Models: fetched at the pinned revisions of the Meetings plan's model catalog; the SHA-256 of each Nemotron 3
   `fast32` file and of the four SpeakerKit weight files matched the recorded values on 2026-11-23.
+- The release package builds every product in debug. The Meetings speech helper is the exception:
+  `script/build_and_run.sh` builds it with `-c release`, because every speed and memory number in this note is a
+  release number. (Added 2026-11-23, from the integration build.)
 - Release helper: `swift build -c release --product RafuMeetingsWorker`. Each number above is one
   `/usr/bin/time -l` run of the release helper, one process at a time, driven by a small local script that writes
   the request, keeps standard input open until `done`, and reads the lines (for live text it writes two tracks of
