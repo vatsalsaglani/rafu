@@ -37,4 +37,22 @@ These choices are intentionally unresolved. Do not turn a bootstrap placeholder 
 - Define GitHub CI runners and required checks.
 - Define release artifacts, signing-secret handling, notarization, checksums, and update policy.
 
+## Meetings (2026-11-22)
+
+Owners and context are in [`meetings.md`](../plans/phases/meetings.md) and the three Meetings decision records
+([`0046`](0046-meeting-agent-without-visible-terminal.md), [`0047`](0047-meetings-scope-app-data-storage-and-agent-access.md),
+[`0048`](0048-meeting-capture-and-on-device-speech.md)).
+
+- Who writes the meeting summary, and when. An automatic send at Stop is against "keep AI explicit".
+- The exact argument arrays for the hidden meeting agent, and whether a stricter "no tools, text on standard input" run
+  is the default.
+- A per-meeting "Let agents read this meeting" switch, or the Settings switch only.
+- Whether "Open Folder..." in the Meetings window opens a new window or changes the same one.
+- How long to keep meeting audio and transcripts.
+- Whether Command-Shift-M works from the menu only, or system-wide.
+- How Meetings looks on macOS 15: a "Needs macOS 26" message, or hidden.
+- Which Rafu terminals get the Rafu tools for meetings.
+- SpeakerKit memory at 2 hours; live text on two streams; permission behaviour after a rebuild; behaviour on macOS 26.
+- The NVIDIA model licence answer for the later Nemotron option.
+
 The full original list remains in product plan §20. Update this file and add an ADR when a choice is resolved.
