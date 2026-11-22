@@ -108,14 +108,18 @@ read -ra SDK_LINK_FLAGS <<<"$("$ROOT_DIR/script/sdk_link_flags.sh" "$MIN_SYSTEM_
 swift build --product "$GUI_PRODUCT" "${SDK_LINK_FLAGS[@]}"
 swift build --product "$CLI_PRODUCT" "${SDK_LINK_FLAGS[@]}"
 swift build --product "$HOOK_HELPER_PRODUCT" "${SDK_LINK_FLAGS[@]}"
-swift build --product "$MEETINGS_WORKER_PRODUCT" "${SDK_LINK_FLAGS[@]}"
+# The Meetings speech helper is always built in release: its engines
+# (FluidAudio, WhisperKit, SpeakerKit) do Swift-side audio work per chunk,
+# and every measured speed and memory number in
+# docs/references/meeting-speech-worker.md comes from a release build.
+swift build -c release --product "$MEETINGS_WORKER_PRODUCT" "${SDK_LINK_FLAGS[@]}"
 swift build --product "$WIDGET_PRODUCT" "${SDK_LINK_FLAGS[@]}"
 
 BUILD_BIN_DIR="$(swift build --show-bin-path)"
 BUILD_APP_BINARY="$BUILD_BIN_DIR/$GUI_PRODUCT"
 BUILD_CLI_BINARY="$BUILD_BIN_DIR/$CLI_PRODUCT"
 BUILD_HOOK_HELPER_BINARY="$BUILD_BIN_DIR/$HOOK_HELPER_PRODUCT"
-BUILD_MEETINGS_WORKER_BINARY="$BUILD_BIN_DIR/$MEETINGS_WORKER_PRODUCT"
+BUILD_MEETINGS_WORKER_BINARY="$(swift build -c release --show-bin-path)/$MEETINGS_WORKER_PRODUCT"
 BUILD_WIDGET_BINARY="$BUILD_BIN_DIR/$WIDGET_PRODUCT"
 
 rm -rf "$APP_BUNDLE"
