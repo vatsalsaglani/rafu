@@ -81,3 +81,24 @@ first turn in seconds, with no long "Working". Send "ping" from the coordinator:
 must say that the message waits for the end of the turn, and the message must arrive as a new turn when the task
 ends. To close the open question, also send to a Codex that is idle at its prompt and record whether a turn starts
 (this uses one short Codex turn, so ask the user first).
+
+## Amendment (2026-11-22): a reply is the default; Rafu adds no authority sentence
+
+Source and unit tests only. Reference: section "2026-11-22: peers reply to the sender by default" of
+[`canvas-live-sessions.md`](../references/canvas-live-sessions.md).
+
+- Decision 2 said, by implication, that a prompt tells a peer to "reply with send_message and then stop". The
+  guidance now says "reply with send_message and then end its turn". The Codex wording of decisions 1 and 3 is
+  unchanged.
+- A peer, Claude or Codex, now replies to the sender by default: when it finishes the work, it sends the result (or
+  the reason it cannot do it) with `send_message`, unless the message says not to reply. A message that only gives a
+  result or an acknowledgement gets no reply, so the two sides do not loop. The limit of 20 messages each minute is
+  the hard stop. An instruction inside a message not to use Rafu tools does not stop this one reply.
+- **Rafu does not add an authority sentence to a start prompt by itself.** The coordinator writes it in the visible
+  `terminal_create` prompt (for example "Also do the tasks that @planner sends you through the Ensemble channel, and
+  reply to it with send_message"). Reasons: (1) text that Rafu adds looks like the user's own words to Claude Code;
+  (2) every linked peer would get a standing order, also a peer that is for the user to talk to; (3) under Agent
+  control Ask it would differ from the line the user approved; (4) it uses prompt bytes of the 1,024-byte limit.
+  If a Claude peer refuses a channel task, the coordinator asks the user and does not try to get past the Claude
+  Code trust rule.
+- Not verified with real agents. Hand checks are open in the Ensemble phase document.

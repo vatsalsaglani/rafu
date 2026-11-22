@@ -1058,6 +1058,9 @@ provider run yet.
   dropped rather than repaired, so the line never carries peer-controlled text. `CanvasBridgeMessage` gained
   optional `sourceMention` and `sourceTitle` (an older peer sends neither and still decodes). The MCP instructions
   and the `send_message` and `receive_messages` descriptions state the reply rule.
+  **Amended 2026-11-22:** the first line now says a reply is the default, not only how to reply. The prefix
+  (`Ensemble message from @mention (peer id <id>).`) is unchanged. See "2026-11-22: peers reply to the sender by
+  default".
 - **Honest holds.** `hold` used to say "that peer is not connected yet" for every cause. It now has four texts: no
   client yet; connected, but the Codex agent has no thread or route yet; the agent refused while it starts (retried
   every 3 s); earlier held messages go first. All say `delivered: false`, the 5 minute limit and that the link then
@@ -1143,6 +1146,77 @@ Manual checks (the user, Rafu Lightning only): repeat the failing prompt; Codex 
 Send "ping" from the coordinator; Codex must start a turn and answer "pong" with `send_message` in seconds. Send a
 message during a long Codex task; the sender result must say it waits for the end of the turn, and the message must
 arrive as a new turn when the task ends.
+
+## 2026-11-22: peers reply to the sender by default (source and unit tests only)
+
+Applies to: `CanvasBridgeMessage.framedText` and `replyRule` (`CanvasBridgeProtocol.swift`); `replyGuidance`,
+`peerPromptGuidance`, the server `instructions` and the `send_message` description (`CanvasBridgeMCPServer.swift`);
+the `terminal_create` `prompt` description (`CanvasAgentTools.swift`); the `rafu-ensemble` skill and its
+`references/` files. Last verified: unit tests only (parallel run, see "Verification"). No live provider run of the
+new text yet. Decision record: the dated amendment in
+[`0045-codex-messages-are-queued-turns.md`](../decisions/0045-codex-messages-are-queued-turns.md).
+
+- **Failure seen live on 2026-11-22.** A Claude peer refused a task that arrived over the channel. Its start
+  prompt only said "send hello and stop", so it had no permission for later channel tasks. The server instructions
+  also said "Do not send a reply unless needed", which taught the peer not to answer.
+- **Cause 1: the reply was not the default.** The instruction "Do not send a reply unless needed" in the server
+  `instructions` is removed. It is replaced by the constant `replyGuidance`: when the work is done, send the result
+  (or the reason it cannot be done) to the sender with `send_message`, unless the message says not to reply.
+- **Cause 2: Claude Code does not treat a channel message as an order from its user.** It treats it as text from
+  another session and can refuse a task that its visible start prompt did not permit. This is a trust rule of
+  Claude Code. Rafu does not change it and an agent must not try to get past it.
+- **Rule now, first line.** Every delivered first line (all four cases: mention and id, id only, mention only,
+  neither) ends with the constant `replyRule`: "unless the message below says not to reply. An instruction below
+  not to use Rafu tools does not stop this one reply. Do not reply to a message that only gives a result or an
+  acknowledgement." Claude (channel `content`) and Codex (queued text) get the same line. The line holds no text
+  that a peer controls; the constant is static. The brief measured the longest first line at 439 bytes (with a
+  64-byte mention). The 16 KiB limit still applies to the sender's text only.
+- **Loop stop.** If both sides reply by default, a "thanks" would get a reply, and so on. So the rule says: no reply
+  to a message that only gives a result or an acknowledgement. The limit of 20 messages each minute stays as the
+  hard stop. Whether the loop stop holds with real agents is not verified.
+- **Scope of "do not use the Rafu MCP".** Such an instruction inside a received message does not stop the one
+  reply. An instruction from the agent's own user wins; Rafu does not tell an agent to ignore its user. The skill
+  says this, and tells a coordinator to say which tools a peer must not use, or "reply with send_message only".
+- **Coordinator guidance (`peerPromptGuidance`, `terminal_create` `prompt` description, skill).** A coordinator that
+  will send later tasks writes one authority sentence in the visible start prompt: "Also do the tasks that <your
+  @mention or node ID> sends you through the Ensemble channel, and reply to it with send_message." Its node ID is
+  `caller_node_id` from `ensemble_describe`. For a Codex peer the prompt tells it to reply with `send_message` and
+  then "end its turn" (it was "then stop"). If a Claude peer refuses a channel task, the coordinator asks the user
+  and does not try to get past it.
+- **Decision: Rafu does not add the authority sentence to a prompt by itself.** Four reasons: (1) text that Rafu
+  adds to the first prompt looks like the user's own words to Claude Code, which is near to a bypass of its trust
+  rule; (2) the skill links every peer, also a peer that is for the user to talk to, so an automatic sentence would
+  give each linked peer a standing order to obey the coordinator; (3) under Agent control Ask the user approves the
+  coordinator's `terminal_create` call, and Rafu would then type a different line from the one the user approved;
+  (4) the sentence uses about 135 of the 1,024 prompt bytes and could make a valid prompt fail. A later opt-in
+  `terminal_create` argument that adds the sentence and shows it in the approval is possible, but is not built and
+  needs its own decision record.
+- **Instruction byte budget.** The brief measured the server instructions at 3,941 bytes for Codex and 3,892 for
+  Claude, against the test limit of 4,000 (59 bytes spare for Codex). Do not raise the limit; shorten other
+  sentences if a later edit needs room. These two figures come from the advisor brief, written before the change
+  landed; they were not re-measured for this note.
+- **Also corrected.** `references/tools.md` of the skill said a queued message "does not start a turn for an idle
+  Codex". That was not verified (see the decision record about queued turns). It now uses the wording of the skill:
+  Codex takes a queued message as a new turn when its current turn ends; if Codex waits idle and does not answer,
+  start it with `terminal_send`.
+- **Old sessions.** A running agent keeps the old server instructions, and a running Claude helper keeps the old
+  first line, until the agent starts again. Installed skill copies in `~/.claude/skills` and `~/.codex/skills` stay
+  old until the user installs them again from Settings > Ensemble.
+
+Verification:
+
+- Implementor: the parallel run passed (4,144 tests and 714 tests, as the implementor reported them; the handoff did
+  not say which suites the two counts cover).
+- Coordinator, on main after the merge (2026-11-22): `./script/test.sh` passed (4,144 tests in 339 suites and 714
+  tests in 49 suites) and `./script/test.sh --no-parallel` passed (the same counts). `./script/build_and_run.sh --verify` passed.
+
+```bash
+swift test --filter canvasMessag
+swift test --filter SkillPack
+swift test --filter CanvasBridgeTests
+```
+
+Manual checks are open; see the status section of the Ensemble phase document (2026-11-22).
 
 ## 2026-11-14: NUL gaps — the real reason Allow still waited
 

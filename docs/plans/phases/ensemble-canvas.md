@@ -946,3 +946,32 @@ bullet of [`notch-companion.md`](../../references/notch-companion.md).
   a Codex tool call, which needs the user's decision). (5) No arguments show `{}`; arguments over 2 KiB give "Open
   terminal" only. (6) A Rafu tool raises no Codex question; the Claude card is unchanged. (7) VoiceOver, keyboard,
   second window.
+
+## Status (2026-11-22, peers reply to the sender by default)
+
+Decision record: the dated amendment in the decision about Codex queued turns (ADR 0045:
+[`0045-codex-messages-are-queued-turns.md`](../../decisions/0045-codex-messages-are-queued-turns.md)). Reference: the
+section "2026-11-22: peers reply to the sender by default" of
+[`canvas-live-sessions.md`](../../references/canvas-live-sessions.md).
+
+- **Delivered (source and unit tests only).** Text only; no protocol field, no new tool. Live cause on 2026-11-22: the
+  server instructions said "Do not send a reply unless needed", and a Claude peer refused channel tasks because its
+  start prompt only said "send hello and stop". Now the first line of each delivered message (`replyRule`) and the
+  server instructions (`replyGuidance`) say: reply to the sender with `send_message` when done, unless the message
+  says not to reply; "do not use Rafu tools" inside a message does not stop this one reply; no reply to a message
+  that only gives a result or an acknowledgement (the 20 messages each minute limit stays the hard stop). The
+  coordinator guidance (`peerPromptGuidance`, the `terminal_create` `prompt` description, the skill and its
+  references) says to write one authority sentence in the visible start prompt and to ask the user when a Claude peer
+  refuses. Rafu does not add that sentence by itself (four reasons in the decision record). The skill reference on
+  tools no longer says that a queued message does not start an idle Codex.
+- **Test evidence.** Implementor: parallel run passed (4,144 tests and 714 tests, as reported). Coordinator on main:
+  parallel and `--no-parallel` both passed (4,144 tests in 339 suites and 714 tests in 49 suites).
+- **Old sessions.** Running agents keep the old text until they restart. Installed skill copies stay old until the
+  user installs them again from Settings > Ensemble.
+- **Open checks (manual, in Rafu Lightning; they use real agent turns).** (1) Start a Claude peer and a Codex peer
+  with a prompt that holds the authority sentence; send each a small task; each result must come back to the
+  coordinator as a message. (2) Send "Do not use the Rafu MCP for the work. <task>"; the result must still come back.
+  (3) Send "<task>. Do not reply."; no message must come back. (4) The coordinator gets a result; it must not send
+  "thanks" back (no loop). (5) Start a Claude peer without the authority sentence and send a file task; if it
+  refuses, the coordinator must tell the user and not retry with new wording. (6) Check the 20 messages each minute
+  limit in the hand test, for example when the two sides do loop.
