@@ -19,6 +19,10 @@ nonisolated struct ClaudeAnswerRequestBook: Equatable, Sendable {
         let receivedAt: Date
         /// The helper stops waiting by itself at this time.
         let expiresAt: Date
+        /// A helper waits for this request, so ending it writes `dismiss`.
+        /// False for a plan, a notice and an unclassified request: they are
+        /// only shown, and nobody reads an answer file for them.
+        let waits: Bool
     }
 
     /// Seconds. The helper gives up after `AgentAnswerChannel.waitSeconds`,
@@ -39,7 +43,13 @@ nonisolated struct ClaudeAnswerRequestBook: Equatable, Sendable {
             Entry(
                 eventID: event.id, controllerID: controllerID, sessionID: event.sessionID,
                 subagentID: event.subagentID, toolName: event.toolName, receivedAt: event.time,
-                expiresAt: event.time.addingTimeInterval(Self.lifetime)))
+                expiresAt: event.time.addingTimeInterval(Self.lifetime),
+                waits: ClaudePermissionAnswerBridge.helperWaits(event)))
+    }
+
+    /// True when a request of `sessionID` is open (any sub-agent).
+    func hasEntry(sessionID: String) -> Bool {
+        entries.contains { $0.sessionID == sessionID }
     }
 
     @discardableResult
@@ -56,7 +66,9 @@ nonisolated struct ClaudeAnswerRequestBook: Equatable, Sendable {
     /// Removes and returns the entries that `event` shows as done: the tool
     /// ran or failed, the turn ended or a new one started, the session
     /// ended, or Claude asked the next permission question (Claude shows
-    /// the next dialog only after the earlier one is answered).
+    /// the next dialog only after the earlier one is answered). The same
+    /// rules end a question set (AskUserQuestion), a plan (ExitPlanMode) and
+    /// a notice; a notice has no tool, so any tool that finishes ends it.
     mutating func resolve(by event: AgentHookEvent) -> [Entry] {
         let done = entries.filter { Self.resolves(event, $0) }
         guard !done.isEmpty else { return [] }
@@ -109,6 +121,13 @@ nonisolated enum ClaudeAnswerWrite: Equatable, Sendable {
 
 /// Answers Claude Code permission requests from the Up next row.
 ///
+/// - Shows every request the answer-mode helper writes: an answerable card,
+///   a question set, a read-only plan, or a notice for a request Rafu could
+///   not classify (its shape, names and types only, goes to the
+///   `AgentRequestShape` log). A Claude Code `Notification` that asks for
+///   the person opens a read-only notice when the session has no request
+///   open.
+///
 /// - Holds the `AgentAnswerWatchLock` only while `setWatching(true)`: a held
 ///   lock makes every answer-mode helper wait, so the owner turns it on only
 ///   while the person enabled the setting, the answer entry is connected and
@@ -123,35 +142,42 @@ nonisolated enum ClaudeAnswerWrite: Equatable, Sendable {
 ///   shows the tool ran or was answered in the terminal, when the request
 ///   expires, or when its terminal is gone. When something else cleared the
 ///   request from the store (terminal exit, a new terminal route), it only
-///   writes `dismiss`.
+///   writes `dismiss`. It writes `dismiss` only for a request whose helper
+///   waits.
 ///
 /// Request text never reaches a log.
 @MainActor
 final class ClaudePermissionAnswerCoordinator {
     typealias Terminals = @MainActor () -> [AgentTerminalCandidate]
     typealias Writer = @MainActor (ClaudeAnswerWrite) -> Void
+    typealias ShapeRecorder = @MainActor (String) -> Void
 
     let channel: AgentAnswerChannel
     private let requests: AgentRequestStore
     private let terminals: Terminals
     private let write: Writer
+    private let recordShape: ShapeRecorder
     private let now: @MainActor () -> Date
     private var lock: AgentAnswerWatchLock?
     private(set) var book = ClaudeAnswerRequestBook()
     private var isObserving = false
 
-    /// `write` is a test seam; the default writes off the main actor.
+    /// `write` and `recordShape` are test seams; the default writes off the
+    /// main actor and logs each distinct shape once per launch.
     init(
         channel: AgentAnswerChannel,
         requests: AgentRequestStore,
         terminals: @escaping Terminals,
         now: @escaping @MainActor () -> Date = { Date() },
-        write: Writer? = nil
+        write: Writer? = nil,
+        recordShape: ShapeRecorder? = nil
     ) {
         self.channel = channel
         self.requests = requests
         self.terminals = terminals
         self.now = now
+        self.recordShape =
+            recordShape ?? { AgentRequestShape.Recorder.shared.record($0) }
         let bridge = ClaudePermissionAnswerBridge(channel: channel)
         self.write = write ?? { change in Task { await ClaudeAnswerIO.perform(change, bridge) } }
     }
@@ -169,10 +195,7 @@ final class ClaudePermissionAnswerCoordinator {
             guard let held = lock else { return }
             held.release()
             lock = nil
-            for entry in book.removeAll() {
-                requests.close(controllerID: entry.controllerID, key: entry.eventID)
-                write(.dismiss(entry.eventID))
-            }
+            for entry in book.removeAll() { end(entry) }
         }
     }
 
@@ -190,10 +213,9 @@ final class ClaudePermissionAnswerCoordinator {
     func handle(_ events: [AgentHookEvent]) {
         let date = now()
         for event in events {
-            for entry in book.resolve(by: event) {
-                requests.close(controllerID: entry.controllerID, key: entry.eventID)
-                write(.dismiss(entry.eventID))
-            }
+            // Names and types only; the recorder logs each shape once.
+            if event.provider == .claude, let shape = event.requestShape { recordShape(shape) }
+            for entry in book.resolve(by: event) { end(entry) }
             open(event, at: date)
         }
         reconcile()
@@ -203,10 +225,7 @@ final class ClaudePermissionAnswerCoordinator {
     /// each drain and each change of the request store.
     func reconcile() {
         let date = now()
-        for entry in book.expire(now: date) {
-            requests.close(controllerID: entry.controllerID, key: entry.eventID)
-            write(.dismiss(entry.eventID))
-        }
+        for entry in book.expire(now: date) { end(entry) }
         let live = Set(terminals().map(\.id))
         for entry in book.entries {
             if let decision = requests.decision(for: entry.controllerID, key: entry.eventID) {
@@ -218,11 +237,10 @@ final class ClaudePermissionAnswerCoordinator {
             }) {
                 // Cleared by its terminal's exit or route change.
                 book.remove(eventID: entry.eventID)
-                write(.dismiss(entry.eventID))
+                if entry.waits { write(.dismiss(entry.eventID)) }
             } else if !live.contains(entry.controllerID) {
                 book.remove(eventID: entry.eventID)
-                requests.close(controllerID: entry.controllerID, key: entry.eventID)
-                write(.dismiss(entry.eventID))
+                end(entry)
             }
         }
         observeRequestsIfNeeded()
@@ -230,24 +248,39 @@ final class ClaudePermissionAnswerCoordinator {
 
     // MARK: Private
 
+    /// Closes `entry`'s request in the store and, when its helper waits,
+    /// tells the helper to leave Claude's dialog alone.
+    private func end(_ entry: ClaudeAnswerRequestBook.Entry) {
+        requests.close(controllerID: entry.controllerID, key: entry.eventID)
+        if entry.waits { write(.dismiss(entry.eventID)) }
+    }
+
     private func open(_ event: AgentHookEvent, at date: Date) {
         // The helper writes an answerable event only while the lock is held.
         // Without it, the helper is gone or about to go: nothing to answer.
-        guard ClaudePermissionAnswerBridge.isAnswerable(event), isWatching,
-            date.timeIntervalSince(event.time) < ClaudeAnswerRequestBook.lifetime,
+        guard isWatching, date.timeIntervalSince(event.time) < ClaudeAnswerRequestBook.lifetime,
             book.entry(eventID: event.id) == nil
         else { return }
-        guard let request = ClaudePermissionAnswerBridge.request(for: event),
-            let controllerID = Self.terminal(for: event, in: terminals())
-        else {
-            write(.dismiss(event.id))
+        let waits = ClaudePermissionAnswerBridge.helperWaits(event)
+        let request: CanvasAgentRequest?
+        if ClaudePermissionAnswerBridge.isAnswerable(event) {
+            request = ClaudePermissionAnswerBridge.request(for: event)
+        } else if !book.hasEntry(sessionID: event.sessionID) {
+            // A notification for a prompt Rafu shows already adds nothing.
+            guard let notice = ClaudePermissionAnswerBridge.notice(for: event) else { return }
+            request = notice
+        } else {
+            return
+        }
+        guard let request, let controllerID = Self.terminal(for: event, in: terminals()) else {
+            if waits { write(.dismiss(event.id)) }
             return
         }
         switch requests.open(request, controllerID: controllerID) {
         case .opened, .alreadyOpen:
             book.add(event, controllerID: controllerID)
         case .conflict, .full:
-            write(.dismiss(event.id))
+            if waits { write(.dismiss(event.id)) }
         }
     }
 

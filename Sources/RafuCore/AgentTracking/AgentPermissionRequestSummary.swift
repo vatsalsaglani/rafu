@@ -327,15 +327,16 @@ public nonisolated struct AgentPermissionRequestSummary: Codable, Equatable, Sen
     /// The path of the file change, if any.
     public var filePath: String? { fileChanges.first?.path }
 
-    /// True for a request the helper waits on and Up next can answer today:
-    /// a command, a file change, or an MCP tool call. Questions, plans,
-    /// built-in tool cards and unclassified requests are not yet answered
-    /// from Up next, so the helper leaves them to Claude Code's own dialog.
+    /// True for a request the helper waits on and Up next can answer: a
+    /// command, a file change, a tool call (MCP or built-in), or a question
+    /// set. Claude Code keeps its own dialog on screen while the hook waits,
+    /// also for AskUserQuestion (probe on Claude Code 2.1.330). A plan and
+    /// an unclassified request are only shown: the helper writes the event
+    /// and exits at once.
     public var waitsForAnswer: Bool {
         switch classification {
-        case .command, .fileChange: true
-        case .toolCall: toolCall?.isBuiltIn == false
-        case .questions, .plan, .unclassified: false
+        case .command, .fileChange, .toolCall, .questions: true
+        case .plan, .unclassified: false
         }
     }
 

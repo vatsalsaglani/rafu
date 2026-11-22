@@ -6,12 +6,15 @@ import RafuCore
 /// exits 0 either way.
 ///
 /// The answer mode (`rafu-agent-events claude <spool> --answer`) is a separate
-/// hook entry for Claude Code's `PermissionRequest` only. It writes the event
-/// with a bounded request summary, then waits for Rafu's answer and prints the
-/// decision JSON. It prints nothing, and so leaves Claude's own dialog in
-/// charge, when Rafu is not watching, the tool is not one it summarizes, Rafu
-/// sends `dismiss`, or the wait times out. It never logs a command, a path, or
-/// an answer.
+/// hook entry for Claude Code's `PermissionRequest` only. While Rafu watches,
+/// it writes every request with a bounded request summary, so Up next can
+/// show it. It waits for Rafu's answer only for a class Up next can answer (a
+/// command, a file change, a tool call, a question set) and prints the
+/// decision JSON; for a plan or an unclassified request it exits at once. It
+/// prints nothing, and so leaves Claude's own dialog in charge, when Rafu is
+/// not watching, the request is only shown, Rafu sends `dismiss`, the answer
+/// does not fit the request (`ClaudeAnswerModeRequest`), or the wait times
+/// out. It never logs a command, a path, a question, or an answer.
 enum AgentEventHelper {
     /// The command-line flag that selects the answer mode. The same constant
     /// that Rafu writes into the answer hook entry.
@@ -44,13 +47,13 @@ enum AgentEventHelper {
             var event = try? AgentHookEvent(
                 provider: provider, payload: payload, includesRequestSummary: answering)
         else { return }
+        var request: ClaudeAnswerModeRequest?
         if answering {
-            // Not watched means nobody can answer. A tool Rafu does not
-            // summarize (not Bash, a file tool, or an `mcp__` tool) stays
-            // with Claude's own dialog.
-            guard event.hookEventName == "PermissionRequest", event.requestSummary != nil,
-                channel.isWatched
+            // Not watched means nobody can show or answer it.
+            guard event.hookEventName == "PermissionRequest", channel.isWatched,
+                let kept = ClaudeAnswerModeRequest(event: event, payload: payload)
             else { return }
+            request = kept
         }
         event.ancestorProcessIDs = ProcessAncestry.parentChain(
             limit: AgentHookEvent.maximumAncestors)
@@ -59,8 +62,9 @@ enum AgentEventHelper {
         } catch {
             return
         }
-        guard answering else { return }
-        if let output = channel.wait(eventID: event.id).output {
+        // A plan or an unclassified request is only shown: no wait.
+        guard let request, request.waitsForAnswer else { return }
+        if let output = request.output(for: channel.wait(eventID: event.id)) {
             FileHandle.standardOutput.write(output + Data("\n".utf8))
         }
     }

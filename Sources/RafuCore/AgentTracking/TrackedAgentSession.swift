@@ -85,6 +85,12 @@ public struct TrackedAgentSession: Equatable, Identifiable, Sendable {
     /// At most `AgentHookEvent.maximumMessageLength` characters.
     public internal(set) var lastMessagePreview: String?
     public internal(set) var lastEventName: String
+    /// The agent's own text of the Claude Code `Notification` that put the
+    /// session in a waiting state ("Claude needs your permission to use
+    /// Bash"), at most `AgentHookEvent.maximumNotificationMessageBytes`.
+    /// Cleared when the session stops waiting or a new prompt starts. Kept in
+    /// memory only, never logged.
+    public internal(set) var notificationMessage: String?
     public internal(set) var turnID: String?
     /// The `Stop` event that produced the current reply; `nil` when the
     /// session is idle without a new reply.
@@ -233,6 +239,7 @@ public struct AgentSessionLedger: Equatable, Sendable {
         if !event.ancestorProcessIDs.isEmpty { row.ancestorProcessIDs = event.ancestorProcessIDs }
         if let tool = event.toolName { row.lastTool = tool }
         Self.fold(event, into: &row)
+        Self.foldNotificationMessage(event, into: &row)
         if event.hookEventName == "SessionEnd", event.subagentID == nil {
             row.subagents = []
             row.pendingSpawns = []
@@ -346,6 +353,32 @@ public struct AgentSessionLedger: Equatable, Sendable {
             sessionsByKey[key] = updated
         }
         return changed
+    }
+
+    /// Claude Code notification types that ask for the person and carry the
+    /// agent's own text about it. `agent_needs_input` is not one: it also
+    /// fires for background sessions, so it does not read as Needs you.
+    static let attentionNotificationTypes: Set<String> = [
+        "permission_prompt", "worker_permission_prompt", "elicitation_dialog",
+        "elicitation_url_dialog",
+    ]
+
+    /// Keeps the message of a waiting notification while the session waits.
+    /// A new permission request or question (a different prompt) and any
+    /// state that is not waiting clear it.
+    private static func foldNotificationMessage(
+        _ event: AgentHookEvent, into row: inout TrackedAgentSession
+    ) {
+        if event.hookEventName == "Notification", event.subagentID == nil,
+            let type = event.notificationType, attentionNotificationTypes.contains(type),
+            let message = event.notificationMessage, !message.isEmpty
+        {
+            row.notificationMessage = message
+        } else if !row.needsAttention || event.hookEventName == "PermissionRequest"
+            || event.hookEventName == "PreToolUse"
+        {
+            row.notificationMessage = nil
+        }
     }
 
     private static func fold(_ event: AgentHookEvent, into row: inout TrackedAgentSession) {
