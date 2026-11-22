@@ -367,7 +367,8 @@ struct CompanionUpNextSectionView: View {
                                             claudeAnswersEnabled: AgentActivityStore.shared
                                                 .claudeAnswersEnabled,
                                             request: AgentRequestStore.shared.current(
-                                                for: row.id)))
+                                                for: row.id),
+                                            notificationMessage: row.notificationMessage))
                                 }
                             }
                         }
