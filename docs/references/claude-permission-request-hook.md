@@ -18,8 +18,10 @@ verified with unit tests only (temporary folders, a fixed clock); no live probe 
 
 Status: the helper mode, the answer channel, the app mapping, the hook entry, the Settings switch, the Connect step,
 the request lifetime and the Up next row that shows and answers a request exist and are tested (see
-[`notch-companion.md`](notch-companion.md), "Approval rows"). GUI hand checks of the row are pending. Claude Code questions
-(`AskUserQuestion`) are not answered from Up next; see the section "Claude Code questions use a different hook".
+[`notch-companion.md`](notch-companion.md), "Approval rows"). GUI hand checks of the row are pending. Since 2026-11-22
+every `PermissionRequest` shows, and an `AskUserQuestion` question set is answered through this same hook (it was
+terminal-only before): see the section "Every prompt reaches Rafu (2026-11-22, Claude Code 2.1.330)". The older section
+"Claude Code questions use a different hook" is about a `PreToolUse` hook, which still hides the question.
 
 ## Observations (Claude Code 2.1.328)
 
@@ -76,17 +78,20 @@ the request lifetime and the Up next row that shows and answers a request exist 
   harmless.
 - The helper reads all of stdin, builds the event with a bounded `requestSummary` and writes it to the spool. It
   prints a decision only when Rafu answered `allow` or `deny`. It prints nothing (Claude keeps its dialog) when
-  Rafu is not watching, the tool is not Bash, Edit, MultiEdit, Write or an MCP tool (`mcp__<server>__<tool>`, added
-  2026-11-21), the summary is empty, Rafu sent `dismiss`,
-  Rafu stopped watching, or 285 s passed (`waitSeconds`). A 290 s alarm is the last resort (`alarmSeconds`).
+  Rafu is not watching, Rafu sent `dismiss`, Rafu stopped watching, or 285 s passed (`waitSeconds`). A 290 s alarm is
+  the last resort (`alarmSeconds`). (Until 2026-11-22 it also printed nothing, and wrote no event, for any tool other
+  than Bash, Edit, MultiEdit, Write or an MCP tool. It now spools every request; it waits only for the classes that
+  can be answered. See the section "Every prompt reaches Rafu".)
 - **"Rafu is watching" is a held `flock`.** The app holds an exclusive lock on `AgentTracking/answers/watcher.lock`
   (`AgentAnswerWatchLock`). The helper takes a shared lock without waiting; a refusal means a live holder. The kernel
   drops the lock when the app quits or crashes, so there is no stale "watching" flag. The helper checks it before it
   writes the event and on every poll.
 - **Answers are files.** `AgentTracking/answers/<EVENT ID>.json` (folder 0700, file 0600) holds `{eventID, verdict,
-  interrupt}` and no text. The app writes it under a hidden name and renames it (the first answer for an event wins).
+  interrupt}`. Since 2026-11-22 a question-set answer also holds `answers` (for each question: its index, the chosen
+  labels and the text the user typed) and a lasting-grant answer holds `remember`; it never holds question text.
+  The app writes it under a hidden name and renames it (the first answer for an event wins).
   The helper polls every 0.2 s, reads it once (`lstat`: regular file, owned by the user, no group/other bits, at most
-  1 KiB, event id equal to the name), and deletes it, valid or not. A file for another event id is never read.
+  `maximumAnswerBytes` = 16 KiB (was 1 KiB), event id equal to the name), and deletes it, valid or not. A file for another event id is never read.
   The answers folder is the spool's sibling, so the release app and Rafu Lightning never share a channel.
 - **The fixed denial text.** A `deny` carries `The user denied this request in Rafu.` No user text travels.
 - **The request key is the event id.** `ClaudePermissionAnswerBridge.request(for:)` sets
@@ -235,7 +240,8 @@ request summary"), `ClaudePermissionAnswerBridgeTests`.
   alternative if answering every edit proves too slow.
 - Why an `mcp__` tool (for example a Rafu tool) produced no row: the summary read only Bash, Edit, MultiEdit and
   Write, so the answer-mode helper returned at once for any other tool and Claude Code showed its own dialog. (It
-  now reads an MCP tool name; see the next section. Any other tool, such as `WebFetch`, still gets no row.)
+  now reads an MCP tool name; see the next section. Since 2026-11-22 any other tool, such as `WebFetch`, gets a
+  generic tool card, and an unknown one gets a notice: see "Every prompt reaches Rafu".)
 
 ## MCP tool requests (2026-11-21, source and unit tests only)
 
@@ -295,6 +301,107 @@ Applies to: `AgentHookInstaller.refreshHelper`, `AgentHookConfiguration.referenc
   the app uses an atomic rename.
 - A Claude Code session that is already running picks up the new helper at its next hook event, because the agent
   starts the helper for each event.
+
+## Every prompt reaches Rafu (2026-11-22, Claude Code 2.1.330)
+
+Applies to: `AgentPermissionRequestSummary.swift` (`Classification`, `classify(toolName:toolInput:permissionSuggestions:)`,
+`waitsForAnswer`, `noticeReason`, `PermissionSuggestion`), `AgentAnswerChannel.swift` (`AgentPermissionAnswer.hookOutput`,
+`answerValues`), `ClaudeAnswerModeRequest.swift`, `Sources/RafuAgentEventHelper/AgentEventHelper.swift`,
+`ClaudePermissionAnswerBridge.swift` (`request(for:)`, `notice(for:)`, `answer(for:eventID:policy:)`),
+`ClaudePermissionAnswerCoordinator.swift`, `AgentHookEvent.swift` (`notificationMessage`, `requestShape`),
+`TrackedAgentSession.swift`. Tests: `AgentPermissionRequestSummaryTests`, `AgentAnswerChannelTests`,
+`AgentHookEventTests`, `ClaudePermissionAnswerBridgeTests`, `ClaudePermissionAnswerCoordinatorTests`,
+`AgentPromptCoverageTests`. The prompt inventory and the version checklist are in
+[`agent-prompt-coverage.md`](agent-prompt-coverage.md). Decision record: the amendment "Every agent prompt shows;
+question sets answer in Rafu" in [`0042-answer-agent-requests-from-up-next.md`](../decisions/0042-answer-agent-requests-from-up-next.md).
+
+**Why a request used to vanish.** The summary returned nil for any tool but Bash, Edit, MultiEdit, Write or an MCP
+tool, and the answer-mode helper exited before it wrote the event. Now every `PermissionRequest` gets a class:
+`command`, `fileChange`, `toolCall`, `questions`, `plan` or `unclassified`. The helper spools all of them. It waits
+for an answer only for `command`, `fileChange`, `toolCall` and `questions` (`waitsForAnswer`). For `plan` and
+`unclassified` it writes the event and exits at once with no output, so Claude Code keeps its own dialog.
+
+**P1: a `PermissionRequest` hook receives `AskUserQuestion`, and can answer it.** Live, Claude Code 2.1.330, model
+`haiku`, a temporary settings file, the pty method in "Reproduce".
+
+- The hook receives `tool_name` `AskUserQuestion` with `tool_input.questions`: for each question `question`, `header`,
+  `options` (`label`, `description`) and `multiSelect`. This holds, although a `PreToolUse` hook for the same tool
+  hides the question (next section).
+- The terminal question stays visible while the hook waits. So decision 3 of the decision record (the terminal must
+  stay usable while Rafu waits) holds for questions too.
+- The hook allows and returns `updatedInput`: `{questions: <the original>, answers: {<question text>: <value>}}`. The
+  dialog closes and Claude receives the answers.
+- A multi-select value is the chosen labels joined with `", "`. A typed (free-text) answer works: the text is the
+  value.
+- A notification "Claude needs your permission" (`permission_prompt`) comes about 6 s after the dialog, as in
+  observation 10.
+
+The hooks reference says `AskUserQuestion` and `ExitPlanMode` need `updatedInput`: "Returning `allow` alone is not
+sufficient for these tools" (documentation fetched 2026-11-22).
+
+**How Rafu answers a question set.**
+
+- The helper keeps the original `tool_input` in memory. The app sends indexes, labels and typed text, never question
+  text. The helper checks every label against its own copy and prints nothing on any mismatch, so the terminal
+  dialog stays (`AgentPermissionAnswer.answerValues`).
+- A question is terminal-only when its question text repeats (Claude Code keys answers by question text), when a
+  multi-select label holds `", "` (the join would be ambiguous), or when a label or id changed in sanitizing.
+- Bounds: at most 4 questions, 6 choices each, 1 KiB of typed text each. The answer file holds the chosen labels and
+  the typed text (0600 in a 0700 folder, deleted on read, pruned after 10 minutes, never logged). The helper's wait
+  and the answer-file limit changed with this (`maximumAnswerBytes` 1 KiB to 16 KiB).
+- A choice `preview` (Claude Code sets it only for an SDK host that asks for `previewFormat`) shows as plain text,
+  bounded, and is never part of the answer.
+- "Chat about this" (the extra choice of a single-select dialog) has no documented hook payload. It is parked.
+
+**Built-in tools get a generic tool card.** A tool name in the form `^[A-Za-z][A-Za-z0-9_]{0,63}$` with no `__`
+(`isBuiltInToolName`) builds a `toolCall` request. The reason line is `"Claude Code tool: <name>"` then the raw name;
+the arguments are the whole `tool_input` as sorted JSON with no masking, bounded at 2 KiB like an MCP tool. Read,
+Glob and Grep outside the working folders, WebFetch, WebSearch, NotebookEdit, Skill, Agent, Workflow and any future
+tool are covered. `AskUserQuestion` and `ExitPlanMode` are excluded by name because a plain allow is not valid for
+them. The hook decision for every other tool is the same JSON as for Bash. Unit tests only; not run live.
+
+**Plan approval (`ExitPlanMode`) shows read-only.** The card is titled "Plan ready". It shows the plan file path and
+the plan text (at most 4 KiB, then cut and marked) with "Open terminal". The payload for its three choices (yes with
+auto mode, yes with manual edits, no) is not documented, so Rafu does not answer it. Parked: probe P2.
+
+**Unknown prompts.** A tool name outside both forms, or an input that is not an object, gives a `notice` request: "Claude
+Code asks to use <name>. Open the terminal to answer." The helper also writes a shape line (key names for a built-in
+tool, counts for an MCP tool) in the spooled event field `requestShape`; the app logs it (see
+[`agent-prompt-coverage.md`](agent-prompt-coverage.md)).
+
+**Notifications open notices.** `permission_prompt` and `worker_permission_prompt` map to the title "Permission
+request", `elicitation_dialog` to "MCP server form", `elicitation_url_dialog` to "Sign-in in browser"
+(`ClaudePermissionAnswerBridge.noticeTitles`). A notice opens only when no other request shows for the session and
+the `message` is not empty. `agent_needs_input` opens none (it also fires for background sessions). The `message` is
+kept in memory only (512 bytes, sanitized, never logged). A "Needs you" row with no card also shows the message
+(`CompanionUpNextContent.needsYouHint`).
+
+**Prompts no hook can answer** (so Rafu shows them and stops there):
+
+- The network request of a sandboxed command: no `PermissionRequest` runs, only the `permission_prompt`
+  notification (documentation fetched 2026-11-22).
+- An MCP elicitation: an `Elicitation` hook exists, but whether a waiting hook hides the terminal form is not
+  known. Parked: probe P3, and it needs a new hook entry that the user approves in a Connect review.
+- An MCP tool marked `anthropic/requiresUserInteraction`: the documentation says a hook cannot skip its prompt with
+  `allow`. Rafu cannot tell from the payload. An Allow from Rafu would have no effect and the terminal dialog stays.
+- Folder trust, login, `/permissions`, a model switch, a usage-limit wait and a teammate setup question are not tool
+  prompts.
+
+**Remember choice (built, off).** `permission_suggestions` can hold permission updates. Rafu understands exactly one
+`addRules` entry with `behavior` `allow` and one rule (`PermissionSuggestion`). The helper would echo that entry as
+`updatedPermissions`. `CanvasAgentRequest.PersistPolicy.current` keeps the choice hidden until the user decides. See
+the pending amendment in the decision record.
+
+**Not verified live.** The generic tool card, the plan card, the notice rows and the lifetime of a question request
+that the person answers in the terminal (the "done in the terminal" rule for `PostToolUse` of `AskUserQuestion`).
+P1 proves the hook input, the visible dialog, the allow with `updatedInput`, the joined multi-select value and free
+text. The exact date, wait time and prompt text of the P1 runs were not supplied to the documentor.
+
+**Stale helper.** A helper from before this change exits without an event for every class but the old four. The
+refresh in the section "A stale installed helper hides a row" replaces it at launch.
+
+Test evidence: each group's parallel run passed in its own worktree; counts were not supplied. Coordinator runs on
+`main`: Coordinator on `main` (2026-11-22, after the merge of the Needs-you hint follow-up): `./script/test.sh` and `./script/test.sh --no-parallel` both passed (4,174 tests in 339 suites and 795 tests in 54 suites); `./script/build_and_run.sh --verify` passed. Hand tests in Rafu Lightning are open.
 
 ## Claude Code questions use a different hook
 

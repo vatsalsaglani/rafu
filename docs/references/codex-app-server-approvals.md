@@ -172,6 +172,10 @@ Applies to: `CanvasAgentRequest.parse` (case `mcpServer/elicitation/request`, he
 [`0044-pre-approve-rafu-tools-for-codex.md`](../decisions/0044-pre-approve-rafu-tools-for-codex.md) (reversed for tool
 approvals).
 
+**Update 2026-11-22:** the INFERRED `_meta` key list and the answer table below are replaced by the next section
+("Every server request shows"), which is checked against the Codex source at the tag `rust-v0.171.0`. Read the next
+section first.
+
 Codex asks before it calls a tool of an MCP server (for example "Allow the atlassian MCP server to run tool
 "getJiraIssue"?") with the server request `mcpServer/elicitation/request`. The proxy now follows it. A tool approval
 opens the same `toolCall` request that a Claude MCP tool request uses ("Use MCP tool" card).
@@ -236,6 +240,87 @@ session" stays off for this kind. A Claude tool call never reaches the proxy tab
 Reproduce the schema: `codex app-server generate-json-schema --out <dir>` (and `generate-ts --out <dir>`), then read
 `McpServerElicitationRequestParams.json` and `McpServerElicitationRequestResponse.json`. The `_meta` keys were found
 with `strings` on the `codex` binary.
+
+## Every server request shows; the tool card key set (2026-11-22, Codex 0.171.0, source tag `rust-v0.171.0`)
+
+Applies to: `CanvasAgentRequest.parseCodex`, `classify(method:)`, `knownToolApprovalMetaKeys`,
+`forcingToolApprovalMetaKeys`, `toolCallRequest(fromElicitation:)`, `result(for:)`, `stopsTurnOnCancel`, and
+`trackApprovals` in `CanvasCodexProxy.swift`. Tests: `CanvasAgentRequestTests`, `CanvasCodexApprovalTests`,
+`AgentPromptCoverageTests`. The prompt inventory and the version checklist:
+[`agent-prompt-coverage.md`](agent-prompt-coverage.md). Decision record: the amendment "Every agent prompt shows;
+question sets answer in Rafu" in [`0042-answer-agent-requests-from-up-next.md`](../decisions/0042-answer-agent-requests-from-up-next.md).
+
+**Live symptom (2026-11-22).** A Google Calendar tool of the `codex_apps` server showed a card with "Open terminal"
+only.
+
+**Root cause (checked in the source).** The `_meta` key list of the first version was inferred from binary strings.
+It missed three keys that Codex 0.171.0 does send: `tool_annotations`, `link_id` and `link_is_implicit`. A
+`codex_apps` connector tool carries all three, so the card became terminal-only. The list also held
+`codex_request_type`, which the builder does not write (it was inferred and is removed).
+
+The keys that `build_mcp_tool_approval_elicitation_meta` (`codex-rs/core/src/mcp_tool_call.rs`) can write, now the
+known set: `codex_approval_kind`, `persist`, `tool_name`, `tool_annotations`, `tool_title`, `tool_description`,
+`source`, `connector_id`, `link_id`, `link_is_implicit`, `connector_name`, `connector_description`, `tool_params`,
+`tool_params_display`.
+
+Four keys keep the request terminal-only, whatever their value, because they change what an approval means
+(`codex-rs/protocol/src/mcp_approval_meta.rs`): `codex_sensitive_action`, `codex_requires_user_input`,
+`codex_strict_auto_review`, `approvals_reviewer`. Any other unknown key also makes it terminal-only, and the shape
+recorder names the key.
+
+**`persist`** is absent, the string `"session"` or `"always"`, or the array of both. It decides which remember
+choices Codex offers. Rafu models them, but `PersistPolicy.current` keeps both off (pending the user's decision), so
+no `persist` goes out today.
+
+**Answers** (source: `submit_answers` and `parse_mcp_tool_approval_elicitation_response` in
+`codex-rs/tui/src/bottom_pane/mcp_server_elicitation.rs`). Not run live.
+
+| Rafu button | `result` sent upstream |
+|---|---|
+| Allow | `{"action":"accept","content":null}` (an empty object `{}` also gives "Approved") |
+| Allow for this session (off) | `{"action":"accept","content":null,"_meta":{"persist":"session"}}` |
+| Always allow (off) | `{"action":"accept","content":null,"_meta":{"persist":"always"}}` |
+| Cancel tool call | `{"action":"cancel","content":null,"_meta":{"codex_approval_cancellation_reason":"user"}}` |
+| Deny | `{"action":"decline"}`: the model reads "user rejected MCP tool call" |
+
+`cancel` does not stop the turn: core tells the model "user cancelled MCP tool call" and goes on. So a Codex tool
+call shows "Cancel tool call" and not "Deny and stop" (`stopsTurnOnCancel` is false for it; a command still says "Deny
+and stop", because `cancel` stops the turn there, see the reply table).
+
+**Not known from the source:** whether the app-server adds a key to `_meta` on the way out. The shape recorder shows
+the answer on the first real request. Hand check: ask a Codex terminal in Rafu Lightning to create a calendar event
+(any connector tool). If the card still shows only "Open terminal", run
+`log show --last 10m --predicate 'category == "AgentRequestShape"' --info` and read the key names.
+
+**Every server request for the thread is parsed.** A method that is a prompt but that Rafu does not answer gives a
+`notice` row and a recorded shape, not nothing. Only `item/tool/call`, token refresh and attestation give no row.
+The thread match reads `params.threadId`, and the older approval methods (`applyPatchApproval`,
+`execCommandApproval`) name it in `params.conversationId`. A generic MCP form, a message-only approval, a URL
+elicitation (`browser_auth`, `tool_suggestion`) and an old-API approval show read-only with the server's own
+message. Whether the 0.171.0 terminal still sends the old methods is not known; the recorder shows it.
+
+**Tool approval sent as a question.** When the Codex feature `ToolCallMcpElicitation` is off, Codex sends the
+approval as a `request_user_input` question whose id starts with `mcp_tool_call_approval`. The request holds no
+tool arguments, so Rafu could not show what would run. It shows a terminal-only notice ("Tool approval: open the
+terminal to see the arguments").
+
+**Questions.** `request_user_input` has 1 to 3 questions, each with `id`, `header`, `question`, and `options`
+(`label`, `description`); `isOther` is always true, `isSecret` can be set, and there is no multi-select (source:
+`codex-rs/core/src/tools/handlers/request_user_input_spec.rs`). Free text is now answerable: the result is
+`{"answers": {"<id>": {"answers": ["<label>", "user_note: <text>"]}}}`. With a text and no chosen label the list is
+`["None of the above", "user_note: <text>"]`, the label Codex adds for its "other" row. A secret question stays
+terminal-only.
+
+**Commands.** A network approval (`networkApprovalContext`) now shows "Network: <protocol> <host>" and can be
+accepted, declined or cancelled, with no session answer (it was terminal-only). A `proposedExecpolicyAmendment` that
+is a list of at most 16 plain words within 256 bytes becomes the remember choice "Always allow commands that start
+with <words>" (`{"decision":{"acceptWithExecpolicyAmendment":{"execpolicy_amendment":[...]}}}`); it is off under
+`PersistPolicy.current`. Codex schema facts are checked; none of these were run live.
+
+Reproduce the source reading: the tag `rust-v0.171.0` of the Codex repository, the four files named above.
+
+Test evidence: the Codex group's parallel run passed in its worktree; the count was not supplied to the documentor.
+Coordinator runs on `main`: Coordinator on `main` (2026-11-22, after the merge of the Needs-you hint follow-up): `./script/test.sh` and `./script/test.sh --no-parallel` both passed (4,174 tests in 339 suites and 795 tests in 54 suites); `./script/build_and_run.sh --verify` passed. Hand tests in Rafu Lightning are open.
 
 ## Verification
 

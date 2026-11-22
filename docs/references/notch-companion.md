@@ -526,6 +526,11 @@ and `noteApprovalInteraction()`. Tests:
   (`CompanionUpNextContent.needsYouHint`): "Turn on Answers from Up next in
   Settings to answer here" for Claude Code while that switch is off, else
   "Answer in the terminal". The row height is now at least 26 pt, not fixed.
+  Since 2026-11-22 the line starts with the agent's own text when Rafu holds
+  it: a Claude notification message ("Claude needs your permission to use
+  Bash. Answer in the terminal"), or, for a row with a request, the title
+  ("Plan ready. Open the terminal to answer" or "<title>. Answer here"). The
+  bare "Answer in the terminal" is the last resort.
 
 **20. Approval peek (2026-11-20).** NOT checked in the GUI (launch only).
 Decision: the peek amendment of
@@ -643,6 +648,56 @@ Code: `ApprovalPeekModels.swift` (pure), `ApprovalPeekController.swift`,
   whole text: a command "<agent> asks to run <command>", a file change
   "<agent> asks to write <path>. New content: <body>" or "<agent> asks to change
   <path>. Diff: <body>". "Show all" is labelled "Show the whole request".
+
+**21. Question sets, plan cards and notices (2026-11-22).** NOT checked in the GUI. Decision: the amendment "Every
+agent prompt shows; question sets answer in Rafu" of
+[`0042-answer-agent-requests-from-up-next.md`](../decisions/0042-answer-agent-requests-from-up-next.md). Code:
+`CompanionQuestionSetView.swift` (`CompanionQuestionSetState`, `CompanionQuestionSetView`, `CompanionPlanView`,
+`CompanionNoticeView`), `CompanionRequestView.swift`, `CompanionRequestPresentation.swift` (titles),
+`ApprovalPeekModels.swift` (`ApprovalPeekContent.questionsCollapsed` and `.questionSet`), `ApprovalPeekView.swift`,
+`NotchAgentModels.swift` (`needsYouHint`), `NotchSectionViews.swift`. Tests: `CompanionRequestPresentationTests`,
+`ApprovalPeekModelsTests`, `NotchAgentModelsTests`, `AgentRequestStoreTests`. Prompt inventory:
+[`agent-prompt-coverage.md`](agent-prompt-coverage.md).
+
+- **Question set.** One page for each question. The page line reads "Question 1 of 3" (hidden for one question) with
+  the question `header` as a small label. A single-choice question shows radio rows, a multiple-choice question
+  shows checkbox rows with "Choose one or more". Each row shows the label, the description and, when the agent sent
+  one, the preview in a quiet monospaced box. An "Other…" row with a text field shows when the agent takes typed
+  text. Back and Next move between pages. "Answer" is on the last page and stays off until
+  `CanvasAgentRequest.permits` is true for the whole set. "Open terminal" always shows. The page, the chosen labels
+  and the typed text are private `@State` (`CompanionQuestionSetState` is a pure value that the tests drive); the
+  request stays a value. The typed text keeps only what can be sent (no control or format characters, at most 1 KiB),
+  so the text sent is the text shown. It stays in memory and is never logged.
+- **One-click case unchanged.** One short single-choice question with at most 4 choices still shows one button for
+  each choice in the peek (`.choices`). "Other…" there expands the card. Any other set shows the first question and an
+  "Answer" button that expands the card (`.questionsCollapsed`, then `.questionSet`). Nothing is chosen before the
+  person expands it. The choice list scrolls above `ApprovalPeekGeometry.questionChoicesHeight`, so the buttons stay
+  in view. A question set that only the terminal can answer shows read-only with the line "Only the terminal can
+  answer this question."
+- **Keyboard.** Up and Down move between the rows. Space toggles a row. Return goes to the next page, or sends the
+  answer on the last page when it is valid. In the text field Return goes on through `onSubmit` and Escape leaves the
+  field. The arrow keys move between rows only when Full Keyboard Access is on, because the rows are buttons.
+  Choosing a row sends nothing, so it is not behind the 0.5 s click guard; "Answer" is.
+- **VoiceOver.** The page reads "Question 1 of 3". Each choice is one element with the label, the description and the
+  selected state ("Checked" or "Not checked" for a multiple-choice question). A preview is extra content ("Preview").
+  The text field reads "Other answer" with the hint "Type your own answer".
+- **Plan card.** Title "Plan ready", the plan file path, the plan in a scrolling selectable box (peek box height
+  120 pt), and "The plan is cut here. Open the terminal to read all of it." when it was cut. Read-only: "Open
+  terminal" only.
+- **Notice card.** The row title is the first line of the notice's reason, without a closing "Open the terminal to
+  answer." (for example "Permission request", "MCP server form" or "Sign-in in browser" for a Claude notification,
+  "Claude Code asks to use <tool>", "An MCP server asks for approval" for Codex), or "Prompt in the terminal" when
+  there is none. The body is the agent's own text, two
+  lines with "Show all" and "Show less". It replaces the bare "Answer in the terminal" whenever Rafu holds text for
+  the session. Read-only: "Open terminal" only.
+- **Titles** (`CompanionRequestPresentation.title(for:)`): "Run command", "Apply file changes", "Grant permissions",
+  "Answer a question" or "Answer questions", "Use MCP tool", "Plan ready", and the first line of a notice.
+- **Remember choices** go in the menu of the action row with their exact effect as text, never on the primary button
+  or the swipe. They are off (`PersistPolicy.current`) until the user decides.
+- **Frames.** The cards follow the pin-to-top rule of `AGENTS.md`. No new string holds "Conductor" or "Canvas".
+- **Not checked.** All of the above in a GUI run: both surfaces, a second window, VoiceOver, Full Keyboard Access,
+  Reduce Motion. Each implementation group passed its parallel run in its worktree; counts were not supplied.
+  Coordinator runs on `main`: Coordinator on `main` (2026-11-22, after the merge of the Needs-you hint follow-up): `./script/test.sh` and `./script/test.sh --no-parallel` both passed (4,174 tests in 339 suites and 795 tests in 54 suites); `./script/build_and_run.sh --verify` passed. Hand tests in Rafu Lightning are open.
 
 ## Why it matters
 

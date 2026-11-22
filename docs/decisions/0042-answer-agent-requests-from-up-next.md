@@ -1,6 +1,7 @@
 # ADR 0042: Answer agent requests from the Up next row
 
-- **Status:** Accepted (2026-11-20) on the user's direction (answer an agent's approval request from the Up next row
+- **Status:** Amended 2026-11-22 (every prompt shows; question sets answer in Rafu; lasting grants pending the
+  user's decision, see the last amendment). Accepted (2026-11-20) on the user's direction (answer an agent's approval request from the Up next row
   of the notch, the island card or the menu bar card, with no trip to the terminal). Amended the same day after a
   read-only review (the full command always shows, more terminal-only cases, file changes are terminal-only, and a
   live check of a late hook answer). GUI checks pending (listed below).
@@ -76,7 +77,10 @@ dialog must stay usable, and an answer must never be typed into a terminal as ke
    Claude Code. The switch alone installs nothing. Rafu tells a helper that it is watching only while the switch is
    on and the entry is connected (a held `flock`; the kernel drops it when the app quits or crashes). Disconnect of
    activity tracking removes the answer entry too.
-9. **Claude Code questions are not answered from Up next (final for this release).** A question that Claude Code
+9. **Claude Code questions are not answered from Up next (final for this release).** *Superseded on 2026-11-22 by
+   the amendment "Every agent prompt shows; question sets answer in Rafu" below: a blocking `PermissionRequest`
+   hook, not the `PreToolUse` hook tested here, receives the question and the terminal stays usable.* The original
+   text follows. A question that Claude Code
    asks with its `AskUserQuestion` tool stays terminal-only: Rafu shows no row for it. Reason: a spike with Claude
    Code 2.1.329 showed that a blocking `PreToolUse` hook for `AskUserQuestion` hides the terminal question until
    the hook exits. The choices appeared about 20 ms after a hook that ran for 12 s exited. This breaks decision 3
@@ -139,7 +143,8 @@ coordinator's brief named the first three, and their reasons are listed as far a
 - The Claude install step was verified with unit tests only. No live probe of the full app path exists yet.
 - Codex permission replies with scope `session` were not run live. They follow the same schema. File changes are no
   longer answered from the row (decision 10).
-- **Claude Code questions stay terminal-only (decision 9).** The row cannot answer an `AskUserQuestion` question.
+- ~~**Claude Code questions stay terminal-only (decision 9).** The row cannot answer an `AskUserQuestion` question.~~
+  Superseded on 2026-11-22 (see the last amendment).
 
 ## Revisit trigger
 
@@ -299,6 +304,72 @@ exact `_meta` of a real request; that the accept shape runs the tool; that the t
 with a new stored flag). A request whose shape does not match the rule gets no row, so a wrong guess hides the feature
 and does not make it unsafe. Test evidence: 4143 tests passed in parallel mode in the implementor's worktree; the
 `--no-parallel` result was not supplied to the documentor.
+
+## Amendment: every agent prompt shows; question sets answer in Rafu (2026-11-22)
+
+On the user's direction: "every kinda choice and question set should come to Rafu" (Claude Code and Codex can ask
+several questions at once), and "no guesses": a fact that is not checked is parked, not built. The coordinator
+reported the work merged (shared contract, Codex group, UI group, Claude group, and the "Needs you" hint follow-up).
+Detail and evidence: [`claude-permission-request-hook.md`](../references/claude-permission-request-hook.md),
+[`codex-app-server-approvals.md`](../references/codex-app-server-approvals.md),
+[`agent-prompt-coverage.md`](../references/agent-prompt-coverage.md),
+[`notch-companion.md`](../references/notch-companion.md) rule 21.
+
+1. **No prompt is dropped in silence.** Three silent allow-lists caused the repeated gaps (Claude summary returned
+   nil for unknown tools, Codex `parse` returned nil for unknown requests, the plain "Answer in the terminal" row).
+   Now a request that Rafu does not know shows read-only, with the agent's own text and "Open terminal" (new
+   request kind `notice`). Only a method that is not a prompt for the user returns no row. `AgentRequestShape`
+   records key names and value types, never values (tested), and `AgentPromptCoverageTests` fails when a Claude
+   Code tool name or a Codex server request method has no class. Each Claude Code or Codex update follows the
+   version checklist in the coverage note.
+2. **Question sets answer in Rafu.** This supersedes decision 9 (Claude questions terminal-only) and the last
+   sentence of decision 6 (Codex free text needs the terminal). Claude Code: the `PermissionRequest` hook receives
+   `AskUserQuestion`; the terminal question stays visible while the hook waits; the hook allows with `updatedInput`
+   that holds `answers` keyed by question text (live probe, Claude Code 2.1.330). Decision 9 recorded that a
+   `PreToolUse` hook hides the question; that is still true and Rafu does not use it. Codex: a question set with a
+   typed note answers as `user_note: <text>` (source checked, 0.171.0). Up to 4 Claude questions and 3 Codex
+   questions; multi-select exists for Claude only.
+3. **The answer file now carries chosen labels and typed text.** This changes decision 2, which said the answer
+   file has no text. It still never carries question text or request text. The file stays 0600 in a 0700 folder, is
+   deleted on read and pruned after 10 minutes, and is never logged. The typed text is at most 1 KiB for each
+   question and sanitized. The file limit rose from 1 KiB to 16 KiB. The helper keeps the original `tool_input` and
+   checks each label against it; a mismatch prints nothing and the terminal dialog stays. A multi-select label that
+   holds `", "` and two questions with one text are terminal-only.
+4. **New request kinds and a wider tool card.** `plan` (Claude `ExitPlanMode`, read-only, always terminal-only) and
+   `notice`. A Claude built-in tool with a plain name (Read or Glob outside the folders, WebFetch, WebSearch,
+   NotebookEdit, Skill, Agent, ...) gets the same "Use MCP tool"-style card with the identity "Claude Code tool:
+   <name>" and the whole `tool_input` as JSON. This supersedes the sentence in decision 5 that Claude requests for
+   other tools get no row. `AskUserQuestion` and `ExitPlanMode` are excluded from it by name.
+5. **Codex tool card repaired.** The `_meta` key list is now the set that Codex 0.171.0 writes (source tag
+   `rust-v0.171.0`): the earlier inferred list missed `tool_annotations`, `link_id` and `link_is_implicit`, so a
+   connector tool (Google Calendar) was terminal-only. Four keys keep it terminal-only (`codex_sensitive_action`,
+   `codex_requires_user_input`, `codex_strict_auto_review`, `approvals_reviewer`). Accept now sends
+   `{"action":"accept","content":null}` (this replaces `content: {}` of the Codex MCP amendment). `cancel` does not
+   stop the turn, so the Codex button reads "Cancel tool call", not "Deny and stop", and it sends
+   `codex_approval_cancellation_reason: "user"` in `_meta`. A tool approval that arrives as a question (id prefix
+   `mcp_tool_call_approval`) is a terminal-only notice, because it holds no arguments.
+6. **Network approvals answer in the row.** A Codex command approval with `networkApprovalContext` shows "Network:
+   <protocol> <host>" and answers accept, decline or cancel, with no session answer. This supersedes the
+   `networkApprovalContext` case in decision 5. Every Codex server request with an id for the bound thread is parsed;
+   the older approval methods name the thread in `conversationId`.
+7. **Pending amendment: lasting grants (not approved).** The remember choices are modelled and tested but OFF
+   through `CanvasAgentRequest.PersistPolicy.current`: Codex "Allow for this session" and "Always allow" for a tool
+   (`_meta.persist`), the Codex command prefix rule (`acceptWithExecpolicyAmendment`), and the Claude rule suggestion
+   (`updatedPermissions`, one understood `addRules` entry, echoed by the helper). Decision 7 stays in force: Rafu
+   sends no `persist` and no `updatedPermissions`. The user has not agreed to change that. If the user agrees, the
+   choices go in the menu with their exact effect as text, never on the primary button or the swipe.
+8. **Parked** (each needs a user action or a probe): Claude "Chat about this"; Claude plan approval answering
+   (probe P2); Claude MCP elicitation answering (probe P3, and a new hook entry that the user approves in a Connect
+   review); Codex generic form answering; Codex "Implement this plan?" (needs a screenshot); lasting grants (the
+   user's decision). A sandboxed Claude network request cannot be answered at all: no hook runs for it (hooks
+   documentation, 2026-11-22).
+
+Alternative considered: one fixed text ("Answer in the terminal") for every unknown prompt. Rejected: it is the
+cause of the repeated gaps, because it shows no question, option or reason.
+
+Not verified live: the Claude generic tool card, the plan card, the notice rows; every Codex answer shape in item 5
+and 6 (source only; the Google Calendar terminal-only symptom was seen live). Test evidence: each group's parallel
+run passed in its worktree; counts were not supplied. Coordinator runs on `main`: Coordinator on `main` (2026-11-22, after the merge of the Needs-you hint follow-up): `./script/test.sh` and `./script/test.sh --no-parallel` both passed (4,174 tests in 339 suites and 795 tests in 54 suites); `./script/build_and_run.sh --verify` passed. Hand tests in Rafu Lightning are open.
 
 ## GUI checks pending
 

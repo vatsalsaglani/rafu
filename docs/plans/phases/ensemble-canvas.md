@@ -975,3 +975,82 @@ section "2026-11-22: peers reply to the sender by default" of
   "thanks" back (no loop). (5) Start a Claude peer without the authority sentence and send a file task; if it
   refuses, the coordinator must tell the user and not retry with new wording. (6) Check the 20 messages each minute
   limit in the hand test, for example when the two sides do loop.
+
+## Status (2026-11-22, every agent prompt reaches Rafu)
+
+User request: "every kinda choice and question set should come to Rafu and Claude and Codex can even ask multiple
+questions", and "no guesses, if you need me to do something ask me or park it". Decision record: the amendment "Every
+agent prompt shows; question sets answer in Rafu" of the decision about answering agent requests from the Up next row
+(ADR 0042: [`0042-answer-agent-requests-from-up-next.md`](../../decisions/0042-answer-agent-requests-from-up-next.md)).
+References: [`agent-prompt-coverage.md`](../../references/agent-prompt-coverage.md) (new: the prompt table, the shape
+recorder, the version checklist), [`claude-permission-request-hook.md`](../../references/claude-permission-request-hook.md),
+[`codex-app-server-approvals.md`](../../references/codex-app-server-approvals.md),
+[`notch-companion.md`](../../references/notch-companion.md) rule 21.
+
+- **Root cause.** Three silent allow-lists (the Claude summary returned nil for unknown tools, Codex `parse` returned
+  nil for unknown requests, the plain "Answer in the terminal" row). New rule: nothing returns nil in silence.
+- **Delivered (merged on `main`, in this order).** The shared contract (merge dfe85e8): question sets, `plan` and
+  `notice` kinds, the answer file with labels and typed text, `AgentRequestShape`, `AgentPromptCoverageTests`. The
+  Codex group (merge of 3499e39): repaired `_meta` key set, tool card answers, free text with `user_note:`, network
+  approvals, every server request parsed. The UI group (merge of 70b3447): question-set view, plan card, notice card,
+  titles. The Claude group (merge of 37deb1c): the helper spools every `PermissionRequest`, `AskUserQuestion` answered
+  through the hook, generic built-in tool card, notices from notifications. The "Needs you" hint follow-up
+  (c79880d): a row shows the agent's notification text.
+- **Probe P1 (live, Claude Code 2.1.330, haiku, temporary settings file).** A `PermissionRequest` hook receives
+  `AskUserQuestion`; the terminal question stays visible while the hook waits; allow with `updatedInput` closes it;
+  multi-select joins with `", "`; free text works; a "Claude needs your permission" notification comes about 6 s
+  later.
+- **Codex 0.171.0, read from the source tag `rust-v0.171.0`.** The Google Calendar connector card was terminal-only
+  because three `_meta` keys were missing; fixed. Answers and the "Cancel tool call" label are from the source and
+  not run live.
+- **Remember choices are built and off** (`PersistPolicy.current`), pending the user's decision. The decision record
+  holds this as a pending amendment, not an approval.
+- **Parked (needs the user or a probe).** Claude "Chat about this"; Claude plan approval answering (probe P2);
+  Claude MCP elicitation answering (probe P3 and a new hook entry the user approves); Codex form answering; Codex
+  "Implement this plan?" (needs one screenshot); lasting grants (the user's yes or no). A sandboxed Claude network
+  request cannot be answered: no hook runs for it.
+- **Version checklist.** Run it on each Claude Code or Codex update (see the coverage note).
+- **Test evidence.** Each group's parallel run passed in its worktree (counts not supplied). Coordinator runs on
+  `main` (parallel and `--no-parallel`): Coordinator on `main` (2026-11-22, after the merge of the Needs-you hint follow-up): `./script/test.sh` and `./script/test.sh --no-parallel` both passed (4,174 tests in 339 suites and 795 tests in 54 suites); `./script/build_and_run.sh --verify` passed. Hand tests in Rafu Lightning are open.
+- **Open checks.** The matrix below; none has been run in the GUI.
+
+### Hand-test matrix (Rafu Lightning only)
+
+Each row: the card shows, then the answer, then the agent goes on, then the card clears. Claude Code needs Settings >
+Agents > "Answer Claude Code permission requests from Up next" on and the answer hook connected.
+
+Claude Code:
+
+| Kind | Prompt to type | Expect |
+|---|---|---|
+| Bash | "run `touch x.txt`" | Card; Run works |
+| Write or Edit | "create a.txt with hello", then "change hello to bye" | Card with the change |
+| MCP tool | any connector tool | "Use MCP tool" card |
+| Question, single | "ask me one question with 3 options using AskUserQuestion" | Buttons in the peek; the answer arrives |
+| Question set | "ask me 3 questions, the second multi-select" | "Question 1 of 3"; checkboxes on page 2; Answer sends all |
+| Free text | the same, type in "Other…" | The typed text is the answer |
+| Answer in the terminal | answer a question in the terminal | The card clears |
+| Plan | start with `--permission-mode plan`, ask for a plan | "Plan ready" card, read-only |
+| WebFetch or WebSearch | "fetch https://example.com", "search the web for swift 6.2" | Generic tool card with the URL or query |
+| Read outside the folder | "read /etc/hosts" | Generic tool card |
+| NotebookEdit, Skill, Agent | one prompt each | Generic tool card |
+| Remember (only after the user decides) | Bash, menu "Allow and remember" | Rule in `.claude/settings.local.json`; no second prompt |
+| Sandbox network | a sandboxed `curl` | Notice row with Claude's text and "Open terminal" |
+| MCP elicitation | a server that asks for a field | Notice row |
+| Unknown | (unit test only) | Notice row and one `AgentRequestShape` log line |
+
+Codex (Ensemble terminal, link live):
+
+| Kind | Prompt | Expect |
+|---|---|---|
+| Command | "run `touch y.txt`" | Card; Run, deny, deny and stop (session answer is off) |
+| Command prefix (only after the user decides) | the same, menu | "Always allow commands that start with touch" |
+| Network command | `curl https://example.com` in a restricted sandbox | Card shows the host; accept works |
+| File change | "create b.txt" | Card with the diff |
+| Permissions | a task that needs a write outside the folder | Card |
+| Question | plan mode, a vague task | Question card; choose |
+| Question set with a note | 2 to 3 questions; type in "Other…" | `user_note:` reaches the model |
+| MCP tool (connector) | "create a calendar event tomorrow 10:00 called test" | Card with Allow, Deny and "Cancel tool call", not "Open terminal" only. If it is still terminal-only, run `log show --last 10m --predicate 'category == "AgentRequestShape"' --info` and send the key names |
+| MCP tool (own server) | a tool of a local MCP server | The same card, no connector keys |
+| Form or URL elicitation | a server that elicits | Notice row |
+| Both agents | second window open; VoiceOver reads a question page; Full Keyboard Access reaches every choice; Reduce Motion | Pass |
