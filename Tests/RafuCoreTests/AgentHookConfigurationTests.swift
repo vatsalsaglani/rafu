@@ -330,6 +330,226 @@ struct AgentHookInstallerTests {
             AgentHookInstaller.isConnected(
                 provider: .claude, destination: fixture.destination, paths: fixture.paths))
     }
+
+    // MARK: - Helper refresh
+
+    private func connect(
+        _ fixture: Fixture, provider: AgentHookProvider = .claude, destination: URL? = nil,
+        scope: AgentHookScope = .activity
+    ) throws {
+        let change = try AgentHookInstaller.prepare(
+            provider: provider, destination: destination ?? fixture.destination,
+            paths: fixture.paths, removing: false, scope: scope)
+        try AgentHookInstaller.apply(
+            change, paths: fixture.paths, bundledHelper: fixture.bundledHelper)
+    }
+
+    private func refresh(
+        _ fixture: Fixture, provider: AgentHookProvider = .claude, destination: URL? = nil,
+        paths: AgentTrackingPaths? = nil, bundledHelper: URL?? = nil
+    ) throws -> AgentHookHelperRefresh {
+        try AgentHookInstaller.refreshHelper(
+            targets: [(provider, destination ?? fixture.destination)],
+            paths: paths ?? fixture.paths,
+            bundledHelper: bundledHelper ?? fixture.bundledHelper)
+    }
+
+    private func inode(_ url: URL) throws -> Int? {
+        (try FileManager.default.attributesOfItem(atPath: url.path)[.systemFileNumber]
+            as? NSNumber)?.intValue
+    }
+
+    @Test("A connected, stale helper is replaced and keeps mode 0700")
+    func refreshUpdatesStaleHelper() throws {
+        let fixture = try fixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        try connect(fixture)
+        try Data("old helper bytes".utf8).write(to: fixture.paths.helper)
+        #expect(try refresh(fixture) == .updated)
+        #expect(
+            try Data(contentsOf: fixture.paths.helper)
+                == Data(contentsOf: fixture.bundledHelper))
+        #expect(try mode(fixture.paths.helper) == 0o700)
+    }
+
+    @Test("A connected helper with the same bytes is left alone")
+    func refreshCurrent() throws {
+        let fixture = try fixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        try connect(fixture)
+        let before = try inode(fixture.paths.helper)
+        #expect(try refresh(fixture) == .current)
+        #expect(try inode(fixture.paths.helper) == before)
+    }
+
+    @Test("A helper of the same size and other bytes is replaced")
+    func refreshSameSizeOtherBytes() throws {
+        let fixture = try fixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        try connect(fixture)
+        var bytes = try Data(contentsOf: fixture.bundledHelper)
+        bytes[bytes.count - 2] ^= 0xFF
+        try bytes.write(to: fixture.paths.helper)
+        #expect(try refresh(fixture) == .updated)
+        #expect(
+            try Data(contentsOf: fixture.paths.helper)
+                == Data(contentsOf: fixture.bundledHelper))
+    }
+
+    @Test("A connected file with a deleted helper gets the helper back")
+    func refreshRestoresMissingHelper() throws {
+        let fixture = try fixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        try connect(fixture)
+        try FileManager.default.removeItem(at: fixture.paths.helper)
+        #expect(try refresh(fixture) == .updated)
+        #expect(
+            try Data(contentsOf: fixture.paths.helper)
+                == Data(contentsOf: fixture.bundledHelper))
+        #expect(try mode(fixture.paths.helper) == 0o700)
+    }
+
+    @Test("Without a Rafu hook in any provider file nothing is written")
+    func refreshNotConnected() throws {
+        let fixture = try fixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        // No provider file, no helper folder: nothing may appear.
+        #expect(try refresh(fixture) == .notConnected)
+        #expect(!FileManager.default.fileExists(atPath: fixture.paths.helper.path))
+        #expect(
+            !FileManager.default.fileExists(
+                atPath: fixture.paths.helper.deletingLastPathComponent().path))
+        // A provider file with only other hooks, and a stale helper.
+        try FileManager.default.createDirectory(
+            at: fixture.destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let other = Data(
+            "{\"hooks\": {\"Stop\": [{\"hooks\": [{\"type\": \"command\", \"command\": \"/usr/bin/true x\"}]}]}}"
+                .utf8)
+        try other.write(to: fixture.destination)
+        try FileManager.default.createDirectory(
+            at: fixture.paths.helper.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let stale = Data("stale".utf8)
+        try stale.write(to: fixture.paths.helper)
+        #expect(try refresh(fixture) == .notConnected)
+        #expect(try Data(contentsOf: fixture.paths.helper) == stale)
+        #expect(try Data(contentsOf: fixture.destination) == other)
+    }
+
+    @Test("Only a Codex file that refers to the helper is enough")
+    func refreshCodexOnly() throws {
+        let fixture = try fixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let codex = fixture.root.appending(path: "home/.codex/hooks.json")
+        try connect(fixture, provider: .codex, destination: codex)
+        try Data("old".utf8).write(to: fixture.paths.helper)
+        #expect(
+            try AgentHookInstaller.refreshHelper(
+                targets: [(.claude, fixture.destination), (.codex, codex)],
+                paths: fixture.paths, bundledHelper: fixture.bundledHelper) == .updated)
+        #expect(
+            try Data(contentsOf: fixture.paths.helper)
+                == Data(contentsOf: fixture.bundledHelper))
+    }
+
+    @Test("Only the Claude answer entry refers to the helper")
+    func refreshAnswerEntryOnly() throws {
+        let fixture = try fixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        try connect(fixture, scope: .answers)
+        #expect(
+            !AgentHookInstaller.isConnected(
+                provider: .claude, destination: fixture.destination, paths: fixture.paths))
+        try Data("old".utf8).write(to: fixture.paths.helper)
+        #expect(try refresh(fixture) == .updated)
+        #expect(
+            try Data(contentsOf: fixture.paths.helper)
+                == Data(contentsOf: fixture.bundledHelper))
+    }
+
+    @Test("A file that refers to the other app variant's helper is not a connection")
+    func refreshOtherVariant() throws {
+        let fixture = try fixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        try connect(fixture)
+        let otherPaths = AgentTrackingPaths(
+            root: fixture.root.appending(path: "Other/AgentTracking", directoryHint: .isDirectory))
+        #expect(try refresh(fixture, paths: otherPaths) == .notConnected)
+        #expect(!FileManager.default.fileExists(atPath: otherPaths.root.path))
+    }
+
+    @Test("A symbolic-link helper is refused and its target is not changed")
+    func refreshSymlinkedHelper() throws {
+        let fixture = try fixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        try connect(fixture)
+        let target = fixture.root.appending(path: "elsewhere")
+        let original = Data("do not touch".utf8)
+        try original.write(to: target)
+        try FileManager.default.removeItem(at: fixture.paths.helper)
+        try FileManager.default.createSymbolicLink(
+            at: fixture.paths.helper, withDestinationURL: target)
+        #expect(throws: AgentHookConfigurationError.symlinkedConfiguration) {
+            try refresh(fixture)
+        }
+        #expect(try Data(contentsOf: target) == original)
+    }
+
+    @Test("A missing or non-executable bundled helper is a quiet skip")
+    func refreshBundledHelperMissing() throws {
+        let fixture = try fixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        try connect(fixture)
+        try Data("old".utf8).write(to: fixture.paths.helper)
+        #expect(try refresh(fixture, bundledHelper: .some(nil)) == .bundledHelperMissing)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o644], ofItemAtPath: fixture.bundledHelper.path)
+        #expect(try refresh(fixture) == .bundledHelperMissing)
+        #expect(try Data(contentsOf: fixture.paths.helper) == Data("old".utf8))
+    }
+}
+
+@Suite("Agent hook helper reference")
+struct AgentHookReferencesHelperTests {
+    @Test("An activity command, the answer command, and Cursor's flat entry all count")
+    func references() throws {
+        let activity = try plan(.claude, existing: nil)
+        #expect(
+            AgentHookConfiguration.referencesHelper(
+                provider: .claude, existing: activity.after, helper: paths.helper))
+        let answers = try planAnswers(nil)
+        #expect(
+            AgentHookConfiguration.referencesHelper(
+                provider: .claude, existing: answers.after, helper: paths.helper))
+        let cursor = try plan(.cursor, existing: nil)
+        #expect(
+            AgentHookConfiguration.referencesHelper(
+                provider: .cursor, existing: cursor.after, helper: paths.helper))
+    }
+
+    @Test("Other commands, another helper, invalid JSON and no file do not count")
+    func doesNotReference() {
+        let other = Data(
+            "{\"hooks\": {\"Stop\": [{\"hooks\": [{\"type\": \"command\", \"command\": \"/usr/bin/true x\"}]}]}}"
+                .utf8)
+        #expect(
+            !AgentHookConfiguration.referencesHelper(
+                provider: .claude, existing: other, helper: paths.helper))
+        #expect(
+            !AgentHookConfiguration.referencesHelper(
+                provider: .claude, existing: Data("not json".utf8), helper: paths.helper))
+        #expect(
+            !AgentHookConfiguration.referencesHelper(
+                provider: .claude, existing: nil, helper: paths.helper))
+        let otherHelper = URL(fileURLWithPath: "/elsewhere/AgentTracking/bin/rafu-agent-events")
+        let command = AgentHookConfiguration.command(
+            helper: otherHelper, provider: .claude, spool: paths.spool)
+        let file = Data(
+            "{\"hooks\": {\"Stop\": [{\"hooks\": [{\"type\": \"command\", \"command\": \(String(reflecting: command))}]}]}}"
+                .utf8)
+        #expect(
+            !AgentHookConfiguration.referencesHelper(
+                provider: .claude, existing: file, helper: paths.helper))
+    }
 }
 
 private func planAnswers(_ existing: Data?, removing: Bool = false) throws -> AgentHookChange {

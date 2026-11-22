@@ -138,6 +138,26 @@ public enum AgentHookConfiguration {
         hasRafuEntries(provider: .claude, scope: .answers, existing: existing, helper: helper)
     }
 
+    /// Whether any hook command in `existing` runs `helper`, in activity or
+    /// answer mode. Unlike `isConnected`, it needs no entry for every event,
+    /// so a file written by an older Rafu still counts. `false` for a missing
+    /// or unreadable file.
+    public static func referencesHelper(
+        provider: AgentHookProvider, existing: Data?, helper: URL
+    ) -> Bool {
+        guard let existing, let document = try? parse(existing),
+            let hooks = document["hooks"] as? [String: Any]
+        else { return false }
+        return hooks.values.contains { value in
+            guard let entries = value as? [[String: Any]] else { return false }
+            return entries.contains { entry in
+                commands(in: entry, provider: provider).contains {
+                    isRafuCommand($0, helper: helper)
+                }
+            }
+        }
+    }
+
     private static func hasRafuEntries(
         provider: AgentHookProvider, scope: AgentHookScope, existing: Data?, helper: URL
     ) -> Bool {

@@ -1,11 +1,17 @@
 import Foundation
 import Observation
 import RafuCore
+import os
 
 /// Settings ▸ Agents ▸ Activity tracking. Connect and Disconnect are always
 /// two steps: `prepare` reads the provider file and builds a reviewed
 /// change; only `apply`, after the person confirms the sheet, writes. All
-/// file work runs off the main actor. Nothing here runs at launch.
+/// file work runs off the main actor.
+///
+/// The one thing that runs without a review is the helper refresh
+/// (`refreshHelperAtLaunch`, and the end of `refresh()`). It replaces a
+/// stale installed helper with the bundled one, only when a provider file
+/// already refers to it. It never writes a provider file.
 @MainActor
 @Observable
 final class AgentHookSetupModel {
@@ -96,6 +102,51 @@ final class AgentHookSetupModel {
             destination(for: .claude), paths: paths)
         answerStatus = answers ? .connected : .notConnected
         if store.claudeAnswersConnected != answers { store.setClaudeAnswersConnected(answers) }
+        // After an app update the installed helper is older than the bundled
+        // one. Replace it here too, without the launch gate on
+        // `connectedProviders`, which can be stale.
+        let refresh = await AgentHookSetupIO.refreshHelper(
+            targets, paths: paths, bundledHelper: bundledHelper)
+        if case .failure = refresh { message = Self.helperRefreshFailure }
+    }
+
+    /// The fixed Settings sentence when the helper refresh fails. It names no
+    /// path and no file content.
+    static let helperRefreshFailure =
+        "Rafu could not update its hook helper. Disconnect and connect again."
+
+    private static let log = Logger(subsystem: "dev.vatsalsaglani.rafu", category: "agent-hooks")
+
+    /// At launch: replaces a stale installed helper with the bundled one. Does
+    /// nothing, and reads no file, when no provider was ever connected. Never
+    /// installs or changes hooks. The work runs off the main actor.
+    static func refreshHelperAtLaunch(
+        store: AgentActivityStore = .shared,
+        home: URL = FileManager.default.homeDirectoryForCurrentUser,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        bundledHelper: URL? = AgentHookSetupModel.defaultBundledHelper
+    ) {
+        guard !store.connectedProviders.isEmpty else { return }
+        let paths = store.paths
+        let targets = providers.map {
+            (
+                $0,
+                AgentHookConfiguration.destination(
+                    provider: $0, home: home, environment: environment)
+            )
+        }
+        Task(priority: .utility) {
+            let result = await AgentHookSetupIO.refreshHelper(
+                targets, paths: paths, bundledHelper: bundledHelper)
+            switch result {
+            case .success(.updated): log.notice("Hook helper refreshed: updated")
+            case .success: break
+            case .failure(let error):
+                // The error kind only: no path, no file content.
+                log.error(
+                    "Hook helper refresh failed: \(String(describing: error), privacy: .public)")
+            }
+        }
     }
 
     /// Builds the reviewed change for Claude Code's answer entry.
@@ -216,6 +267,22 @@ nonisolated enum AgentHookSetupIO {
         -> Bool
     {
         AgentHookInstaller.isAnswerConnected(destination: destination, paths: paths)
+    }
+
+    @concurrent
+    static func refreshHelper(
+        _ targets: [(AgentHookProvider, URL)], paths: AgentTrackingPaths, bundledHelper: URL?
+    ) async -> Result<AgentHookHelperRefresh, AgentHookConfigurationError> {
+        do {
+            return .success(
+                try AgentHookInstaller.refreshHelper(
+                    targets: targets.map { (provider: $0.0, destination: $0.1) },
+                    paths: paths, bundledHelper: bundledHelper))
+        } catch let error as AgentHookConfigurationError {
+            return .failure(error)
+        } catch {
+            return .failure(.fileSystemFailure)
+        }
     }
 
     @concurrent
