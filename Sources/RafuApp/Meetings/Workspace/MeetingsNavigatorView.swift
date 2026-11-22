@@ -158,23 +158,37 @@ struct MeetingsNavigatorView: View {
         }
     }
 
+    // Split into typed parts: as one expression this took about 1 s to
+    // type-check here, and the CI runner has a lower effective limit.
     private func rowButton(_ row: MeetingsWorkspaceRow) -> some View {
-        RafuHoverRow(isSelected: workspaceSession.selectedAuxiliaryTab == .meeting(row.id)) {
-            Button {
-                workspaceSession.openMeetingTab(row.id)
-            } label: {
-                MeetingsListRowLabel(row: row, session: session)
-            }
-            .buttonStyle(.plain)
+        let selectedTab: WorkspaceAuxiliaryTab? = workspaceSession.selectedAuxiliaryTab
+        var isSelected = false
+        if case .meeting(let selected)? = selectedTab { isSelected = selected == row.id }
+        let canDelete: Bool = MeetingsWorkspacePresentation.canDelete(
+            meeting: row.id, recorder: session.recorderState)
+        return RafuHoverRow(isSelected: isSelected) {
+            rowOpenButton(row)
         }
         .contextMenu {
-            Button("Open in Meetings") { openMeetings(selecting: row.id) }
-            if MeetingsWorkspacePresentation.canDelete(
-                meeting: row.id, recorder: session.recorderState)
-            {
-                Divider()
-                Button("Delete…", role: .destructive) { pendingDelete = row.id }
-            }
+            rowMenu(row, canDelete: canDelete)
+        }
+    }
+
+    private func rowOpenButton(_ row: MeetingsWorkspaceRow) -> some View {
+        Button {
+            workspaceSession.openMeetingTab(row.id)
+        } label: {
+            MeetingsListRowLabel(row: row, session: session)
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func rowMenu(_ row: MeetingsWorkspaceRow, canDelete: Bool) -> some View {
+        Button("Open in Meetings") { openMeetings(selecting: row.id) }
+        if canDelete {
+            Divider()
+            Button("Delete…", role: .destructive) { pendingDelete = row.id }
         }
     }
 
