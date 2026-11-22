@@ -1,0 +1,31 @@
+import Foundation
+
+@testable import RafuCore
+
+/// Builders for the transcript tests. Times are binary-exact (multiples of
+/// 0.25) wherever a test sits on a threshold, so no rounding error decides.
+enum MeetingTestWords {
+    static func word(_ text: String, _ start: TimeInterval, _ end: TimeInterval) -> MeetingWord {
+        MeetingWord(text: text, start: start, end: end)
+    }
+
+    /// One word per `step` seconds, each lasting `length`, from `start`.
+    static func sentence(
+        _ text: String, from start: TimeInterval, step: TimeInterval = 0.5,
+        length: TimeInterval = 0.25
+    ) -> [MeetingWord] {
+        text.split(separator: " ").enumerated().map { index, piece in
+            let wordStart = start + Double(index) * step
+            return MeetingWord(text: String(piece), start: wordStart, end: wordStart + length)
+        }
+    }
+
+    static func turn(
+        _ number: Int, _ track: MeetingTrack, _ speaker: MeetingSpeakerLabel, _ start: TimeInterval,
+        _ text: String, isEcho: Bool = false
+    ) -> MeetingTurn {
+        MeetingTurn(
+            id: MeetingTurnID(number), track: track, speaker: speaker, start: start,
+            end: start + 1, text: text, isEcho: isEcho)
+    }
+}
