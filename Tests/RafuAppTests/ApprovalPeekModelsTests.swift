@@ -349,7 +349,7 @@ func approvalPeekContentChoices() {
             == .choices(short))
 }
 
-@Test("ApprovalPeekContent: 5 choices, 2 questions or long text give Answer in Up next")
+@Test("ApprovalPeekContent: 5 choices, 2 questions or long text give the collapsed question set")
 func approvalPeekContentAnswerInUpNext() {
     let five = question(choices: ["a", "b", "c", "d", "e"])
     let wide = question(choices: [
@@ -367,8 +367,74 @@ func approvalPeekContentAnswerInUpNext() {
     for request in requests {
         #expect(
             ApprovalPeekContent.resolve(request: request, decision: nil, oversize: false)
-                == .answerInUpNext)
+                == .questionsCollapsed)
     }
+}
+
+@Test("ApprovalPeekContent: a multiple-choice question is never one-click buttons")
+func approvalPeekContentMultipleChoiceCollapses() {
+    let multi = CanvasAgentRequest.Question(
+        id: "q", header: "", text: "Which?",
+        choices: [.init(label: "a", detail: ""), .init(label: "b", detail: "")],
+        allowsMultiple: true)
+    let request = CanvasAgentRequest(kind: .userInput, questions: [multi])
+    #expect(
+        ApprovalPeekContent.resolve(request: request, decision: nil, oversize: false)
+            == .questionsCollapsed)
+}
+
+@Test("ApprovalPeekContent: only a click on Answer or Other expands the question set")
+func approvalPeekContentQuestionSetNeedsAClick() {
+    let short = question(choices: ["Indigo", "Khadi"])
+    let second = CanvasAgentRequest.Question(
+        id: "q2", header: "", text: "Sure?", choices: [.init(label: "Yes", detail: "")])
+    for request in [
+        CanvasAgentRequest(kind: .userInput, questions: [short]),
+        CanvasAgentRequest(kind: .userInput, questions: [short, second]),
+    ] {
+        #expect(
+            ApprovalPeekContent.resolve(
+                request: request, decision: nil, oversize: false, isExpanded: true)
+                == .questionSet)
+        // A question set offers no swipe: the answer is the choice.
+        #expect(!ApprovalPeekContent.questionSet.allowsSwipeRight)
+        #expect(!ApprovalPeekContent.questionSet.allowsSwipeLeft)
+        #expect(
+            ApprovalPeekContent.resolve(
+                request: request, decision: .answers(labels: ["q": "Indigo"]), oversize: false,
+                isExpanded: true) == .sending)
+    }
+}
+
+@Test("ApprovalPeekContent: a plan, a notice and a terminal-only question show Open terminal")
+func approvalPeekContentShownOnlyKinds() {
+    let requests = [
+        CanvasAgentRequest(kind: .plan, reason: "/repo/plan.md", text: "1. Do it"),
+        CanvasAgentRequest(kind: .notice, reason: "Network request", text: "curl example.com"),
+        CanvasAgentRequest(
+            kind: .userInput, questions: [question(choices: ["a"])], terminalOnly: true),
+    ]
+    for request in requests {
+        #expect(
+            ApprovalPeekContent.resolve(
+                request: request, decision: nil, oversize: false, isExpanded: true)
+                == .terminalOnly)
+    }
+}
+
+@Test("ApprovalPeekGeometry: the question choice list caps at 220 pt and follows the screen")
+func questionChoicesHeightFollowsTheScreen() {
+    #expect(ApprovalPeekGeometry.questionChoicesHeight(visibleFrame: nil) == 220)
+    #expect(
+        ApprovalPeekGeometry.questionChoicesHeight(
+            visibleFrame: CGRect(x: 0, y: 0, width: 1_000, height: 1_000)) == 220)
+    // 400 - 16 - 230 = 154.
+    #expect(
+        ApprovalPeekGeometry.questionChoicesHeight(
+            visibleFrame: CGRect(x: 0, y: 0, width: 1_000, height: 400)) == 154)
+    #expect(
+        ApprovalPeekGeometry.questionChoicesHeight(
+            visibleFrame: CGRect(x: 0, y: 0, width: 1_000, height: 200)) == 80)
 }
 
 @Test("ApprovalPeekContent: a chosen answer shows the sending state")
@@ -486,6 +552,59 @@ func approvalPeekAnnouncement() {
         controllerID: UUID(), title: "t", cli: .codex,
         request: CanvasAgentRequest(kind: .userInput, questions: [question(choices: ["a"])]))
     #expect(ApprovalPeekText.announcement(for: ask) == "Codex asks: Which theme?")
+    let set = ApprovalPeekEntry(
+        controllerID: UUID(), title: "t", cli: .claudeCode,
+        request: CanvasAgentRequest(
+            kind: .userInput,
+            questions: [
+                question(choices: ["a"]),
+                .init(
+                    id: "q2", header: "", text: "Sure?", choices: [.init(label: "Yes", detail: "")]
+                ),
+            ]))
+    #expect(ApprovalPeekText.announcement(for: set) == "Claude Code asks 2 questions: Which theme?")
+    let plan = ApprovalPeekEntry(
+        controllerID: UUID(), title: "t", cli: .claudeCode,
+        request: CanvasAgentRequest(kind: .plan, reason: "/repo/plan.md", text: "1. Do it"))
+    #expect(
+        ApprovalPeekText.announcement(for: plan)
+            == "Claude Code has a plan ready. Open the terminal to answer.")
+    let notice = ApprovalPeekEntry(
+        controllerID: UUID(), title: "t", cli: .codex,
+        request: CanvasAgentRequest(kind: .notice, reason: "Network request\nmore", text: "x"))
+    #expect(
+        ApprovalPeekText.announcement(for: notice)
+            == "Codex needs you: Network request. Open the terminal to answer.")
+    // A Codex notice reason already says where to answer: not said twice.
+    let codexNotice = ApprovalPeekEntry(
+        controllerID: UUID(), title: "t", cli: .codex,
+        request: CanvasAgentRequest(
+            kind: .notice,
+            reason: "Codex asks you to sign in with a browser. Open the terminal to answer.",
+            text: "Sign in to GitHub"))
+    #expect(
+        ApprovalPeekText.announcement(for: codexNotice)
+            == "Codex needs you: Codex asks you to sign in with a browser. "
+            + "Open the terminal to answer.")
+    // A network command approval speaks its target.
+    let network = ApprovalPeekEntry(
+        controllerID: UUID(), title: "t", cli: .codex,
+        request: CanvasAgentRequest(
+            kind: .command, command: "curl https://example.com",
+            permissions: ["Network: https example.com"]))
+    #expect(network.request.permissions == ["Network: https example.com"])
+    #expect(
+        ApprovalPeekText.announcement(for: network)
+            == "Codex needs approval: curl https://example.com. Network: https example.com")
+    #expect(
+        ApprovalPeekText.spokenBox(agent: "Codex", request: network.request)
+            == "Codex asks to run curl https://example.com. Network: https example.com")
+    let bare = ApprovalPeekEntry(
+        controllerID: UUID(), title: "t", cli: .codex,
+        request: CanvasAgentRequest(kind: .notice))
+    #expect(
+        ApprovalPeekText.announcement(for: bare)
+            == "Codex needs you. Open the terminal to answer.")
 }
 
 // MARK: - MCP tool call

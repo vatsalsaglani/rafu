@@ -252,6 +252,8 @@ struct CanvasCodexApprovalTests {
     private final class Hooks: Sendable {
         let requests = Mutex<[CanvasAgentRequest]>([])
         let cleared = Mutex<[UUID]>([])
+        /// The shape lines the proxy handed over to record.
+        let shapes = Mutex<[String]>([])
         private let requestSignal = DispatchSemaphore(value: 0)
         private let clearSignal = DispatchSemaphore(value: 0)
 
@@ -264,7 +266,8 @@ struct CanvasCodexApprovalTests {
                 clear: { [self] key in
                     cleared.withLock { $0.append(key) }
                     clearSignal.signal()
-                })
+                },
+                recordShape: { [self] shape in shapes.withLock { $0.append(shape) } })
         }
 
         private let requestsRead = Mutex(0)
@@ -546,8 +549,9 @@ struct CanvasCodexApprovalTests {
 
     private static let elicitation = "mcpServer/elicitation/request"
 
-    /// The params of a Codex tool approval. The `_meta` keys are INFERRED from
-    /// the Codex binary, not captured live.
+    /// The params of a Codex tool approval. The `_meta` keys follow the Codex
+    /// 0.171.0 source (`build_mcp_tool_approval_elicitation_meta`), not a
+    /// live capture.
     private static func toolApprovalParams(
         mode: String = "form",
         schema: [String: Any] = ["type": "object", "properties": [String: Any]()],
@@ -564,9 +568,12 @@ struct CanvasCodexApprovalTests {
     }
 
     @Test(arguments: [
-        (CanvasAgentRequestDecision.accept, #"{"action":"accept","content":{}}"#),
+        (CanvasAgentRequestDecision.accept, #"{"action":"accept","content":null}"#),
         (CanvasAgentRequestDecision.decline, #"{"action":"decline"}"#),
-        (CanvasAgentRequestDecision.cancel, #"{"action":"cancel"}"#),
+        (
+            CanvasAgentRequestDecision.cancel,
+            #"{"_meta":{"codex_approval_cancellation_reason":"user"},"action":"cancel","content":null}"#
+        ),
     ])
     func aToolApprovalOpensAndAnInjectedAnswerReachesTheServer(
         decision: CanvasAgentRequestDecision, expected: String
@@ -607,7 +614,7 @@ struct CanvasCodexApprovalTests {
         #expect(harness.proxy.inject(key: request.key, decision: .accept) == .sent)
     }
 
-    @Test func otherElicitationsAreForwardedAndNotAnnounced() throws {
+    @Test func otherElicitationsAreForwardedAndAnnouncedAsTerminalOnlyNotices() throws {
         let harness = try Harness()
         defer { harness.tearDown() }
         let tui = try harness.tui()
@@ -625,10 +632,206 @@ struct CanvasCodexApprovalTests {
             harness.approvalFrame(id: 43, method: Self.elicitation, params: form),
             harness.approvalFrame(id: 44, method: Self.elicitation, params: url),
         ])
+        // The TUI still gets both, unchanged.
         #expect(tui.received { Self.jsonText($0["id"]) == "43" } != nil)
         #expect(tui.received { Self.jsonText($0["id"]) == "44" } != nil)
+        let formNotice = try #require(harness.hooks.awaitRequest())
+        let linkNotice = try #require(harness.hooks.awaitRequest())
+        #expect(formNotice.kind == .notice && formNotice.terminalOnly)
+        #expect(linkNotice.kind == .notice && linkNotice.text == "Sign in")
+        // The terminal answers a notice; Rafu never sends a verdict for it.
+        #expect(harness.proxy.inject(key: formNotice.key, decision: .accept) == .refused)
+        #expect(harness.proxy.inject(key: linkNotice.key, decision: .cancel) == .refused)
+        // Each one has its shape recorded: key names and types only.
+        let shapes = harness.hooks.shapes.withLock { $0 }
+        #expect(shapes.count == 2)
+        #expect(shapes.allSatisfy { $0.hasPrefix(Self.elicitation + " ") })
+        #expect(shapes.allSatisfy { !$0.contains("example.com") && !$0.contains("Sign in") })
+        // The terminal answering clears the notice.
+        tui.send(["id": 43, "result": ["action": "cancel"]])
+        #expect(harness.hooks.awaitClear() == formNotice.key)
+    }
+
+    @Test func aToolApprovalWithAnUnknownKeyIsAnnouncedTerminalOnlyAndItsShapeRecorded() throws {
+        let harness = try Harness()
+        defer { harness.tearDown() }
+        let tui = try harness.tui()
+        defer { tui.close() }
+        let meta: [String: Any] = [
+            "codex_approval_kind": "mcp_tool_call", "tool_name": "getJiraIssue",
+            "tool_params": ["issueKey": "ABC-1"], "codex_new_key": "SECRET-VALUE",
+        ]
+        tui.serverSends([
+            harness.approvalFrame(
+                id: 48, method: Self.elicitation, params: Self.toolApprovalParams(meta: meta))
+        ])
+        let request = try #require(harness.hooks.awaitRequest())
+        #expect(request.kind == .toolCall && request.terminalOnly)
+        #expect(harness.proxy.inject(key: request.key, decision: .accept) == .refused)
+        let shapes = harness.hooks.shapes.withLock { $0 }
+        #expect(shapes.count == 1)
+        #expect(shapes.first?.contains("codex_new_key:string") == true)
+        #expect(shapes.first?.contains("SECRET-VALUE") == false)
+        #expect(shapes.first?.contains("issueKey") == false)
+    }
+
+    @Test func aToolApprovalOfAConnectorAnswersWithEveryRememberKindOnlyUnderAPolicy() throws {
+        let request = try #require(
+            CanvasAgentRequest.parse(
+                method: Self.elicitation,
+                params: Self.toolApprovalParams(meta: [
+                    "codex_approval_kind": "mcp_tool_call", "persist": ["session", "always"],
+                    "tool_name": "google_calendar_create_event",
+                    "tool_annotations": ["openWorldHint": true], "source": "connector",
+                    "link_id": "link_1", "link_is_implicit": false,
+                    "tool_params": ["summary": "test"],
+                ])))
+        #expect(!request.terminalOnly)
+        // Off: no remember answer is written, whatever the caller asks.
+        #expect(
+            CanvasCodexProxy.answerFrame(
+                rpcID: "5", request: request, decision: .acceptAndRemember(.session),
+                permissions: nil) == nil)
+        for (kind, text) in [
+            (CanvasAgentRequest.PersistChoice.Kind.session, "session"), (.always, "always"),
+        ] {
+            let frame = try #require(
+                CanvasCodexProxy.answerFrame(
+                    rpcID: "5", request: request, decision: .acceptAndRemember(kind),
+                    permissions: nil, policy: .all))
+            let result = try Self.result(ofMaskedFrame: frame)
+            #expect(
+                Self.jsonText(result)
+                    == #"{"_meta":{"persist":"\#(text)"},"action":"accept","content":null}"#)
+        }
+    }
+
+    @Test func aCommandPrefixIsRememberedOnlyUnderAPolicyAndWithTheShownWords() throws {
+        let harness = try Harness()
+        defer { harness.tearDown() }
+        let tui = try harness.tui()
+        defer { tui.close() }
+        tui.serverSends([
+            harness.approvalFrame(
+                id: 49,
+                params: [
+                    "command": "touch y.txt", "cwd": "/work",
+                    "proposedExecpolicyAmendment": ["touch", "y.txt"],
+                ])
+        ])
+        let request = try #require(harness.hooks.awaitRequest())
+        #expect(request.persistChoices.map(\.kind) == [.rule])
+        // Through the live path the policy is off: refused, and the entry stays.
+        #expect(
+            harness.proxy.inject(key: request.key, decision: .acceptAndRemember(.rule))
+                == .refused)
+        // The frame itself, under a policy, carries the exact amendment.
+        let frame = try #require(
+            CanvasCodexProxy.answerFrame(
+                rpcID: "49", request: request, decision: .acceptAndRemember(.rule),
+                permissions: nil, execpolicyAmendment: ["touch", "y.txt"], policy: .all))
+        let result = try Self.result(ofMaskedFrame: frame)
+        #expect(
+            Self.jsonText(result)
+                == #"{"decision":{"acceptWithExecpolicyAmendment":{"execpolicy_amendment":["touch","y.txt"]}}}"#
+        )
+        #expect(harness.proxy.inject(key: request.key, decision: .accept) == .sent)
+    }
+
+    @Test func aNetworkApprovalIsAnnouncedWithItsTargetAndAnswersAcceptOrDecline() throws {
+        let harness = try Harness()
+        defer { harness.tearDown() }
+        let tui = try harness.tui()
+        defer { tui.close() }
+        let params: [String: Any] = [
+            "command": "curl https://example.com", "cwd": "/work",
+            "networkApprovalContext": ["host": "example.com", "protocol": "https"],
+        ]
+        tui.serverSends([
+            harness.approvalFrame(id: 50, params: params),
+            harness.approvalFrame(id: 51, params: params),
+        ])
+        let accepted = try #require(harness.hooks.awaitRequest())
+        let declined = try #require(harness.hooks.awaitRequest())
+        #expect(accepted.permissions == ["Network: https example.com"])
+        #expect(!accepted.terminalOnly)
+        #expect(
+            harness.proxy.inject(key: accepted.key, decision: .acceptForSession) == .refused)
+        #expect(harness.proxy.inject(key: accepted.key, decision: .accept) == .sent)
+        #expect(harness.proxy.inject(key: declined.key, decision: .decline) == .sent)
+        let answers = harness.serverMessages(upToEcho: tui).filter(Self.isAnswer)
+        let byID = Dictionary(
+            uniqueKeysWithValues: answers.map {
+                (Self.jsonText($0["id"]), Self.jsonText($0["result"]))
+            })
+        #expect(byID["50"] == #"{"decision":"accept"}"#)
+        #expect(byID["51"] == #"{"decision":"decline"}"#)
+    }
+
+    @Test func anOlderApprovalNamesItsThreadByConversationIdAndIsAnnouncedAsANotice() throws {
+        let harness = try Harness()
+        defer { harness.tearDown() }
+        let tui = try harness.tui()
+        defer { tui.close() }
+        tui.serverSends([
+            [
+                "id": 52, "method": "execCommandApproval",
+                "params": [
+                    "conversationId": harness.thread, "callId": "c", "command": ["ls"],
+                    "cwd": "/work", "parsedCmd": [Any](),
+                ],
+            ],
+            [
+                "id": 53, "method": "applyPatchApproval",
+                "params": ["conversationId": "another", "callId": "c", "fileChanges": [:]],
+            ],
+        ])
+        let notice = try #require(harness.hooks.awaitRequest())
+        #expect(notice.kind == .notice && notice.terminalOnly)
         #expect(tui.barrier())
-        #expect(harness.hooks.requests.withLock { $0.isEmpty })
+        // The request of another conversation is not announced.
+        #expect(harness.hooks.requests.withLock { $0.count } == 1)
+        #expect(harness.hooks.shapes.withLock { $0.count } == 1)
+    }
+
+    @Test func anUnknownServerRequestForTheThreadIsAnnouncedAsANoticeWithItsShape() throws {
+        let harness = try Harness()
+        defer { harness.tearDown() }
+        let tui = try harness.tui()
+        defer { tui.close() }
+        tui.serverSends([
+            ["id": 54, "method": "item/other/request", "params": ["threadId": harness.thread]]
+        ])
+        let notice = try #require(harness.hooks.awaitRequest())
+        #expect(notice.kind == .notice && notice.terminalOnly)
+        #expect(
+            notice.reason == "Codex sent a request named request. Open the terminal to answer.")
+        #expect(
+            harness.hooks.shapes.withLock { $0 }.first?.hasPrefix("item/other/request ") == true)
+        // The TUI still gets it, and a resolved notice clears the row.
+        #expect(tui.received { Self.jsonText($0["id"]) == "54" } != nil)
+        tui.serverSends([
+            [
+                "method": "serverRequest/resolved",
+                "params": ["threadId": harness.thread, "requestId": 54],
+            ]
+        ])
+        #expect(harness.hooks.awaitClear() == notice.key)
+    }
+
+    /// The `result` object of a masked answer frame from `answerFrame`.
+    private static func result(ofMaskedFrame frame: Data) throws -> [String: Any] {
+        var offset = 2
+        switch frame[1] & 0x7F {
+        case 126: offset = 4
+        case 127: offset = 10
+        default: break
+        }
+        let mask = Array(frame[offset..<offset + 4])
+        let payload = Data(
+            frame[(offset + 4)...].enumerated().map { $0.element ^ mask[$0.offset % 4] })
+        let object = try #require(JSONSerialization.jsonObject(with: payload) as? [String: Any])
+        return try #require(object["result"] as? [String: Any])
     }
 
     @Test func aToolApprovalForAnotherThreadIsNotAnnounced() throws {
@@ -802,16 +1005,23 @@ struct CanvasCodexApprovalTests {
         defer { harness.tearDown() }
         let tui = try harness.tui()
         defer { tui.close() }
-        // A request for a notification (no id) and an unrelated method pass through.
+        // A notification (no id) and a request that is not a prompt for the
+        // user (a dynamic tool call, a token refresh) pass through unannounced.
         tui.serverSends([
             [
                 "method": "item/commandExecution/requestApproval",
                 "params": ["threadId": harness.thread, "command": "ls"],
             ],
-            ["id": 12, "method": "item/other/request", "params": ["threadId": harness.thread]],
+            ["id": 12, "method": "item/tool/call", "params": ["threadId": harness.thread]],
+            [
+                "id": 14, "method": "account/chatgptAuthTokens/refresh",
+                "params": ["threadId": harness.thread],
+            ],
+            ["method": "item/other/notification", "params": ["threadId": harness.thread]],
         ])
         #expect(tui.barrier())
         #expect(harness.hooks.requests.withLock { $0.isEmpty })
+        #expect(harness.hooks.shapes.withLock { $0.isEmpty })
         // Another thread's request revokes the route and is not announced.
         tui.serverSends([harness.approvalFrame(id: 13, thread: UUID().uuidString)])
         #expect(tui.barrier())

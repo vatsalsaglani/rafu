@@ -53,6 +53,9 @@ final class CanvasCodexProxy: Sendable {
         /// `params.permissions` as JSON. An accepted permissions request sends
         /// exactly this profile back.
         let permissions: Data?
+        /// The command prefix the request offered to remember. A remembered
+        /// answer sends exactly these words.
+        var execpolicyAmendment: [String]? = nil
     }
 
     /// What `inject(key:decision:)` did.
@@ -75,6 +78,12 @@ final class CanvasCodexProxy: Sendable {
         /// The request is gone without an answer from `inject`: the TUI answered
         /// it, the server resolved it, the turn ended, or the connection ended.
         let clear: @Sendable (UUID) -> Void
+        /// A request Rafu could only show, or not answer, because of a shape it
+        /// does not know. The line holds key names and value types, never a
+        /// value. The default logs it once per launch (`AgentRequestShape`).
+        var recordShape: @Sendable (String) -> Void = {
+            _ = AgentRequestShape.Recorder.shared.record($0)
+        }
     }
 
     /// The most unanswered server requests the proxy tracks per connection.
@@ -257,7 +266,8 @@ final class CanvasCodexProxy: Sendable {
                 guard
                     let frame = CanvasCodexProxy.answerFrame(
                         rpcID: pending.rpcID, request: pending.request, decision: decision,
-                        permissions: pending.permissions)
+                        permissions: pending.permissions,
+                        execpolicyAmendment: pending.execpolicyAmendment)
                 else { return .refused }
                 // Take the entry and a hold on the descriptors in one step.
                 let claimed = life.withLock { life -> Bool in
@@ -559,16 +569,15 @@ final class CanvasCodexProxy: Sendable {
 
     // MARK: Answering server requests
 
-    private static let approvalMethods: Set<String> = [
-        "item/commandExecution/requestApproval", "item/fileChange/requestApproval",
-        "item/permissions/requestApproval", "item/tool/requestUserInput",
-        "mcpServer/elicitation/request",
-    ]
-
     /// Follows server requests for the bound thread. Returns the request to hand
     /// to the supervisor, which hears it before the TUI does. It never changes
     /// what is forwarded. An unbound session
     /// (empty thread ID) tracks nothing.
+    ///
+    /// Every server request for the thread that is a prompt for the user gets
+    /// a row, also one this build does not know (as a notice that sends the
+    /// user to the terminal). A request names its thread in `threadId`; the
+    /// older approval requests name it in `conversationId`.
     private func trackApprovals(
         _ object: [String: Any], connection: Connection, outgoing: Bool
     ) -> CanvasAgentRequest? {
@@ -584,7 +593,7 @@ final class CanvasCodexProxy: Sendable {
             return nil
         }
         guard let method, let params = object["params"] as? [String: Any],
-            params["threadId"] as? String == threadID
+            (params["threadId"] as? String ?? params["conversationId"] as? String) == threadID
         else { return nil }
         switch method {
         case "serverRequest/resolved":
@@ -603,7 +612,8 @@ final class CanvasCodexProxy: Sendable {
                     itemID: itemID,
                     changes: CanvasAgentRequest.fileChanges(fromPatchUpdated: params))
             }
-        case _ where Self.approvalMethods.contains(method):
+        default:
+            // A server request has an ID. A notification has none.
             guard let identifier = Self.integerOrStringID(object["id"]) else { return nil }
             var changes: [CanvasAgentRequest.FileChange] = []
             if method == "item/fileChange/requestApproval",
@@ -611,19 +621,24 @@ final class CanvasCodexProxy: Sendable {
             {
                 changes = connection.patch(itemID: itemID)
             }
-            guard
-                let request = CanvasAgentRequest.parse(
-                    method: method, params: params, fileChanges: changes)
-            else { return nil }
+            let parsed = CanvasAgentRequest.parseCodex(
+                method: method, params: params, fileChanges: changes)
+            guard let request = parsed.request else { return nil }
             var profile: Data?
             if let permissions = params["permissions"] as? [String: Any] {
                 profile = try? JSONSerialization.data(
                     withJSONObject: permissions, options: [.sortedKeys])
             }
-            let pending = PendingRequest(rpcID: identifier, request: request, permissions: profile)
-            return connection.track(pending) ? request : nil
-        default:
-            break
+            var amendment: [String]?
+            if method == "item/commandExecution/requestApproval" {
+                amendment = CanvasAgentRequest.execpolicyAmendment(fromCommandParams: params)
+            }
+            let pending = PendingRequest(
+                rpcID: identifier, request: request, permissions: profile,
+                execpolicyAmendment: amendment)
+            guard connection.track(pending) else { return nil }
+            if let shape = parsed.shape { approvals.recordShape(shape) }
+            return request
         }
         return nil
     }
@@ -645,10 +660,14 @@ final class CanvasCodexProxy: Sendable {
     /// from its client.
     static func answerFrame(
         rpcID: String, request: CanvasAgentRequest, decision: CanvasAgentRequestDecision,
-        permissions: Data?
+        permissions: Data?, execpolicyAmendment: [String]? = nil,
+        policy: CanvasAgentRequest.PersistPolicy = .current
     ) -> Data? {
         let requested = permissions.flatMap { try? JSONSerialization.jsonObject(with: $0) }
-        guard let result = request.result(for: decision, requestedPermissions: requested),
+        guard
+            let result = request.result(
+                for: decision, requestedPermissions: requested,
+                execpolicyAmendment: execpolicyAmendment, policy: policy),
             let body = try? JSONSerialization.data(
                 withJSONObject: result, options: [.sortedKeys, .withoutEscapingSlashes])
         else { return nil }

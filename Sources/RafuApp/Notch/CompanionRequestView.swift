@@ -14,7 +14,6 @@ struct CompanionRequestView: View {
     /// is ignored, so a double-click cannot answer the next request.
     var allowsClick: () -> Bool = { true }
 
-    @State private var answers: [String: String] = [:]
     @Environment(\.rafuTheme) private var theme
 
     private var ink: NotchInk { NotchInk(theme: theme) }
@@ -48,6 +47,8 @@ struct CompanionRequestView: View {
                         ApprovalPeekText.spokenBox(agent: row.cli.displayName, request: request)
                             ?? "")
             }
+            if request.kind == .plan { CompanionPlanView(request: request) }
+            if request.kind == .notice { CompanionNoticeView(request: request) }
             CompanionRequestDetails(request: request, showsReason: true)
             controls(presentation.controls)
         }
@@ -87,35 +88,12 @@ struct CompanionRequestView: View {
                 actions: CompanionRequestActions(request: request),
                 choose: choose,
                 menuItems: [CompanionRequestMenuItem(title: "Open terminal", action: openTerminal)])
-        case .questions(let questions):
-            ForEach(questions, id: \.id) { question in
-                if !question.header.isEmpty { Text(verbatim: question.header).bold() }
-                Text(verbatim: question.text)
-                ForEach(question.choices.indices, id: \.self) { index in
-                    let choice = question.choices[index]
-                    let selected = answers[question.id] == choice.label
-                    Button {
-                        answers[question.id] = choice.label
-                    } label: {
-                        Label {
-                            VStack(alignment: .leading) {
-                                Text(verbatim: choice.label)
-                                if !choice.detail.isEmpty {
-                                    Text(verbatim: choice.detail).font(.caption)
-                                }
-                            }
-                        } icon: {
-                            Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-                        }
-                    }
-                    .accessibilityAddTraits(selected ? .isSelected : [])
-                }
-            }
-            HStack(spacing: RafuMetrics.space2) {
-                Button("Answer") { choose(.answers(labels: answers)) }
-                    .disabled(!request.permits(.answers(labels: answers)))
-                Button("Open terminal", action: openTerminal)
-            }
+        case .questions:
+            CompanionQuestionSetView(
+                request: request, choose: choose, openTerminal: openTerminal)
+        case .readOnlyQuestions:
+            CompanionQuestionSetView(
+                request: request, readOnly: true, choose: { _ in }, openTerminal: openTerminal)
         }
     }
 
@@ -170,8 +148,9 @@ struct CompanionRequestDetails: View {
         VStack(alignment: .leading, spacing: 2) {
             if let cwd = request.cwd { Text(verbatim: "In \(cwd)") }
             if let root = request.grantRoot { Text(verbatim: "Write access to \(root)") }
-            // A tool call shows its reason as the tool header instead.
-            if showsReason, request.kind != .toolCall, let reason = request.reason {
+            // A tool call shows its reason as the tool header instead, a
+            // plan as its file path and a notice as its title.
+            if showsReason, Self.showsReasonLine(request.kind), let reason = request.reason {
                 Text(verbatim: reason)
             }
             ForEach(request.permissions.indices, id: \.self) { index in
@@ -181,6 +160,13 @@ struct CompanionRequestDetails: View {
         .font(.system(size: 10))
         .foregroundStyle(ink.muted)
         .fixedSize(horizontal: false, vertical: true)
+    }
+
+    static func showsReasonLine(_ kind: CanvasAgentRequest.Kind) -> Bool {
+        switch kind {
+        case .toolCall, .plan, .notice: false
+        case .command, .fileChange, .permissions, .userInput: true
+        }
     }
 }
 
