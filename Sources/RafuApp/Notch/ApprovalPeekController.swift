@@ -235,7 +235,7 @@ final class ApprovalPeekController: NSObject {
             let word: ApprovalPeekFlashResult
             switch decision {
             case .decline, .cancel: word = .denied
-            case .accept, .acceptForSession, .answers: word = .allowed
+            case .accept, .acceptForSession, .acceptAndRemember, .answers: word = .allowed
             }
             startFlash(
                 ApprovalPeekFlash(

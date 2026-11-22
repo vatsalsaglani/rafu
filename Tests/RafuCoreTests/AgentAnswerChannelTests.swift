@@ -415,4 +415,167 @@ struct AgentPermissionAnswerOutputTests {
                 AgentPermissionAnswer.self,
                 from: Data(#"{"eventID":"\#(id.uuidString)","verdict":"maybe"}"#.utf8))) == nil)
     }
+
+    // MARK: Question sets
+
+    /// An AskUserQuestion `tool_input` as Claude Code sends it (hooks
+    /// reference). The helper keeps it in memory.
+    private static var input: [String: Any] {
+        [
+            "questions": [
+                [
+                    "question": "Which framework?", "header": "Framework", "multiSelect": false,
+                    "options": [["label": "React"], ["label": "Vue"]],
+                ],
+                [
+                    "question": "Which parts?", "header": "Parts", "multiSelect": true,
+                    "options": [["label": "Intro"], ["label": "End"]],
+                ],
+            ]
+        ]
+    }
+
+    private static func updatedInput(
+        _ answers: [AgentPermissionAnswer.QuestionAnswer], input: [String: Any] = input
+    ) throws -> [String: Any]? {
+        let answer = AgentPermissionAnswer(eventID: UUID(), verdict: .allow, answers: answers)
+        guard let data = answer.hookOutput(originalInput: input, suggestion: nil) else {
+            return nil
+        }
+        let specific = try #require(try output(data)["hookSpecificOutput"] as? [String: Any])
+        let decision = try #require(specific["decision"] as? [String: Any])
+        #expect(decision["behavior"] as? String == "allow")
+        return decision["updatedInput"] as? [String: Any]
+    }
+
+    @Test("Answers print the original input with answers keyed by question text")
+    func questionAnswers() throws {
+        let updated = try #require(
+            try Self.updatedInput([
+                .init(index: 0, labels: ["Vue"]), .init(index: 1, labels: ["Intro", "End"]),
+            ]))
+        #expect(
+            updated["answers"] as? [String: String] == [
+                "Which framework?": "Vue", "Which parts?": "Intro, End",
+            ])
+        // The questions go back unchanged.
+        #expect((updated["questions"] as? [Any])?.count == 2)
+        // Free text is the value; on a multiple-choice question it follows the labels.
+        let typed = try #require(
+            try Self.updatedInput([
+                .init(index: 0, labels: [], text: "Svelte"),
+                .init(index: 1, labels: ["End"], text: "Appendix"),
+            ]))
+        #expect(
+            typed["answers"] as? [String: String] == [
+                "Which framework?": "Svelte", "Which parts?": "End, Appendix",
+            ])
+    }
+
+    @Test("Any answer that does not match the kept questions prints nothing")
+    func questionMismatch() throws {
+        for answers: [AgentPermissionAnswer.QuestionAnswer] in [
+            [.init(index: 0, labels: ["Vue"])],  // one question unanswered
+            [.init(index: 0, labels: ["Angular"]), .init(index: 1, labels: ["End"])],
+            [.init(index: 0, labels: ["Vue", "React"]), .init(index: 1, labels: ["End"])],
+            [.init(index: 0, labels: ["Vue"], text: "x"), .init(index: 1, labels: ["End"])],
+            [.init(index: 0, labels: []), .init(index: 1, labels: ["End"])],
+            [.init(index: 0, labels: ["Vue"]), .init(index: 1, labels: ["End", "End"])],
+            [.init(index: 0, labels: ["Vue"]), .init(index: 0, labels: ["React"])],
+            [.init(index: 0, labels: ["Vue"]), .init(index: 5, labels: ["End"])],
+            [.init(index: 0, labels: [], text: "a\nb"), .init(index: 1, labels: ["End"])],
+            [.init(index: 0, labels: [], text: " "), .init(index: 1, labels: ["End"])],
+        ] {
+            #expect(try Self.updatedInput(answers) == nil)
+        }
+        // No kept input, or two questions with one text.
+        let answer = AgentPermissionAnswer(
+            eventID: UUID(), verdict: .allow, answers: [.init(index: 0, labels: ["Vue"])])
+        #expect(answer.hookOutput == nil)
+        let question: [String: Any] = ["question": "Q?", "options": [["label": "A"]]]
+        #expect(
+            try Self.updatedInput(
+                [.init(index: 0, labels: ["A"]), .init(index: 1, labels: ["A"])],
+                input: ["questions": [question, question]]) == nil)
+    }
+
+    @Test("Answers and remember travel only with allow and survive the answer file")
+    func answerFields() throws {
+        let deny = AgentPermissionAnswer(
+            eventID: UUID(), verdict: .deny, answers: [.init(index: 0, labels: ["A"])],
+            remember: true)
+        #expect(deny.answers == nil)
+        #expect(!deny.remember)
+        let allow = AgentPermissionAnswer(
+            eventID: UUID(), verdict: .allow,
+            answers: [.init(index: 0, labels: ["A", "B"], text: "typed")], remember: true)
+        let data = try JSONEncoder().encode(allow)
+        #expect(try JSONDecoder().decode(AgentPermissionAnswer.self, from: data) == allow)
+        // A plain verdict writes no new keys, so an older helper reads it as before.
+        let plain = try JSONEncoder().encode(
+            AgentPermissionAnswer(eventID: UUID(), verdict: .allow))
+        let object = try #require(try JSONSerialization.jsonObject(with: plain) as? [String: Any])
+        #expect(Set(object.keys) == ["eventID", "verdict", "interrupt"])
+    }
+
+    @Test("The largest answer file fits the answer bound")
+    func largestAnswerFile() throws {
+        let limits = CanvasAgentRequest.Limits.self
+        let label = String(repeating: "\"", count: limits.labelBytes)
+        let text = String(repeating: "\"", count: limits.freeTextBytes)
+        let answers = (0..<limits.questions).map { index in
+            AgentPermissionAnswer.QuestionAnswer(
+                index: index, labels: Array(repeating: label, count: limits.choices), text: text)
+        }
+        // 4 answers × (6 labels × 128 bytes + 1 KiB of text), every
+        // character a JSON escape: about 14.5 KiB, inside the 16 KiB bound.
+        let data = try JSONEncoder().encode(
+            AgentPermissionAnswer(eventID: UUID(), verdict: .allow, answers: answers))
+        #expect(data.count <= AgentAnswerChannel.maximumAnswerBytes)
+        #expect(data.count > 8 * 1_024)
+        // The helper takes it whole from the private file.
+        let (channel, root) = try temporaryChannel()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let largest = AgentPermissionAnswer(eventID: UUID(), verdict: .allow, answers: answers)
+        try channel.write(largest)
+        #expect(channel.take(eventID: largest.eventID) == largest)
+        // A decoded file with too many answers is refused.
+        let five = (0..<5).map { #"{"index":\#($0),"labels":["a"]}"# }.joined(separator: ",")
+        let json = #"{"eventID":"\#(UUID().uuidString)","verdict":"allow","answers":[\#(five)]}"#
+        #expect(
+            (try? JSONDecoder().decode(AgentPermissionAnswer.self, from: Data(json.utf8))) == nil)
+    }
+
+    // MARK: Remember
+
+    private static var suggestion: [String: Any] {
+        [
+            "type": "addRules", "rules": [["toolName": "Bash", "ruleContent": "npm test"]],
+            "behavior": "allow", "destination": "localSettings",
+        ]
+    }
+
+    @Test("Remember echoes the one suggestion only when lasting grants are allowed")
+    func remember() throws {
+        let answer = AgentPermissionAnswer(eventID: UUID(), verdict: .allow, remember: true)
+        // Off by default: nothing prints, so the terminal dialog stays.
+        #expect(answer.hookOutput(originalInput: nil, suggestion: Self.suggestion) == nil)
+        let data = try #require(
+            answer.hookOutput(originalInput: nil, suggestion: Self.suggestion, policy: .all))
+        let specific = try #require(try output(data)["hookSpecificOutput"] as? [String: Any])
+        let decision = try #require(specific["decision"] as? [String: Any])
+        let echoed = try #require(decision["updatedPermissions"] as? [[String: Any]])
+        #expect(echoed.count == 1)
+        #expect(echoed[0]["destination"] as? String == "localSettings")
+        // A suggestion Rafu does not understand is never echoed.
+        var other = Self.suggestion
+        other["type"] = "setMode"
+        #expect(answer.hookOutput(originalInput: nil, suggestion: other, policy: .all) == nil)
+        #expect(answer.hookOutput(originalInput: nil, suggestion: nil, policy: .all) == nil)
+        // Without remember, a plain allow never carries updatedPermissions.
+        let plain = try #require(
+            AgentPermissionAnswer(eventID: UUID(), verdict: .allow)
+                .hookOutput(originalInput: nil, suggestion: Self.suggestion, policy: .all))
+        #expect(!String(decoding: plain, as: UTF8.self).contains("updatedPermissions"))
+    }
 }

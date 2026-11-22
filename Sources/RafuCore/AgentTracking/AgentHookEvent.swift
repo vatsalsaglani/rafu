@@ -112,8 +112,20 @@ public struct AgentHookEvent: Codable, Equatable, Identifiable, Sendable {
     /// never logged.
     public let subagentDescription: String?
     /// The command or file a Claude `PermissionRequest` asks about. Set only
-    /// by the helper's answer mode; kept in memory only, never logged.
+    /// by the helper's answer mode, and only when the summary
+    /// `waitsForAnswer`; kept in memory only, never logged.
     public let requestSummary: AgentPermissionRequestSummary?
+    /// The agent's own text of a Claude `Notification` (`message`), at most
+    /// `maximumNotificationMessageBytes`, sanitized like request text. Kept
+    /// in memory only, never logged.
+    public let notificationMessage: String?
+    /// The shape of a Claude `PermissionRequest` that Rafu could not
+    /// classify (`AgentRequestShape`): names and types only, never a value.
+    /// Set only by the helper's answer mode. The app logs it.
+    public let requestShape: String?
+
+    /// The longest `Notification` message kept, in UTF-8 bytes.
+    public static let maximumNotificationMessageBytes = CanvasAgentRequest.Limits.noticeBytes
 
     public init(
         id: UUID = UUID(),
@@ -132,9 +144,17 @@ public struct AgentHookEvent: Codable, Equatable, Identifiable, Sendable {
         subagentType: String? = nil,
         subagentModel: String? = nil,
         subagentDescription: String? = nil,
-        requestSummary: AgentPermissionRequestSummary? = nil
+        requestSummary: AgentPermissionRequestSummary? = nil,
+        notificationMessage: String? = nil,
+        requestShape: String? = nil
     ) {
         self.requestSummary = requestSummary
+        self.notificationMessage = notificationMessage.map {
+            CanvasAgentRequest.clean(
+                $0, limit: Self.maximumNotificationMessageBytes, keepsLineBreaks: true
+            ).text
+        }
+        self.requestShape = requestShape.flatMap(AgentRequestShape.sanitized)
         self.subagentType = subagentType
         self.subagentModel = subagentModel
         self.subagentDescription = subagentDescription
@@ -192,6 +212,20 @@ public struct AgentHookEvent: Codable, Equatable, Identifiable, Sendable {
             isSpawn
             ? Self.subagentLabel(spawn?["subagent_type"])
             : (subagentID == nil ? nil : Self.subagentLabel(object["agent_type"]))
+        // The answer mode reads the request. It keeps a summary only when
+        // the helper waits for that class, and the shape (names and types,
+        // never values) of a request it could not classify.
+        let reads = includesRequestSummary && provider == .claude && event == "PermissionRequest"
+        let summary =
+            reads
+            ? AgentPermissionRequestSummary.classify(
+                toolName: toolName, toolInput: object["tool_input"],
+                permissionSuggestions: object["permission_suggestions"])
+            : nil
+        let shape =
+            summary?.classification == .unclassified
+            ? Self.requestShape(toolName: object["tool_name"], input: object["tool_input"])
+            : nil
         self.init(
             id: id,
             provider: provider,
@@ -213,11 +247,20 @@ public struct AgentHookEvent: Codable, Equatable, Identifiable, Sendable {
             subagentType: subagentType,
             subagentModel: isSpawn ? Self.subagentLabel(spawn?["model"]) : nil,
             subagentDescription: isSpawn ? Self.subagentDescription(spawn?["description"]) : nil,
-            requestSummary: includesRequestSummary && provider == .claude
-                && event == "PermissionRequest"
-                ? AgentPermissionRequestSummary(
-                    toolName: toolName, toolInput: object["tool_input"])
-                : nil)
+            requestSummary: summary?.waitsForAnswer == true ? summary : nil,
+            notificationMessage: provider == .claude && event == "Notification"
+                ? object["message"] as? String : nil,
+            requestShape: shape)
+    }
+
+    /// The shape of an unclassified request. Key names show only for a name
+    /// in the built-in form: an MCP server picks its own key names.
+    static func requestShape(toolName: Any?, input: Any?) -> String {
+        let name = toolName as? String ?? ""
+        let keyNames: AgentRequestShape.KeyNames =
+            AgentPermissionRequestSummary.isBuiltInToolName(name) ? .recorded : .counted
+        return "claude "
+            + AgentRequestShape.describe(name: name, value: input, keyNames: keyNames)
     }
 
     /// `provider:session`, the ledger key.

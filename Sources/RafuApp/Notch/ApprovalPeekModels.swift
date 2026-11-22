@@ -451,6 +451,10 @@ nonisolated enum ApprovalPeekText {
                 return "\(agent) needs approval: Use MCP tool. Open the terminal to answer."
             }
             return "\(agent) needs approval: Use tool \(identity.tool) of \(identity.server)"
+        case .plan:
+            return "\(agent) has a plan ready. Open the terminal to answer."
+        case .notice:
+            return "\(agent) needs you. Open the terminal to answer."
         }
     }
 

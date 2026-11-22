@@ -112,8 +112,8 @@ struct CompanionRequestView: View {
                 }
             }
             HStack(spacing: RafuMetrics.space2) {
-                Button("Answer") { choose(.answers(answers)) }
-                    .disabled(!request.permits(.answers(answers)))
+                Button("Answer") { choose(.answers(labels: answers)) }
+                    .disabled(!request.permits(.answers(labels: answers)))
                 Button("Open terminal", action: openTerminal)
             }
         }

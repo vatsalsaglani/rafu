@@ -194,9 +194,15 @@ struct AgentPermissionRequestSummaryTests {
         #expect(fits.isComplete)
     }
 
-    @Test("Other tools and unreadable inputs give no summary")
+    @Test("Unreadable inputs give no summary; they classify as unclassified")
     func unsupported() {
-        #expect(AgentPermissionRequestSummary(toolName: "WebFetch", toolInput: ["url": "x"]) == nil)
+        // A built-in tool with no card of its own is now a tool call.
+        #expect(
+            AgentPermissionRequestSummary(toolName: "WebFetch", toolInput: ["url": "x"])?
+                .classification == .toolCall)
+        #expect(
+            AgentPermissionRequestSummary.classify(toolName: "Bash", toolInput: "ls")
+                .classification == .unclassified)
         #expect(AgentPermissionRequestSummary(toolName: nil, toolInput: ["command": "ls"]) == nil)
         #expect(AgentPermissionRequestSummary(toolName: "Bash", toolInput: "ls") == nil)
         #expect(AgentPermissionRequestSummary(toolName: "Bash", toolInput: [String: Any]()) == nil)
@@ -487,5 +493,275 @@ struct AgentPermissionRequestSummaryTests {
         let encoded = try JSONEncoder().encode(wide)
         #expect(encoded.count <= AgentHookSpool.maximumFileBytes)
         #expect(try JSONDecoder().decode(AgentHookEvent.self, from: encoded) == wide)
+    }
+
+    // MARK: Classification
+
+    @Test("Every request gets a class; nothing is dropped without one")
+    func classes() {
+        func kind(_ name: String?, _ input: Any? = [String: Any]()) -> String {
+            AgentPermissionRequestSummary.classify(toolName: name, toolInput: input)
+                .classification.rawValue
+        }
+        #expect(kind("Bash", ["command": "ls"]) == "command")
+        #expect(kind("Write", ["file_path": "/a", "content": "x"]) == "fileChange")
+        #expect(kind("mcp__a__b") == "toolCall")
+        #expect(kind("WebFetch", ["url": "https://example.com"]) == "toolCall")
+        #expect(kind("AskUserQuestion", ["questions": []]) == "questions")
+        #expect(kind("ExitPlanMode", ["plan": "p"]) == "plan")
+        #expect(kind(nil) == "unclassified")
+        #expect(kind("bad name!") == "unclassified")
+        #expect(kind("WebFetch", "not an object") == "unclassified")
+        #expect(kind("AskUserQuestion", [1]) == "unclassified")
+    }
+
+    @Test("A built-in tool name has the strict form and cannot pose as an MCP name")
+    func builtInNames() {
+        for name in ["Read", "WebFetch", "propose_skills", "a", String(repeating: "A", count: 64)] {
+            #expect(AgentPermissionRequestSummary.isBuiltInToolName(name), "\(name)")
+        }
+        for name in [
+            "", "1Read", "Web Fetch", "Read\n", "MCP__a__b", "mcp_a__b", "Re\u{202E}ad",
+            String(repeating: "A", count: 65), "Read.x", "Read-x",
+        ] {
+            #expect(!AgentPermissionRequestSummary.isBuiltInToolName(name), "\(name)")
+        }
+        // A question, a plan or a command never becomes a plain tool card:
+        // a plain allow is not a valid answer for the first two.
+        for name in ["AskUserQuestion", "ExitPlanMode", "Bash", "Edit", "MultiEdit", "Write"] {
+            #expect(
+                AgentPermissionRequestSummary.classification(forToolName: name) != .toolCall)
+            #expect(AgentPermissionRequestSummary(toolName: name, arguments: "{}") == nil)
+        }
+    }
+
+    @Test("A built-in tool card names the tool on both reason lines and shows every argument")
+    func builtInToolCall() throws {
+        let summary = try #require(
+            AgentPermissionRequestSummary(
+                toolName: "WebFetch", toolInput: ["url": "https://example.com", "prompt": "Sum"]))
+        let call = try #require(summary.toolCall)
+        #expect(call.isBuiltIn)
+        #expect(call.server == "")
+        #expect(call.tool == "WebFetch")
+        #expect(call.reasonLine == "Claude Code tool: WebFetch\nWebFetch")
+        #expect(call.arguments.contains("https://example.com"))
+        #expect(call.arguments.contains("\"prompt\" : \"Sum\""))
+        #expect(summary.isComplete)
+        let identity = try #require(
+            AgentPermissionRequestSummary.toolIdentity(fromReason: call.reasonLine))
+        #expect(identity.server == "Claude Code tool")
+        #expect(identity.tool == "WebFetch")
+        // Not yet answered from Up next: the helper does not wait for it.
+        #expect(!summary.waitsForAnswer)
+        let mcp = try #require(
+            AgentPermissionRequestSummary(toolName: "mcp__a__b", toolInput: [String: Any]()))
+        #expect(mcp.waitsForAnswer)
+        // A built-in summary round-trips.
+        let data = try JSONEncoder().encode(summary)
+        #expect(try JSONDecoder().decode(AgentPermissionRequestSummary.self, from: data) == summary)
+    }
+
+    @Test("An AskUserQuestion input gives its questions, keyed by index")
+    func questions() throws {
+        let summary = AgentPermissionRequestSummary.classify(
+            toolName: "AskUserQuestion",
+            toolInput: [
+                "questions": [
+                    [
+                        "question": "Which framework?", "header": "Framework",
+                        "options": [
+                            ["label": "React", "description": "Library", "preview": "<div/>"],
+                            ["label": "Vue", "description": "Progressive"],
+                        ],
+                        "multiSelect": false,
+                    ],
+                    [
+                        "question": "Which parts?", "header": "Parts",
+                        "options": [["label": "Intro"], ["label": "End"]],
+                        "multiSelect": true,
+                    ],
+                ]
+            ])
+        #expect(summary.classification == .questions)
+        #expect(summary.isComplete)
+        #expect(!summary.waitsForAnswer)
+        #expect(summary.questions.map(\.id) == ["0", "1"])
+        let first = summary.questions[0]
+        #expect(first.text == "Which framework?")
+        #expect(first.header == "Framework")
+        #expect(first.choices.map(\.label) == ["React", "Vue"])
+        #expect(first.choices[0].preview == "<div/>")
+        #expect(first.choices[1].preview == nil)
+        #expect(!first.allowsMultiple)
+        #expect(first.allowsFreeText)
+        #expect(summary.questions[1].allowsMultiple)
+        #expect(first.accepts("React"))
+        #expect(first.accepts(QuestionAnswer(text: "Svelte")))
+        #expect(!first.accepts(QuestionAnswer(labels: ["React", "Vue"])))
+        #expect(summary.questions[1].accepts(QuestionAnswer(labels: ["Intro", "End"])))
+        // The summary round-trips.
+        let data = try JSONEncoder().encode(summary)
+        #expect(try JSONDecoder().decode(AgentPermissionRequestSummary.self, from: data) == summary)
+    }
+
+    @Test("Questions that the answer could not name exactly need the terminal")
+    func questionLimits() {
+        func summary(_ questions: Any) -> AgentPermissionRequestSummary {
+            AgentPermissionRequestSummary.classify(
+                toolName: "AskUserQuestion", toolInput: ["questions": questions])
+        }
+        let ok: [String: Any] = ["question": "Q?", "options": [["label": "A"]]]
+        // Two questions with one text: Claude Code keys answers by text.
+        let twice = summary([ok, ok])
+        #expect(!twice.isComplete)
+        #expect(twice.questions.allSatisfy { $0.terminalOnly })
+        // A multi-select label with ", " would make the joined answer ambiguous.
+        let comma = summary([
+            ["question": "Q?", "multiSelect": true, "options": [["label": "a, b"]]]
+        ])
+        #expect(!comma.isComplete)
+        // Five questions, none, a missing text, a label that is not text.
+        #expect(!summary(Array(repeating: ok, count: 5)).isComplete)
+        #expect(!summary([Any]()).isComplete)
+        #expect(!summary([["options": [["label": "A"]]]]).isComplete)
+        #expect(!summary([["question": "Q?", "options": [["label": 1]]]]).isComplete)
+        // A question text the sanitizer changes.
+        #expect(!summary([["question": "Q\u{202E}?", "options": [["label": "A"]]]]).isComplete)
+    }
+
+    @Test("Previews past the total budget are dropped, the questions stay answerable")
+    func previewBudget() {
+        let preview = String(repeating: "p", count: CanvasAgentRequest.Limits.previewBytes)
+        let options = (0..<6).map { ["label": "L\($0)", "preview": preview] }
+        let questions = (0..<4).map { ["question": "Q\($0)?", "options": options] }
+        let summary = AgentPermissionRequestSummary.classify(
+            toolName: "AskUserQuestion", toolInput: ["questions": questions])
+        let kept = summary.questions.flatMap(\.choices).compactMap(\.preview)
+        #expect(
+            kept.reduce(0) { $0 + $1.utf8.count }
+                <= AgentPermissionRequestSummary.maximumPreviewBytesTotal)
+        #expect(summary.isComplete)
+    }
+
+    @Test("An ExitPlanMode input gives the plan and its path, cut and marked when long")
+    func plan() throws {
+        let summary = AgentPermissionRequestSummary.classify(
+            toolName: "ExitPlanMode",
+            toolInput: ["plan": "## Plan\n1. Do", "planFilePath": "/tmp/plan.md"])
+        #expect(summary.classification == .plan)
+        #expect(summary.plan == .init(path: "/tmp/plan.md", text: "## Plan\n1. Do"))
+        #expect(summary.isComplete)
+        #expect(!summary.waitsForAnswer)
+        let long = AgentPermissionRequestSummary.classify(
+            toolName: "ExitPlanMode",
+            toolInput: [
+                "plan": String(repeating: "x", count: CanvasAgentRequest.Limits.planBytes + 9)
+            ])
+        #expect(long.plan?.text.utf8.count == CanvasAgentRequest.Limits.planBytes)
+        #expect(!long.isComplete)
+        let data = try JSONEncoder().encode(summary)
+        #expect(try JSONDecoder().decode(AgentPermissionRequestSummary.self, from: data) == summary)
+    }
+
+    @Test("An unclassified request keeps only its sanitized name and a notice line")
+    func unclassified() throws {
+        let summary = AgentPermissionRequestSummary.classify(
+            toolName: "odd tool\u{7}", toolInput: ["secret": "value"])
+        #expect(summary.classification == .unclassified)
+        #expect(summary.unclassifiedToolName == "odd tool")
+        #expect(!summary.isComplete)
+        #expect(!summary.waitsForAnswer)
+        #expect(
+            summary.noticeReason == "Claude Code asks to use odd tool. Open the terminal to answer."
+        )
+        let data = try JSONEncoder().encode(summary)
+        #expect(!String(decoding: data, as: UTF8.self).contains("value"))
+        #expect(try JSONDecoder().decode(AgentPermissionRequestSummary.self, from: data) == summary)
+        #expect(
+            AgentPermissionRequestSummary.classify(toolName: nil, toolInput: nil).noticeReason
+                == "Claude Code asks for permission. Open the terminal to answer.")
+        #expect(
+            AgentPermissionRequestSummary(toolName: "Bash", toolInput: [:])?.noticeReason == nil)
+    }
+
+    @Test("Decoding rejects a class with fields of another class")
+    func decodeRejectsMixedClasses() {
+        func decode(_ json: String) -> AgentPermissionRequestSummary? {
+            try? JSONDecoder().decode(AgentPermissionRequestSummary.self, from: Data(json.utf8))
+        }
+        #expect(decode(#"{"classification":"unclassified","isComplete":false}"#) != nil)
+        #expect(decode(#"{"classification":"unclassified","isComplete":true}"#) == nil)
+        #expect(
+            decode(#"{"classification":"unclassified","command":"ls","isComplete":false}"#)
+                == nil)
+        #expect(decode(#"{"classification":"plan","isComplete":false}"#) == nil)
+        #expect(
+            decode(#"{"classification":"plan","plan":{"text":"a\u0007"},"isComplete":false}"#)
+                == nil)
+        #expect(decode(#"{"classification":"questions","isComplete":false}"#) == nil)
+        #expect(decode(#"{"classification":"fileChange","command":"ls","isComplete":true}"#) == nil)
+        // An older helper sends no classification.
+        #expect(decode(#"{"command":"ls","isComplete":true}"#)?.classification == .command)
+    }
+
+    // MARK: Permission suggestions
+
+    private static var suggestion: [String: Any] {
+        [
+            "type": "addRules", "rules": [["toolName": "Bash", "ruleContent": "npm test"]],
+            "behavior": "allow", "destination": "localSettings",
+        ]
+    }
+
+    @Test("One understood suggestion is kept with its exact effect")
+    func permissionSuggestion() throws {
+        let summary = try #require(
+            AgentPermissionRequestSummary(
+                toolName: "Bash", toolInput: ["command": "npm test"],
+                permissionSuggestions: [Self.suggestion]))
+        let kept = try #require(summary.permissionSuggestion)
+        #expect(kept.rule == "Bash(npm test)")
+        #expect(kept.line == "Add rule Bash(npm test) to local settings")
+        let data = try JSONEncoder().encode(summary)
+        #expect(try JSONDecoder().decode(AgentPermissionRequestSummary.self, from: data) == summary)
+        let whole = AgentPermissionRequestSummary.PermissionSuggestion(entries: [
+            [
+                "type": "addRules", "rules": [["toolName": "WebSearch"]], "behavior": "allow",
+                "destination": "session",
+            ]
+        ])
+        #expect(whole?.line == "Add rule WebSearch to this session")
+    }
+
+    @Test("Any suggestion Rafu cannot show whole is not offered")
+    func permissionSuggestionRefused() {
+        func understood(_ entries: Any?) -> Bool {
+            AgentPermissionRequestSummary.PermissionSuggestion(entries: entries) != nil
+        }
+        var extra = Self.suggestion
+        extra["mode"] = "auto"
+        var deny = Self.suggestion
+        deny["behavior"] = "deny"
+        var twoRules = Self.suggestion
+        twoRules["rules"] = [["toolName": "Bash"], ["toolName": "Read"]]
+        var badName = Self.suggestion
+        badName["rules"] = [["toolName": "Bash X"]]
+        var badContent = Self.suggestion
+        badContent["rules"] = [["toolName": "Bash", "ruleContent": "a\u{202E}b"]]
+        var unknownDestination = Self.suggestion
+        unknownDestination["destination"] = "managedSettings"
+        for entries: Any? in [
+            nil, [Any](), [Self.suggestion, Self.suggestion], [extra], [deny], [twoRules],
+            [badName], [badContent], [unknownDestination],
+            [["type": "setMode", "mode": "acceptEdits", "destination": "session"]],
+        ] {
+            #expect(!understood(entries))
+        }
+        // A file change or a question set never carries one.
+        let write = AgentPermissionRequestSummary.classify(
+            toolName: "Write", toolInput: ["file_path": "/a", "content": "x"],
+            permissionSuggestions: [Self.suggestion])
+        #expect(write.permissionSuggestion == nil)
     }
 }
