@@ -314,7 +314,9 @@ public nonisolated struct CanvasAgentRequest: Codable, Hashable, Sendable {
     public let reason: String?
     /// For a file change: the root the agent asks to write under for the session.
     public let grantRoot: String?
-    /// For a permissions request: one short line per requested grant.
+    /// For a permissions request: one short line per requested grant. For a
+    /// command: the extra facts the row must show beside it, such as the
+    /// network target ("Network: https example.com").
     public let permissions: [String]
     /// For a file change: the whole change of each file.
     public let fileChanges: [FileChange]
@@ -432,7 +434,7 @@ public nonisolated struct CanvasAgentRequest: Codable, Hashable, Sendable {
             kind == .fileChange
             ? grantRoot.map { Self.clean($0, limit: Limits.cwdBytes, keepsLineBreaks: false).text }
             : nil
-        self.permissions = kind == .permissions ? lines : []
+        self.permissions = kind == .permissions || kind == .command ? lines : []
         self.fileChanges = changes
         self.questions = kept
         let textLimit: Int? =
@@ -910,46 +912,147 @@ extension CanvasAgentRequest {
     /// The prefix Codex puts before a typed note in a question answer.
     public static let codexNotePrefix = "user_note: "
 
+    /// What `parseCodex` found: the request for the row, and, when Rafu could
+    /// not fully show it, its shape (key names and value types only, never a
+    /// value) for `AgentRequestShape.Recorder`.
+    public struct CodexParse: Sendable {
+        public let request: CanvasAgentRequest?
+        public let shape: String?
+    }
+
+    /// The `_meta` keys of a Codex tool approval that Rafu knows. Checked in
+    /// the Codex 0.171.0 source (`build_mcp_tool_approval_elicitation_meta`,
+    /// tag `rust-v0.171.0`). A key outside this set and outside
+    /// `forcingToolApprovalMetaKeys` may mean the request asks for more than
+    /// the card shows, so the row then offers "Open terminal" only, and the
+    /// shape recorder names the key.
+    static let knownToolApprovalMetaKeys: Set<String> = [
+        "codex_approval_kind", "persist", "tool_name", "tool_annotations", "tool_title",
+        "tool_description", "source", "connector_id", "link_id", "link_is_implicit",
+        "connector_name", "connector_description", "tool_params", "tool_params_display",
+    ]
+
+    /// The `_meta` keys that change what an approval means
+    /// (`mcp_approval_meta.rs`). A request with one of them is terminal-only,
+    /// whatever its value.
+    static let forcingToolApprovalMetaKeys: Set<String> = [
+        "codex_sensitive_action", "codex_requires_user_input", "codex_strict_auto_review",
+        "approvals_reviewer",
+    ]
+
+    /// The id prefix Codex gives a tool approval that it sends as a question
+    /// (`MCP_TOOL_APPROVAL_QUESTION_ID_PREFIX`).
+    static let codexToolApprovalQuestionPrefix = "mcp_tool_call_approval"
+
+    /// The network protocols of the Codex 0.171.0 schema
+    /// (`NetworkApprovalProtocol`).
+    private static let networkProtocols: Set<String> = ["http", "https", "socks5Tcp", "socks5Udp"]
+
+    /// The most words of a command prefix that Rafu offers to remember.
+    static let maximumAmendmentWords = 16
+    /// The most bytes of the words of a command prefix, joined by spaces.
+    static let maximumAmendmentBytes = 256
+
     /// Builds a sanitized approval from a Codex app-server request, or nil
-    /// when the method is not one Rafu can show. The caller checks the thread.
-    /// `fileChanges` are the changes the caller knows for a file-change
-    /// request: the request params carry no diff, so the caller passes the
-    /// patch it saw in an earlier notification. Without them the request is
-    /// terminal-only.
+    /// when the request is not a prompt for the user. The caller checks the
+    /// thread. `fileChanges` are the changes the caller knows for a
+    /// file-change request: the request params carry no diff, so the caller
+    /// passes the patch it saw in an earlier notification. Without them the
+    /// request is terminal-only.
     public static func parse(
         method: String, params: [String: Any], key: UUID = UUID(), receivedAt: Date = Date(),
         fileChanges: [FileChange] = []
     ) -> CanvasAgentRequest? {
+        parseCodex(
+            method: method, params: params, key: key, receivedAt: receivedAt,
+            fileChanges: fileChanges
+        ).request
+    }
+
+    /// Like `parse`, and also the shape of a request that Rafu can only show
+    /// as a notice, or cannot answer because of an unknown `_meta` key. The
+    /// request is nil only for a method that is not a prompt for the user
+    /// (`CodexRequestClass.notUserPrompt`). Every other method gives a row,
+    /// so no prompt is dropped without a trace.
+    public static func parseCodex(
+        method: String, params: [String: Any], key: UUID = UUID(), receivedAt: Date = Date(),
+        fileChanges: [FileChange] = []
+    ) -> CodexParse {
+        func notice(_ reason: String, text: String? = nil) -> CodexParse {
+            CodexParse(
+                request: CanvasAgentRequest(
+                    key: key, kind: .notice, reason: reason, text: text, receivedAt: receivedAt),
+                shape: AgentRequestShape.describe(
+                    name: method, value: params, keyNames: .recorded))
+        }
+        let openTerminal = " Open the terminal to answer."
         switch method {
         case "item/commandExecution/requestApproval":
             let commandKind = params["kind"] as? String ?? "command"
             let knownKind = ["command", "writeStdin", "humanCommand"].contains(commandKind)
-            // A network approval asks for more than the command shows (the
-            // host and the protocol), so only the terminal can answer it.
-            let asksNetwork = params["networkApprovalContext"].map { !($0 is NSNull) } ?? false
-            return CanvasAgentRequest(
-                key: key, kind: .command, isHumanCheckpoint: commandKind == "humanCommand",
-                command: params["command"] as? String, cwd: params["cwd"] as? String,
-                reason: params["reason"] as? String, terminalOnly: !knownKind || asksNetwork,
-                receivedAt: receivedAt)
+            // A network approval shows its target and can be accepted or
+            // declined. "Allow for this session" stays off for it: what that
+            // would cover for a host is not verified.
+            let network = networkContext(params["networkApprovalContext"])
+            var lines: [String] = []
+            var remember: [PersistChoice] = []
+            var restricted = !knownKind
+            var offersSession = true
+            switch network {
+            case .none:
+                if commandKind == "command",
+                    let words = execpolicyAmendment(fromCommandParams: params)
+                {
+                    remember = [PersistChoice(kind: .rule, line: execpolicyAmendmentLine(words))]
+                }
+            case .line(let line):
+                lines = [line]
+                offersSession = false
+            case .invalid:
+                restricted = true
+                offersSession = false
+            }
+            return CodexParse(
+                request: CanvasAgentRequest(
+                    key: key, kind: .command, isHumanCheckpoint: commandKind == "humanCommand",
+                    command: params["command"] as? String, cwd: params["cwd"] as? String,
+                    reason: params["reason"] as? String, permissions: lines,
+                    persistChoices: remember, terminalOnly: restricted,
+                    offersSessionAllow: offersSession, receivedAt: receivedAt),
+                shape: nil)
         case "item/fileChange/requestApproval":
             // The params carry no diff: the change comes from the patch
             // notification the caller saw. No patch, no answer from the row.
             // "Allow for this session" stays off: what a Codex session grant
             // covers for files is not verified.
-            return CanvasAgentRequest(
-                key: key, kind: .fileChange, reason: params["reason"] as? String,
-                grantRoot: params["grantRoot"] as? String, fileChanges: fileChanges,
-                terminalOnly: fileChanges.isEmpty, offersSessionAllow: false,
-                receivedAt: receivedAt)
+            return CodexParse(
+                request: CanvasAgentRequest(
+                    key: key, kind: .fileChange, reason: params["reason"] as? String,
+                    grantRoot: params["grantRoot"] as? String, fileChanges: fileChanges,
+                    terminalOnly: fileChanges.isEmpty, offersSessionAllow: false,
+                    receivedAt: receivedAt),
+                shape: nil)
         case "item/permissions/requestApproval":
             let summary = permissionSummary(params["permissions"])
-            return CanvasAgentRequest(
-                key: key, kind: .permissions, cwd: params["cwd"] as? String,
-                reason: params["reason"] as? String, permissions: summary.lines,
-                terminalOnly: !summary.complete, receivedAt: receivedAt)
+            return CodexParse(
+                request: CanvasAgentRequest(
+                    key: key, kind: .permissions, cwd: params["cwd"] as? String,
+                    reason: params["reason"] as? String, permissions: summary.lines,
+                    terminalOnly: !summary.complete, receivedAt: receivedAt),
+                shape: nil)
         case "item/tool/requestUserInput":
             let raw = params["questions"] as? [Any] ?? []
+            // Codex sends a tool approval as a question when its elicitation
+            // feature is off. The question holds no arguments, so Rafu must
+            // not offer an answer: the user could not see what runs.
+            let approval = raw.lazy.compactMap { $0 as? [String: Any] }.first {
+                ($0["id"] as? String)?.hasPrefix(codexToolApprovalQuestionPrefix) == true
+            }
+            if let approval {
+                return notice(
+                    "Tool approval: open the terminal to see the arguments.",
+                    text: approval["question"] as? String)
+            }
             var questions: [Question] = []
             var complete = params["questions"] is [Any]
             for item in raw.prefix(Limits.questions + 1) {
@@ -978,39 +1081,115 @@ extension CanvasAgentRequest {
                         isSecret: object["isSecret"] as? Bool ?? false,
                         terminalOnly: choices.count != options.count))
             }
-            return CanvasAgentRequest(
-                key: key, kind: .userInput, questions: questions,
-                terminalOnly: !complete || questions.count != raw.count,
-                receivedAt: receivedAt)
+            return CodexParse(
+                request: CanvasAgentRequest(
+                    key: key, kind: .userInput, questions: questions,
+                    terminalOnly: !complete || questions.count != raw.count,
+                    receivedAt: receivedAt),
+                shape: nil)
         case "mcpServer/elicitation/request":
-            return toolCallRequest(fromElicitation: params, key: key, receivedAt: receivedAt)
+            if let call = toolCallRequest(
+                fromElicitation: params, key: key, receivedAt: receivedAt)
+            {
+                let shape = AgentRequestShape.describe(
+                    name: method, value: params, keyNames: .recorded)
+                return CodexParse(
+                    request: call.request, shape: call.hasUnknownMeta ? shape : nil)
+            }
+            // Not a tool approval Rafu can show: a form that asks for data, a
+            // link, a message-only approval, or a tool approval of a shape it
+            // does not know. Show what the server says; the terminal answers.
+            let meta = params["_meta"] as? [String: Any]
+            let reason: String
+            switch (meta?["codex_approval_kind"] as? String, params["mode"] as? String) {
+            case ("mcp_tool_call", _): reason = "Codex needs your approval for an MCP tool."
+            case ("browser_auth", _): reason = "Codex asks you to sign in with a browser."
+            case ("tool_suggestion", _): reason = "Codex suggests an app or tool."
+            case (_, "url"): reason = "An MCP server asks you to open a link."
+            default:
+                let schema = params["requestedSchema"] as? [String: Any]
+                let properties = schema?["properties"] as? [String: Any]
+                reason =
+                    properties?.isEmpty == false
+                    ? "An MCP server asks for information." : "An MCP server asks for approval."
+            }
+            return notice(reason + openTerminal, text: params["message"] as? String)
+        case "applyPatchApproval", "execCommandApproval":
+            // The older approval API. Shown only; the shape tells whether the
+            // Codex terminal still sends it.
+            let reason =
+                method == "applyPatchApproval"
+                ? "Codex asks to change files." : "Codex asks to run a command."
+            return notice(reason + openTerminal, text: params["reason"] as? String)
         default:
-            return nil
+            guard classify(method: method) == .unclassified else {
+                return CodexParse(request: nil, shape: nil)
+            }
+            let word = method.split(separator: "/").last.map(String.init) ?? ""
+            let name = AgentRequestShape.safeName(word)
+            let reason =
+                name == "?"
+                ? "Codex sent a request that Rafu does not know."
+                : "Codex sent a request named \(name)."
+            return notice(reason + openTerminal)
         }
     }
 
-    /// The `_meta` keys of a Codex tool approval that Rafu knows. A key outside
-    /// this set may mean the request asks for more than the card shows, so the
-    /// row then offers "Open terminal" only.
-    /// INFERRED from strings in the Codex 0.171.0 binary, not seen on a live
-    /// request: a live capture may add a harmless key here.
-    private static let knownToolApprovalMetaKeys: Set<String> = [
-        "codex_approval_kind", "persist", "tool_name", "tool_params", "tool_params_display",
-        "tool_title", "tool_description", "source", "connector_id", "connector_name",
-        "connector_description", "codex_request_type",
-    ]
+    // MARK: Command approval details
+
+    private enum NetworkContext {
+        /// The request has no network context.
+        case none
+        /// "Network: <protocol> <host>".
+        case line(String)
+        /// A context Rafu cannot show whole.
+        case invalid
+    }
+
+    /// The network context of a command approval (`networkApprovalContext`).
+    private static func networkContext(_ value: Any?) -> NetworkContext {
+        guard let value, !(value is NSNull) else { return .none }
+        guard let object = value as? [String: Any], let host = object["host"] as? String,
+            !host.isEmpty, let networkProtocol = object["protocol"] as? String,
+            networkProtocols.contains(networkProtocol)
+        else { return .invalid }
+        return .line("Network: \(networkProtocol) \(host)")
+    }
+
+    /// The command prefix of `proposedExecpolicyAmendment`, when Rafu can show
+    /// it whole: one to `maximumAmendmentWords` words, none empty, none with
+    /// white space or a character the sanitizer removes, at most
+    /// `maximumAmendmentBytes` bytes joined by spaces. Else nil.
+    public static func execpolicyAmendment(fromCommandParams params: [String: Any]) -> [String]? {
+        guard let words = params["proposedExecpolicyAmendment"] as? [String],
+            (1...maximumAmendmentWords).contains(words.count),
+            words.joined(separator: " ").utf8.count <= maximumAmendmentBytes
+        else { return nil }
+        for word in words {
+            let clean = Self.clean(word, limit: maximumAmendmentBytes, keepsLineBreaks: false)
+            guard !word.isEmpty, !clean.altered,
+                !word.unicodeScalars.contains(where: { $0.properties.isWhitespace })
+            else { return nil }
+        }
+        return words
+    }
+
+    /// The line that states what remembering `words` does.
+    public static func execpolicyAmendmentLine(_ words: [String]) -> String {
+        "Always allow commands that start with " + words.joined(separator: " ")
+    }
+
+    // MARK: Tool approval
 
     /// A Codex `mcpServer/elicitation/request` is a tool approval only when
-    /// every check below holds; any other shape gives nil (no row, the terminal
-    /// answers, as before). The schema of the request (mode, `requestedSchema`,
-    /// `serverName`) is verified from the generated Codex schema. The `_meta`
-    /// keys (`codex_approval_kind` = `mcp_tool_call`, `tool_name`,
-    /// `tool_params`) are INFERRED from binary strings and not yet seen live,
-    /// so a mismatch must stay safe: nil. `params.message` and the display
+    /// every check below holds; any other shape gives nil (the caller then
+    /// shows a notice). The request fields (mode, `requestedSchema`,
+    /// `serverName`) and the `_meta` keys are checked against the Codex
+    /// 0.171.0 generated schema and source. `params.message` and the display
     /// fields are free text from Codex and are never read.
     private static func toolCallRequest(
         fromElicitation params: [String: Any], key: UUID, receivedAt: Date
-    ) -> CanvasAgentRequest? {
+    ) -> (request: CanvasAgentRequest, hasUnknownMeta: Bool)? {
         // A form that asks for no data. A property means the user must type
         // something, which Rafu cannot do.
         guard params["mode"] as? String == "form",
@@ -1034,11 +1213,34 @@ extension CanvasAgentRequest {
             let summary = AgentPermissionRequestSummary(toolName: name, toolInput: arguments),
             let call = summary.toolCall
         else { return nil }
-        let hasUnknownMeta = !Set(meta.keys).isSubset(of: knownToolApprovalMetaKeys)
-        return CanvasAgentRequest(
+        let keys = Set(meta.keys)
+        let hasUnknownMeta = !keys.subtracting(forcingToolApprovalMetaKeys).isSubset(
+            of: knownToolApprovalMetaKeys)
+        let forced = !keys.isDisjoint(with: forcingToolApprovalMetaKeys)
+        // What Codex offers to remember: `persist` is absent, a string, or an
+        // array of strings. Only the two known words count.
+        let offered: Set<String> =
+            switch meta["persist"] {
+            case let word as String: [word]
+            case let words as [String]: Set(words)
+            default: []
+            }
+        var remember: [PersistChoice] = []
+        if offered.contains("session") {
+            remember.append(
+                PersistChoice(
+                    kind: .session, line: "Allow \(tool) of \(server) for this Codex session"))
+        }
+        if offered.contains("always") {
+            remember.append(
+                PersistChoice(kind: .always, line: "Always allow \(tool) of \(server) in Codex"))
+        }
+        let request = CanvasAgentRequest(
             key: key, kind: .toolCall, command: call.arguments, reason: call.reasonLine,
-            terminalOnly: !summary.isComplete || hasUnknownMeta, offersSessionAllow: false,
-            receivedAt: receivedAt)
+            persistChoices: remember, stopsTurnOnCancel: false,
+            terminalOnly: !summary.isComplete || hasUnknownMeta || forced,
+            offersSessionAllow: false, receivedAt: receivedAt)
+        return (request, hasUnknownMeta)
     }
 
     /// The changes of a Codex `item/fileChange/patchUpdated` notification
@@ -1090,10 +1292,13 @@ extension CanvasAgentRequest {
     /// The JSON-RPC `result` object that answers this request with
     /// `decision`, or nil when the decision is not valid for it. A
     /// permissions request needs the profile it asked for (`params.permissions`):
-    /// accepting grants exactly that profile; declining grants nothing.
+    /// accepting grants exactly that profile; declining grants nothing. A
+    /// remembered command prefix needs the words the request offered
+    /// (`execpolicyAmendment(fromCommandParams:)`); they must match the line
+    /// the row showed.
     public func result(
         for decision: CanvasAgentRequestDecision, requestedPermissions: Any? = nil,
-        policy: PersistPolicy = .current
+        execpolicyAmendment: [String]? = nil, policy: PersistPolicy = .current
     ) -> [String: Any]? {
         guard permits(decision, policy: policy) else { return nil }
         switch (kind, decision) {
@@ -1123,16 +1328,40 @@ extension CanvasAgentRequest {
             (.command, .cancel), (.fileChange, .accept), (.fileChange, .acceptForSession),
             (.fileChange, .decline), (.fileChange, .cancel):
             return ["decision": decision.name]
+        case (.command, .acceptAndRemember(.rule)):
+            // Checked in the Codex 0.171.0 schema
+            // (`CommandExecutionApprovalDecision`). The words must be the
+            // ones the row showed.
+            guard let words = execpolicyAmendment,
+                persistChoices.contains(where: {
+                    $0.kind == .rule && $0.line == Self.execpolicyAmendmentLine(words)
+                })
+            else { return nil }
+            return [
+                "decision": [
+                    "acceptWithExecpolicyAmendment": ["execpolicy_amendment": words]
+                ]
+            ]
         case (.toolCall, .accept):
-            // Codex elicitation answer. The form has no property, so the
-            // accepted content is the empty object. Never `_meta`: Rafu must
-            // not send `persist` (remember for the session or for always).
-            // Shape INFERRED from the schema; not yet run live.
-            return ["action": "accept", "content": [String: Any]()]
+            // Codex elicitation answers, checked in the Codex 0.171.0 source
+            // (`parse_mcp_tool_approval_elicitation_response`). The form has
+            // no property, so the accepted content is null.
+            return ["action": "accept", "content": NSNull()]
+        case (.toolCall, .acceptAndRemember(let kind)):
+            // `persist` says how long Codex remembers the grant. Offered
+            // only when the request carried it and `PersistPolicy` allows it.
+            guard kind == .session || kind == .always else { return nil }
+            return [
+                "action": "accept", "content": NSNull(), "_meta": ["persist": kind.rawValue],
+            ]
         case (.toolCall, .decline):
             return ["action": "decline"]
         case (.toolCall, .cancel):
-            return ["action": "cancel"]
+            // Cancel skips this tool call; it does not stop the turn.
+            return [
+                "action": "cancel", "content": NSNull(),
+                "_meta": ["codex_approval_cancellation_reason": "user"],
+            ]
         default:
             return nil
         }
