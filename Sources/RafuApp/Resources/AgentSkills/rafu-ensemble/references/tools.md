@@ -91,12 +91,13 @@ drops the message and the link shows Failed; `list_connections` shows
 peer. Wait until `list_connections` shows a started peer `connected` before you
 send.
 
-Codex reads a queued message when it next runs, and a queued message does not
-start a turn for an idle Codex. When the result of an accepted send to a Codex
-peer says so, call `terminal_send` with a short line to wake it.
+Codex takes a queued message as a new turn when its current turn ends. If
+Codex waits idle at its prompt and does not answer, start it with
+`terminal_send`.
 
 A received message begins with "Ensemble message from @name (peer id ...)".
-Answer with `send_message` to that `@mention` or peer ID.
+Answer with `send_message` to that `@mention` or peer ID. When you finish the
+work, send the result to the sender, unless the message says not to reply.
 
 ## Changing a running agent
 

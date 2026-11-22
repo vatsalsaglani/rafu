@@ -1438,7 +1438,7 @@ public nonisolated enum CanvasAgentToolCatalog {
                             ]),
                         "prompt": property(
                             "string",
-                            "First task for claude or codex, typed as one argument of the launch line: at most \(CanvasAgentToolCall.maximumCommandArgumentBytes) bytes, newlines become spaces. For a longer brief write a file or a note and pass a one-line prompt that names the path or note title and what to do with it. Do not tell the agent to wait or poll for messages; a message starts its next turn.",
+                            "First task for claude or codex, typed as one argument of the launch line: at most \(CanvasAgentToolCall.maximumCommandArgumentBytes) bytes, newlines become spaces. For a longer brief write a file or a note and pass a one-line prompt that names the path or note title and what to do with it. Do not tell the agent to wait or poll for messages; a message starts its next turn. If you will send more tasks to a linked peer, say so here, for example: Also do the tasks that <your @mention or node ID> sends you through the Ensemble channel, and reply to it with send_message. A Claude peer does channel tasks only when this prompt permits them.",
                             ["maxLength": CanvasAgentToolCall.maximumCommandArgumentBytes]),
                         "model": property(
                             "string",

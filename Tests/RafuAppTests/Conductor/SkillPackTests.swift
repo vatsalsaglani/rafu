@@ -67,6 +67,26 @@ func bundledAgentSkillTeachesCodexToWaitByEndingTheTurn() throws {
             "To wait for one, end your turn."))
 }
 
+@MainActor
+@Test("The agent skill makes a reply the default and does not bypass the Claude Code trust rule")
+func bundledAgentSkillRepliesByDefaultAndKeepsTheTrustRule() throws {
+    let catalog = try ConductorBundledSkillCatalog.bundled()
+    let skill = String(
+        decoding: try catalog.data(for: .init(pathComponents: ["SKILL.md"])), as: UTF8.self)
+    #expect(skill.contains("cannot read your terminal"))
+    #expect(skill.contains("Give a peer authority for later tasks"))
+    #expect(skill.contains("Do not reword the message"))
+    #expect(skill.contains("you must not try to get past it"))
+    for components in [
+        ["SKILL.md"], ["references", "recipes.md"], ["references", "tools.md"],
+        ["references", "codex-agents-snippet.md"],
+    ] {
+        let text = String(
+            decoding: try catalog.data(for: .init(pathComponents: components)), as: UTF8.self)
+        #expect(!text.contains("then stop"), "\(components) still says then stop")
+    }
+}
+
 @Test("Skill frontmatter parsing reads keys and rejects a missing block")
 func skillFrontmatterParsing() throws {
     let values = try ConductorBundledSkillCatalog.frontmatter(
