@@ -552,8 +552,8 @@ struct AgentPermissionRequestSummaryTests {
             AgentPermissionRequestSummary.toolIdentity(fromReason: call.reasonLine))
         #expect(identity.server == "Claude Code tool")
         #expect(identity.tool == "WebFetch")
-        // Not yet answered from Up next: the helper does not wait for it.
-        #expect(!summary.waitsForAnswer)
+        // Answered from Up next through the generic tool card.
+        #expect(summary.waitsForAnswer)
         let mcp = try #require(
             AgentPermissionRequestSummary(toolName: "mcp__a__b", toolInput: [String: Any]()))
         #expect(mcp.waitsForAnswer)
@@ -585,7 +585,8 @@ struct AgentPermissionRequestSummaryTests {
             ])
         #expect(summary.classification == .questions)
         #expect(summary.isComplete)
-        #expect(!summary.waitsForAnswer)
+        // The terminal question stays on screen while the hook waits.
+        #expect(summary.waitsForAnswer)
         #expect(summary.questions.map(\.id) == ["0", "1"])
         let first = summary.questions[0]
         #expect(first.text == "Which framework?")

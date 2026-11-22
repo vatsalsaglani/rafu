@@ -111,9 +111,8 @@ public struct AgentHookEvent: Codable, Equatable, Identifiable, Sendable {
     /// from the agent's prompt-side input, so it is kept in memory only and
     /// never logged.
     public let subagentDescription: String?
-    /// The command or file a Claude `PermissionRequest` asks about. Set only
-    /// by the helper's answer mode, and only when the summary
-    /// `waitsForAnswer`; kept in memory only, never logged.
+    /// What a Claude `PermissionRequest` asks about, of any class. Set only
+    /// by the helper's answer mode; kept in memory only, never logged.
     public let requestSummary: AgentPermissionRequestSummary?
     /// The agent's own text of a Claude `Notification` (`message`), at most
     /// `maximumNotificationMessageBytes`, sanitized like request text. Kept
@@ -212,9 +211,9 @@ public struct AgentHookEvent: Codable, Equatable, Identifiable, Sendable {
             isSpawn
             ? Self.subagentLabel(spawn?["subagent_type"])
             : (subagentID == nil ? nil : Self.subagentLabel(object["agent_type"]))
-        // The answer mode reads the request. It keeps a summary only when
-        // the helper waits for that class, and the shape (names and types,
-        // never values) of a request it could not classify.
+        // The answer mode reads the request. It keeps the summary of every
+        // class, so the app can show a plan or a notice too, and the shape
+        // (names and types, never values) of a request it could not classify.
         let reads = includesRequestSummary && provider == .claude && event == "PermissionRequest"
         let summary =
             reads
@@ -247,7 +246,7 @@ public struct AgentHookEvent: Codable, Equatable, Identifiable, Sendable {
             subagentType: subagentType,
             subagentModel: isSpawn ? Self.subagentLabel(spawn?["model"]) : nil,
             subagentDescription: isSpawn ? Self.subagentDescription(spawn?["description"]) : nil,
-            requestSummary: summary?.waitsForAnswer == true ? summary : nil,
+            requestSummary: summary,
             notificationMessage: provider == .claude && event == "Notification"
                 ? object["message"] as? String : nil,
             requestShape: shape)

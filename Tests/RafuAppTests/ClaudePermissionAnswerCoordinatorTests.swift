@@ -22,6 +22,50 @@ private func request(
         requestSummary: AgentPermissionRequestSummary(toolName: tool, toolInput: input))
 }
 
+/// An answer-mode event for any tool, built from a hook payload the way the
+/// helper builds it (so an unclassified request carries its shape).
+private func prompt(
+    tool: String, input: [String: Any], session: String = "s1", at seconds: TimeInterval = 0
+) throws -> AgentHookEvent {
+    let payload = try JSONSerialization.data(withJSONObject: [
+        "session_id": session, "hook_event_name": "PermissionRequest", "cwd": "/repo",
+        "tool_name": tool, "tool_input": input,
+    ])
+    let event = try AgentHookEvent(
+        provider: .claude, payload: payload, time: start.addingTimeInterval(seconds),
+        includesRequestSummary: true)
+    return AgentHookEvent(
+        id: event.id, provider: .claude, sessionID: session, hookEventName: "PermissionRequest",
+        cwd: "/repo", toolName: tool, ancestorProcessIDs: [9_001, terminalPID, 1],
+        time: event.time, requestSummary: event.requestSummary,
+        requestShape: event.requestShape)
+}
+
+private func notification(
+    _ type: String, message: String? = "Claude needs your permission to use the network",
+    session: String = "s1", at seconds: TimeInterval = 6
+) -> AgentHookEvent {
+    AgentHookEvent(
+        provider: .claude, sessionID: session, hookEventName: "Notification", cwd: "/repo",
+        notificationType: type, ancestorProcessIDs: [9_003, terminalPID, 1],
+        time: start.addingTimeInterval(seconds), notificationMessage: message)
+}
+
+private var twoQuestions: [String: Any] { [
+    "questions": [
+        [
+            "question": "Which color?", "header": "Color", "multiSelect": false,
+            "options": [["label": "Red", "description": ""], ["label": "Blue", "description": ""]],
+        ],
+        [
+            "question": "Which fruits?", "header": "Fruits", "multiSelect": true,
+            "options": [
+                ["label": "Apple", "description": ""], ["label": "Banana", "description": ""],
+            ],
+        ],
+    ]
+] }
+
 private func hook(
     _ name: String, session: String = "s1", subagent: String? = nil, tool: String? = nil,
     at seconds: TimeInterval = 1
@@ -43,6 +87,7 @@ private final class Harness {
     var clock = start
     var terminals: [AgentTerminalCandidate]
     var writes: [ClaudeAnswerWrite] = []
+    var shapes: [String] = []
     var coordinator: ClaudePermissionAnswerCoordinator!
 
     init() {
@@ -58,7 +103,8 @@ private final class Harness {
             channel: channel, requests: requests,
             terminals: { [unowned self] in terminals },
             now: { [unowned self] in clock },
-            write: { [unowned self] in writes.append($0) })
+            write: { [unowned self] in writes.append($0) },
+            recordShape: { [unowned self] in shapes.append($0) })
     }
 
     func tearDown() {
@@ -181,6 +227,143 @@ struct ClaudePermissionAnswerCoordinatorTests {
         harness.coordinator.handle(events)
         #expect(harness.openKeys.count == AgentRequestStore.perTerminalLimit)
         #expect(harness.writes == [.dismiss(events.last!.id)])
+    }
+
+    // MARK: Question sets, plans and notices
+
+    @Test("A question set opens, its answers are submitted by index, and it closes")
+    func questionSetAnswered() throws {
+        let harness = Harness()
+        defer { harness.tearDown() }
+        harness.coordinator.setWatching(true)
+        let event = try prompt(tool: "AskUserQuestion", input: twoQuestions)
+        harness.coordinator.handle([event])
+        let open = try #require(harness.requests.current(for: harness.terminalID))
+        #expect(open.kind == .userInput)
+        #expect(open.questions.count == 2)
+        let decision = CanvasAgentRequestDecision.answers([
+            "0": "Blue", "1": QuestionAnswer(labels: ["Apple"], text: "Mango"),
+        ])
+        #expect(
+            harness.requests.choose(
+                controllerID: harness.terminalID, key: event.id, decision: decision) == .chosen)
+        harness.coordinator.reconcile()
+        #expect(
+            harness.writes == [.submit(CanvasAgentRequestAnswer(key: event.id, decision: decision))])
+        #expect(harness.openKeys.isEmpty)
+    }
+
+    @Test("A question answered in the terminal closes on PostToolUse of AskUserQuestion")
+    func questionSetAnsweredInTerminal() throws {
+        let harness = Harness()
+        defer { harness.tearDown() }
+        harness.coordinator.setWatching(true)
+        let event = try prompt(tool: "AskUserQuestion", input: twoQuestions)
+        harness.coordinator.handle([event])
+        #expect(harness.openKeys == [event.id])
+        // Another tool finishing does not end it.
+        harness.coordinator.handle([hook("PostToolUse", tool: "Bash", at: 1)])
+        #expect(harness.openKeys == [event.id])
+        harness.coordinator.handle([hook("PostToolUse", tool: "AskUserQuestion", at: 2)])
+        #expect(harness.openKeys.isEmpty)
+        // Its helper waits, so it is told to stop.
+        #expect(harness.writes == [.dismiss(event.id)])
+    }
+
+    @Test("A plan shows read-only and closes on PostToolUse of ExitPlanMode, with no dismiss")
+    func planShownOnly() throws {
+        let harness = Harness()
+        defer { harness.tearDown() }
+        harness.coordinator.setWatching(true)
+        let event = try prompt(
+            tool: "ExitPlanMode", input: ["plan": "## Plan", "planFilePath": "/tmp/p.md"])
+        harness.coordinator.handle([event])
+        let open = try #require(harness.requests.current(for: harness.terminalID))
+        #expect(open.kind == .plan)
+        #expect(open.terminalOnly)
+        harness.coordinator.handle([hook("PostToolUse", tool: "ExitPlanMode", at: 2)])
+        #expect(harness.openKeys.isEmpty)
+        // No helper waits for a plan: nothing is written.
+        #expect(harness.writes.isEmpty)
+    }
+
+    @Test("A plan in a session of no Rafu terminal writes nothing")
+    func planUnmatched() throws {
+        let harness = Harness()
+        defer { harness.tearDown() }
+        harness.coordinator.setWatching(true)
+        harness.terminals = []
+        harness.coordinator.handle([try prompt(tool: "ExitPlanMode", input: ["plan": "p"])])
+        #expect(harness.writes.isEmpty)
+    }
+
+    @Test("An unclassified request shows a notice, records its shape, and expires silently")
+    func unclassifiedNotice() throws {
+        let harness = Harness()
+        defer { harness.tearDown() }
+        harness.coordinator.setWatching(true)
+        let secret = "sk-ant-not-a-real-key"
+        let event = try prompt(tool: "odd tool", input: ["token": secret])
+        harness.coordinator.handle([event])
+        let open = try #require(harness.requests.current(for: harness.terminalID))
+        #expect(open.kind == .notice)
+        #expect(open.reason == "Claude Code asks to use odd tool. Open the terminal to answer.")
+        #expect(harness.shapes == ["claude ? object[1]{string:1}"])
+        #expect(!harness.shapes.joined().contains(secret))
+        harness.clock = start.addingTimeInterval(ClaudeAnswerRequestBook.lifetime)
+        harness.coordinator.reconcile()
+        #expect(harness.openKeys.isEmpty)
+        #expect(harness.writes.isEmpty)
+    }
+
+    @Test("A waiting notification opens a notice only when the session shows nothing else")
+    func notificationNotice() throws {
+        let harness = Harness()
+        defer { harness.tearDown() }
+        harness.coordinator.setWatching(true)
+        // A sandboxed network request: no PermissionRequest, only the notification.
+        let network = notification("permission_prompt")
+        harness.coordinator.handle([network])
+        let open = try #require(harness.requests.current(for: harness.terminalID))
+        #expect(open.kind == .notice)
+        #expect(open.reason == "Permission request")
+        #expect(open.text == "Claude needs your permission to use the network")
+        // The command runs after the person allows it in the terminal.
+        harness.coordinator.handle([hook("PostToolUse", tool: "Bash", at: 9)])
+        #expect(harness.openKeys.isEmpty)
+        #expect(harness.writes.isEmpty)
+
+        // A notification for a request Rafu shows already adds nothing.
+        let bash = request(at: 10)
+        harness.coordinator.handle([bash, notification("permission_prompt", at: 16)])
+        #expect(harness.openKeys == [bash.id])
+        // An idle notification never opens one.
+        harness.coordinator.handle([hook("PostToolUse", tool: "Bash", at: 17)])
+        harness.coordinator.handle([notification("idle_prompt", message: "Idle", at: 80)])
+        #expect(harness.openKeys.isEmpty)
+    }
+
+    @Test("Without the watch lock a notification opens nothing")
+    func notificationNotWatching() {
+        let harness = Harness()
+        defer { harness.tearDown() }
+        harness.coordinator.handle([notification("elicitation_dialog")])
+        #expect(harness.openKeys.isEmpty)
+        #expect(harness.writes.isEmpty)
+    }
+
+    @Test("Releasing the lock dismisses only the requests whose helper waits")
+    func releaseDismissesWaitingOnly() throws {
+        let harness = Harness()
+        defer { harness.tearDown() }
+        harness.coordinator.setWatching(true)
+        let bash = request()
+        let plan = try prompt(tool: "ExitPlanMode", input: ["plan": "p"], session: "s2")
+        harness.coordinator.handle([bash, plan])
+        #expect(Set(harness.openKeys) == [bash.id, plan.id])
+        harness.coordinator.setWatching(false)
+        #expect(harness.openKeys.isEmpty)
+        #expect(harness.writes == [.dismiss(bash.id)])
     }
 
     // MARK: Answering

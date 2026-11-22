@@ -242,8 +242,10 @@ struct AgentHookSpoolTests {
                 "tool_name": "Bash", "tool_input": ["cmd": secret, "n": 3],
             ]),
             includesRequestSummary: true)
-        // Bash without a `command` string is unclassified: no summary, a shape.
-        #expect(event.requestSummary == nil)
+        // Bash without a `command` string is unclassified: a name-only
+        // summary for the notice row, and a shape.
+        #expect(event.requestSummary?.classification == .unclassified)
+        #expect(event.requestSummary?.waitsForAnswer == false)
         let shape = try #require(event.requestShape)
         #expect(shape == "claude Bash {cmd:string,n:number}")
         #expect(!shape.contains(secret))
@@ -257,8 +259,8 @@ struct AgentHookSpoolTests {
         #expect(plain.requestShape == nil)
     }
 
-    @Test("Only classes the helper waits for carry a summary in the event")
-    func waitingClassesOnly() throws {
+    @Test("Every class carries a summary in the answer mode; only some wait")
+    func everyClassCarriesASummary() throws {
         func summary(_ tool: String, _ input: [String: Any]) throws
             -> AgentPermissionRequestSummary?
         {
@@ -271,11 +273,33 @@ struct AgentHookSpoolTests {
                 includesRequestSummary: true
             ).requestSummary
         }
-        #expect(try summary("Bash", ["command": "ls"]) != nil)
-        #expect(try summary("mcp__a__b", [:]) != nil)
-        #expect(try summary("WebFetch", ["url": "https://example.com"]) == nil)
-        #expect(try summary("AskUserQuestion", ["questions": []]) == nil)
-        #expect(try summary("ExitPlanMode", ["plan": "p"]) == nil)
+        let question: [String: Any] = [
+            "question": "Which?", "header": "H", "multiSelect": false,
+            "options": [["label": "A", "description": ""]],
+        ]
+        let cases: [(String, [String: Any], AgentPermissionRequestSummary.Classification, Bool)] =
+            [
+                ("Bash", ["command": "ls"], .command, true),
+                ("Write", ["file_path": "/r/a", "content": "x"], .fileChange, true),
+                ("mcp__a__b", [:], .toolCall, true),
+                ("WebFetch", ["url": "https://example.com"], .toolCall, true),
+                ("AskUserQuestion", ["questions": [question]], .questions, true),
+                ("ExitPlanMode", ["plan": "p"], .plan, false),
+                ("odd tool", ["x": 1], .unclassified, false),
+            ]
+        for (tool, input, classification, waits) in cases {
+            let kept = try #require(try summary(tool, input), "\(tool)")
+            #expect(kept.classification == classification, "\(tool)")
+            #expect(kept.waitsForAnswer == waits, "\(tool)")
+        }
+        // The normal mode never keeps one.
+        let plain = try AgentHookEvent(
+            provider: .claude,
+            payload: payload([
+                "session_id": "s", "hook_event_name": "PermissionRequest",
+                "tool_name": "Bash", "tool_input": ["command": "ls"],
+            ]))
+        #expect(plain.requestSummary == nil)
     }
 
     @Test("A summary of four full questions fits one spool file")

@@ -137,13 +137,189 @@ struct ClaudePermissionAnswerBridgeTests {
         #expect(bidi.terminalOnly)
     }
 
-    @Test("A tool Rafu does not summarize, or a bad MCP name, is not answerable")
-    func otherToolsAreNotAnswerable() throws {
-        let fetch = try event(tool: "WebFetch", input: ["url": "https://example.com"])
-        #expect(!ClaudePermissionAnswerBridge.isAnswerable(fetch))
-        #expect(ClaudePermissionAnswerBridge.request(for: fetch) == nil)
+    @Test("A built-in tool becomes the generic tool card, answered like Bash")
+    func builtInToolCall() throws {
+        let fetch = try event(
+            tool: "WebFetch", input: ["url": "https://example.com", "prompt": "Sum"])
+        #expect(ClaudePermissionAnswerBridge.isAnswerable(fetch))
+        #expect(ClaudePermissionAnswerBridge.helperWaits(fetch))
+        let request = try #require(ClaudePermissionAnswerBridge.request(for: fetch))
+        #expect(request.kind == .toolCall)
+        #expect(request.reason == "Claude Code tool: WebFetch\nWebFetch")
+        #expect(request.command?.contains("https://example.com") == true)
+        #expect(!request.terminalOnly)
+        #expect(request.options.map(\.label) == ["Allow", "Deny", "Deny and stop"])
+        for tool in ["Read", "Glob", "Grep", "WebSearch", "NotebookEdit", "Skill", "Agent"] {
+            let other = try #require(
+                ClaudePermissionAnswerBridge.request(
+                    for: try event(tool: tool, input: ["x": "y"])), "\(tool)")
+            #expect(other.kind == .toolCall, "\(tool)")
+            #expect(!other.terminalOnly, "\(tool)")
+        }
+    }
+
+    @Test("A bad tool name becomes a read-only notice, and its helper does not wait")
+    func unclassifiedNotice() throws {
         let bad = try event(tool: "mcp__srv__bad name", input: [:])
-        #expect(ClaudePermissionAnswerBridge.request(for: bad) == nil)
+        #expect(ClaudePermissionAnswerBridge.isAnswerable(bad))
+        #expect(!ClaudePermissionAnswerBridge.helperWaits(bad))
+        let request = try #require(ClaudePermissionAnswerBridge.request(for: bad))
+        #expect(request.kind == .notice)
+        #expect(request.terminalOnly)
+        #expect(request.options.isEmpty)
+        #expect(
+            request.reason
+                == "Claude Code asks to use mcp__srv__bad name. Open the terminal to answer.")
+        #expect(bad.requestShape == "claude ? object[0]{}")
+    }
+
+    @Test("An AskUserQuestion request becomes a question set keyed by index")
+    func questionSet() throws {
+        let hook = try event(
+            tool: "AskUserQuestion",
+            input: [
+                "questions": [
+                    [
+                        "question": "Which color?", "header": "Color", "multiSelect": false,
+                        "options": [
+                            ["label": "Red", "description": "warm"],
+                            ["label": "Blue", "description": "cool"],
+                        ],
+                    ],
+                    [
+                        "question": "Which fruits?", "header": "Fruits", "multiSelect": true,
+                        "options": [
+                            ["label": "Apple", "description": ""],
+                            ["label": "Banana", "description": ""],
+                        ],
+                    ],
+                ]
+            ])
+        #expect(ClaudePermissionAnswerBridge.helperWaits(hook))
+        let request = try #require(ClaudePermissionAnswerBridge.request(for: hook))
+        #expect(request.key == hook.id)
+        #expect(request.kind == .userInput)
+        #expect(!request.terminalOnly)
+        #expect(request.questions.map(\.id) == ["0", "1"])
+        #expect(request.questions.map(\.allowsMultiple) == [false, true])
+        #expect(request.questions.allSatisfy { $0.allowsFreeText })
+        #expect(request.options.isEmpty)
+        #expect(!request.permits(.accept))
+        let decision = CanvasAgentRequestDecision.answers([
+            "0": QuestionAnswer(labels: [], text: "Green"),
+            "1": QuestionAnswer(labels: ["Apple", "Banana"]),
+        ])
+        #expect(request.permits(decision))
+        #expect(
+            ClaudePermissionAnswerBridge.answer(for: decision, eventID: hook.id)
+                == AgentPermissionAnswer(
+                    eventID: hook.id, verdict: .allow,
+                    answers: [
+                        .init(index: 0, labels: [], text: "Green"),
+                        .init(index: 1, labels: ["Apple", "Banana"]),
+                    ]))
+    }
+
+    @Test("Answers with an id that is not an index map to nothing")
+    func badAnswerIDs() {
+        let id = UUID()
+        for key in ["q", "-1", "01", " 1", ""] {
+            #expect(
+                ClaudePermissionAnswerBridge.answer(
+                    for: .answers([key: "Red"]), eventID: id) == nil, "\(key)")
+        }
+        #expect(ClaudePermissionAnswerBridge.answer(for: .answers([:]), eventID: id) == nil)
+    }
+
+    @Test("An ExitPlanMode request becomes a read-only plan; its helper does not wait")
+    func plan() throws {
+        let hook = try event(
+            tool: "ExitPlanMode",
+            input: ["plan": "## Plan\n1. Build", "planFilePath": "/Users/me/.claude/plans/p.md"])
+        #expect(!ClaudePermissionAnswerBridge.helperWaits(hook))
+        let request = try #require(ClaudePermissionAnswerBridge.request(for: hook))
+        #expect(request.kind == .plan)
+        #expect(request.reason == "/Users/me/.claude/plans/p.md")
+        #expect(request.text == "## Plan\n1. Build")
+        #expect(!request.textIsCut)
+        #expect(request.terminalOnly)
+        #expect(request.options.isEmpty)
+    }
+
+    @Test("One understood suggestion is a hidden rule choice; remember stays off")
+    func rememberRule() throws {
+        let payload = try JSONSerialization.data(withJSONObject: [
+            "session_id": "s1", "hook_event_name": "PermissionRequest", "cwd": "/r",
+            "tool_name": "Bash", "tool_input": ["command": "npm test"],
+            "permission_suggestions": [
+                [
+                    "type": "addRules",
+                    "rules": [["toolName": "Bash", "ruleContent": "npm test"]],
+                    "behavior": "allow", "destination": "localSettings",
+                ]
+            ],
+        ])
+        let hook = try AgentHookEvent(
+            provider: .claude, payload: payload, includesRequestSummary: true)
+        let request = try #require(ClaudePermissionAnswerBridge.request(for: hook))
+        #expect(
+            request.persistChoices == [
+                .init(kind: .rule, line: "Add rule Bash(npm test) to local settings")
+            ])
+        // Hidden under today's policy.
+        #expect(request.options.map(\.label) == ["Run", "Deny", "Deny and stop"])
+        #expect(!request.permits(.acceptAndRemember(.rule)))
+        #expect(
+            ClaudePermissionAnswerBridge.answer(for: .acceptAndRemember(.rule), eventID: hook.id)
+                == nil)
+        #expect(
+            ClaudePermissionAnswerBridge.answer(
+                for: .acceptAndRemember(.rule), eventID: hook.id, policy: .all)
+                == AgentPermissionAnswer(eventID: hook.id, verdict: .allow, remember: true))
+        #expect(
+            ClaudePermissionAnswerBridge.answer(
+                for: .acceptAndRemember(.always), eventID: hook.id, policy: .all) == nil)
+    }
+
+    @Test("A notification that asks for the person becomes a read-only notice")
+    func notificationNotice() throws {
+        func notification(_ type: String, message: String?) throws -> AgentHookEvent {
+            var object: [String: Any] = [
+                "session_id": "s1", "hook_event_name": "Notification", "cwd": "/r",
+                "notification_type": type,
+            ]
+            if let message { object["message"] = message }
+            return try AgentHookEvent(
+                provider: .claude, payload: JSONSerialization.data(withJSONObject: object))
+        }
+        let network = try notification(
+            "permission_prompt", message: "Claude needs your permission to use the network")
+        let notice = try #require(ClaudePermissionAnswerBridge.notice(for: network))
+        #expect(notice.key == network.id)
+        #expect(notice.kind == .notice)
+        #expect(notice.reason == "Permission request")
+        #expect(notice.text == "Claude needs your permission to use the network")
+        #expect(notice.terminalOnly)
+        #expect(!ClaudePermissionAnswerBridge.helperWaits(network))
+        #expect(
+            ClaudePermissionAnswerBridge.notice(
+                for: try notification("elicitation_dialog", message: "Form"))?.reason
+                == "MCP server form")
+        #expect(
+            ClaudePermissionAnswerBridge.notice(
+                for: try notification("elicitation_url_dialog", message: "Link"))?.reason
+                == "Sign-in in browser")
+        // Not a prompt (a background session's wait is not Needs you), or no
+        // text: no notice.
+        #expect(
+            ClaudePermissionAnswerBridge.notice(
+                for: try notification("agent_needs_input", message: "Wait")) == nil)
+        #expect(
+            ClaudePermissionAnswerBridge.notice(
+                for: try notification("idle_prompt", message: "Idle")) == nil)
+        #expect(
+            ClaudePermissionAnswerBridge.notice(
+                for: try notification("permission_prompt", message: nil)) == nil)
     }
 
     @Test("Allow, Deny and Deny and stop on a tool call give the same answers as for Bash")
@@ -195,11 +371,9 @@ struct ClaudePermissionAnswerBridgeTests {
         #expect(ClaudePermissionAnswerBridge.request(for: other) == nil)
         let codex = try event(tool: "Bash", input: ["command": "ls"], provider: .codex)
         #expect(ClaudePermissionAnswerBridge.request(for: codex) == nil)
-        let fetch = try event(tool: "WebFetch", input: ["url": "https://example.com"])
-        #expect(ClaudePermissionAnswerBridge.request(for: fetch) == nil)
     }
 
-    @Test("Decisions map to hook answers; session grants and answers do not")
+    @Test("Decisions map to hook answers; session grants and bad answers do not")
     func decisions() {
         let id = UUID()
         func answer(_ decision: CanvasAgentRequestDecision) -> AgentPermissionAnswer? {
