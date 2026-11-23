@@ -44,6 +44,37 @@ struct MeetingLiveTurnAssemblerTests {
         #expect(assembler.turns().map(\.text) == ["one two", "three"])
     }
 
+    @Test("Live turns use the same cut rules as the stored turns")
+    func sharedCutRules() {
+        var assembler = MeetingLiveTurnAssembler()
+        let words = MeetingTestWords.nemotronShape(
+            Words.sentence("we can start", from: 0) + Words.sentence("next item", from: 3))
+        assembler.ingest(.final(words: words), track: .me)
+        let built = MeetingTurnBuilder.build(meWords: words, themWords: [], segments: [])
+        #expect(assembler.turns().map(\.text) == built.map(\.text))
+        #expect(assembler.turns().map(\.end) == built.map(\.end))
+
+        var long = MeetingLiveTurnAssembler()
+        let many = Words.anonymous(130, from: 0)
+        long.ingest(.final(words: many), track: .them)
+        let built130 = MeetingTurnBuilder.build(meWords: [], themWords: many, segments: [])
+        #expect(long.turns().map(\.text) == built130.map(\.text))
+        #expect(long.turns().count == 2)
+    }
+
+    @Test("A volatile tail after a long turn joins it unless there is a pause")
+    func volatileKeepsPauseRule() {
+        var assembler = MeetingLiveTurnAssembler()
+        var words = Words.anonymous(44, from: 0)
+        words[43].text = "done."
+        assembler.ingest(.final(words: words), track: .me)
+        assembler.ingest(.volatile(text: "and more", range: 22.0...22.75), track: .me)
+        let turns = assembler.turns()
+        #expect(turns.count == 1)
+        #expect(turns[0].isVolatile)
+        #expect(turns[0].text.hasSuffix("done. and more"))
+    }
+
     @Test("Two tracks stay separate, ordered by start")
     func twoTracks() {
         var assembler = MeetingLiveTurnAssembler()

@@ -4,9 +4,10 @@ import Foundation
 /// segments of a speaker engine.
 public enum MeetingWordSpeakerAssigner {
     /// The label of one word: the speaker whose segment overlaps the word
-    /// most; with no overlap, the nearest segment within
-    /// `MeetingTurnRules.nearestSegmentSeconds`; else `.them`. With no
-    /// segments (no speaker model) every word is `.them`.
+    /// most; with no overlap, the nearest segment at any distance (a tie
+    /// goes to the earlier segment). Only with no valid segments (no speaker
+    /// model) is a word `.them`, so a stray word never makes a "Them"
+    /// speaker beside the real ones.
     public static func label(
         for word: MeetingWord, segments: [MeetingSpeakerSegment]
     ) -> MeetingSpeakerLabel {
@@ -72,9 +73,7 @@ public enum MeetingWordSpeakerAssigner {
         }
 
         if let overlapWinner { return .speaker(overlapWinner.speaker) }
-        if let nearest, nearestGap <= MeetingTurnRules.nearestSegmentSeconds {
-            return .speaker(nearest.speaker)
-        }
+        if let nearest { return .speaker(nearest.speaker) }
         return .them
     }
 

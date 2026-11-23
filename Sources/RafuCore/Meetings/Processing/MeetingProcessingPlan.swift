@@ -76,7 +76,8 @@ public struct MeetingProcessingPlan: Hashable, Sendable {
 }
 
 /// Builds the stored turns from the final text of the two tracks and the
-/// speaker segments of the "Them" track, then marks echo.
+/// speaker segments of the "Them" track. Echo is marked per word while the
+/// turns are built, so echo words and real words land in separate turns.
 public enum MeetingTranscriptAssembly {
     /// - Parameter outputWasSpeakers: from `recording.json`; false marks no
     ///   echo.
@@ -85,8 +86,9 @@ public enum MeetingTranscriptAssembly {
         segments: [MeetingSpeakerSegment], outputWasSpeakers: Bool
     ) -> MeetingEchoMarking {
         let turns = MeetingTurnBuilder.build(
-            meWords: me?.words ?? [], themWords: them?.words ?? [], segments: segments)
-        return MeetingEchoMarker.mark(turns, outputWasSpeakers: outputWasSpeakers)
+            meWords: me?.words ?? [], themWords: them?.words ?? [], segments: segments,
+            outputWasSpeakers: outputWasSpeakers)
+        return MeetingEchoMarking(turns: turns, echoCount: turns.filter(\.isEcho).count)
     }
 }
 

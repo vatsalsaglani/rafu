@@ -9,7 +9,7 @@ struct MeetingTurnBuilderTests {
 
     // MARK: Speaker assignment
 
-    @Test("Them word: most overlap, then nearest within 0.5 s, else them")
+    @Test("Them word: most overlap, else the nearest segment at any distance")
     func assignerRules() {
         let segments = [
             MeetingSpeakerSegment(speaker: 1, start: 0, end: 2),
@@ -21,8 +21,9 @@ struct MeetingTurnBuilderTests {
             (Words.word("c", 1.75, 3.0), .speaker(2), "more overlap with the second"),
             (Words.word("d", 6.25, 6.5), .speaker(2), "no overlap, 0.25 s after the end"),
             (Words.word("e", 6.5, 7.0), .speaker(2), "no overlap, exactly 0.5 s"),
-            (Words.word("f", 6.75, 7.0), .them, "no overlap, 0.75 s away"),
-            (Words.word("g", 30, 31), .them, "far from every segment"),
+            (Words.word("f", 6.75, 7.0), .speaker(2), "no overlap, 0.75 s away"),
+            (Words.word("g", 30, 31), .speaker(2), "far from every segment"),
+            (Words.word("h", -3, -2), .speaker(1), "before every segment"),
         ]
         for (word, expected, note) in rows {
             #expect(
@@ -189,11 +190,107 @@ struct MeetingTurnBuilderTests {
         list.append(.setEchoShown(turn: ids[0], shown: true))
         #expect(list.display(turns).map(\.id) == ids)
 
-        let marked = MeetingEchoMarker.mark(turns, outputWasSpeakers: true)
+        let marked = MeetingTranscriptAssembly.assemble(
+            me: MeetingTrackTranscript(
+                track: .me,
+                words: Words.sentence("so what do you think", from: 0)
+                    + Words.sentence("sounds good to me", from: 20), engine: .appleSpeech),
+            them: MeetingTrackTranscript(
+                track: .them,
+                words: Words.sentence("the budget is due friday", from: 4)
+                    + Words.sentence("i will send it today", from: 9), engine: .appleSpeech),
+            segments: [
+                MeetingSpeakerSegment(speaker: 1, start: 3, end: 8),
+                MeetingSpeakerSegment(speaker: 2, start: 8, end: 14),
+            ], outputWasSpeakers: true)
         #expect(marked.turns.map(\.id) == ids)
 
         // The citation t2 still opens the same turn after the rename.
         let renamed = list.display(marked.turns)
         #expect(renamed.first { $0.id == MeetingTurnID(text: "t2") }?.speakerName == "Priya")
+    }
+
+    // MARK: Stray words, cuts and speech time
+
+    @Test("Stray Them words join the nearest speaker; no Them turn when segments exist")
+    func strayWords() {
+        let them = Words.sentence("one two three four", from: 0) + [Words.word("hm", 30, 30.25)]
+        let segments = [MeetingSpeakerSegment(speaker: 1, start: 0, end: 2)]
+        let turns = MeetingTurnBuilder.build(meWords: [], themWords: them, segments: segments)
+        #expect(turns.map(\.speaker) == [.speaker(1), .speaker(1)])
+        #expect(!turns.contains { $0.speaker == .them })
+    }
+
+    @Test("Nemotron words (end = next start) still cut at a 2 s start-to-start gap")
+    func nemotronGap() {
+        let words = Words.nemotronShape(
+            Words.sentence("we can start", from: 0) + Words.sentence("next item", from: 3))
+        // The last word before the gap ends at 3.0; its effective end is 1.8.
+        #expect(words[2].end == 3)
+        let turns = MeetingTurnBuilder.build(meWords: words, themWords: [], segments: [])
+        #expect(turns.map(\.text) == ["we can start", "next item"])
+        #expect(turns[0].end == 1.0 + MeetingTurnRules.maximumWordSeconds)
+    }
+
+    @Test("A turn of 20 s ends at the next sentence end, not before")
+    func softCutAtSentenceEnd() {
+        var words = Words.anonymous(50, from: 0)
+        words[10].text = "early."
+        words[42].text = "done."
+        let turns = MeetingTurnBuilder.build(meWords: words, themWords: [], segments: [])
+        #expect(turns.count == 2)
+        #expect(turns[0].text.hasSuffix("done."))
+        #expect(turns[0].end == 21.25)
+        #expect(turns[1].start == 21.5)
+    }
+
+    @Test("A turn of 20 s ends at a gap of 0.5 s; a shorter turn does not")
+    func softCutAtShortGap() {
+        // Gaps are 0.25 s; one gap of 0.75 s at 5 s and one at 22 s.
+        var words = Words.anonymous(60, from: 0)
+        for index in words.indices where index >= 11 { words[index].start += 0.5 }
+        for index in words.indices where index >= 45 { words[index].start += 0.5 }
+        for index in words.indices { words[index].end = words[index].start + 0.25 }
+        let turns = MeetingTurnBuilder.build(meWords: words, themWords: [], segments: [])
+        #expect(turns.count == 2)
+        #expect(turns[1].start == words[45].start)
+    }
+
+    @Test("No turn is longer than 60 s, even with no sentence end and no gap")
+    func hardCut() {
+        let words = Words.anonymous(130, from: 0)
+        let turns = MeetingTurnBuilder.build(meWords: words, themWords: [], segments: [])
+        #expect(turns.count == 2)
+        #expect(turns.allSatisfy { $0.end - $0.start <= MeetingTurnRules.hardTurnSeconds })
+        #expect(turns[0].end == 59.75 && turns[1].start == 60)
+    }
+
+    @Test("Each turn stores its speech seconds; a long word counts 0.8 s")
+    func speechSeconds() {
+        let words = [
+            Words.word("short", 0, 0.25), Words.word("long", 0.5, 3.0),
+        ]
+        let turns = MeetingTurnBuilder.build(meWords: words, themWords: [], segments: [])
+        #expect(turns.count == 1)
+        #expect(turns[0].speechSeconds == 0.25 + 0.8)
+        #expect(turns[0].end == 0.5 + MeetingTurnRules.maximumWordSeconds)
+
+        let nemotron = Words.nemotronShape(Words.sentence("a b c d", from: 0))
+        let shaped = MeetingTurnBuilder.build(meWords: nemotron, themWords: [], segments: [])
+        #expect(shaped[0].speechSeconds == 0.5 + 0.5 + 0.5 + 0.25)
+    }
+
+    @Test("Echo, stray words and cuts keep ids stable under input reorder")
+    func idsStableWithEcho() {
+        let them = Words.anonymous(20, from: 10)
+        let me = Words.heard(them) + Words.anonymous(20, from: 20.25, prefix: "real")
+        let segments = [MeetingSpeakerSegment(speaker: 1, start: 10, end: 15)]
+        let straight = MeetingTurnBuilder.build(
+            meWords: me, themWords: them, segments: segments, outputWasSpeakers: true)
+        let shuffled = MeetingTurnBuilder.build(
+            meWords: me.reversed(), themWords: them.reversed(), segments: segments,
+            outputWasSpeakers: true)
+        #expect(straight == shuffled)
+        #expect(straight.map(\.id) == straight.indices.map { MeetingTurnID($0 + 1) })
     }
 }
