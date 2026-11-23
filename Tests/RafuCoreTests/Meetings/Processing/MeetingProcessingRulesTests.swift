@@ -98,6 +98,29 @@ struct MeetingProcessingRulesTests {
             me: me, them: them, segments: [], outputWasSpeakers: true)
         #expect(speakers.echoCount == 1)
         #expect(speakers.turns.first { $0.track == .me }?.isEcho == true)
+        #expect(speakers.turns.map(\.id) == headphones.turns.map(\.id))
+        #expect(speakers.turns.allSatisfy { $0.speechSeconds != nil })
+    }
+
+    @Test("Echo words then real words in one Me stream give an echo turn and a real turn")
+    func assemblyMixed() {
+        let them = MeetingTrackTranscript(
+            track: .them, words: words("we ship the beta tomorrow morning", from: 1),
+            engine: .appleSpeech)
+        let me = MeetingTrackTranscript(
+            track: .me,
+            words: words("we ship the beta tomorrow morning", from: 1.2)
+                + words("i agree with that plan today", from: 3.6),
+            engine: .appleSpeech)
+        let result = MeetingTranscriptAssembly.assemble(
+            me: me, them: them, segments: [], outputWasSpeakers: true)
+        let meTurns = result.turns.filter { $0.track == .me }
+        #expect(meTurns.map(\.isEcho) == [true, false])
+        #expect(
+            meTurns.map(\.text) == [
+                "we ship the beta tomorrow morning", "i agree with that plan today",
+            ])
+        #expect(result.echoCount == 1)
     }
 
     @Test("No words in both tracks gives zero turns")

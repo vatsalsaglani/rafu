@@ -112,6 +112,10 @@ public struct MeetingTurn: Hashable, Codable, Sendable, Identifiable {
     /// True when this "Me" turn is the far side heard again through the
     /// microphone (an echo). Echo turns are hidden by default.
     public var isEcho: Bool
+    /// The seconds of speech in this turn: the sum of the word lengths, each
+    /// at most `MeetingTurnRules.maximumWordSeconds`. Nil for a turn stored
+    /// before this field existed; talk time then uses the turn length.
+    public var speechSeconds: TimeInterval?
 
     public init(
         id: MeetingTurnID,
@@ -120,7 +124,8 @@ public struct MeetingTurn: Hashable, Codable, Sendable, Identifiable {
         start: TimeInterval,
         end: TimeInterval,
         text: String,
-        isEcho: Bool = false
+        isEcho: Bool = false,
+        speechSeconds: TimeInterval? = nil
     ) {
         self.id = id
         self.track = track
@@ -129,6 +134,7 @@ public struct MeetingTurn: Hashable, Codable, Sendable, Identifiable {
         self.end = end
         self.text = text
         self.isEcho = isEcho
+        self.speechSeconds = speechSeconds
     }
 }
 

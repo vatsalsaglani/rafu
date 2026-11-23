@@ -31,7 +31,7 @@ public struct MeetingLiveTurn: Hashable, Sendable, Identifiable {
 }
 
 /// Joins the live events of the two tracks into turns for the live view, with
-/// the pause rule of `MeetingTurnRules`.
+/// the time rules of `MeetingTurnRules`.
 public struct MeetingLiveTurnAssembler: Sendable {
     private struct VolatileText: Sendable {
         var text: String
@@ -96,28 +96,41 @@ public struct MeetingLiveTurnAssembler: Sendable {
         return result
     }
 
+    /// Final words are cut with `MeetingTurnRules.startsNewTurn`, the same
+    /// time rules as the stored transcript. The volatile tail can still
+    /// change, so it joins the last turn unless there is a pause.
     private func turns(for track: MeetingTrack) -> [MeetingLiveTurn] {
         guard let state = states[track] else { return [] }
         var runs: [MeetingLiveTurn] = []
+        var lastTexts: [String] = []
 
         func add(text: String, start: TimeInterval, end: TimeInterval, isVolatile: Bool) {
-            if let last = runs.last, !MeetingTurnRules.isPause(gap: start - last.end) {
+            if let last = runs.last,
+                isVolatile
+                    ? !MeetingTurnRules.isPause(gap: start - last.end)
+                    : !MeetingTurnRules.startsNewTurn(
+                        turnStart: last.start, turnEnd: last.end,
+                        lastText: lastTexts[lastTexts.count - 1], nextStart: start,
+                        nextEnd: end)
+            {
                 runs[runs.count - 1].end = max(last.end, end)
                 runs[runs.count - 1].text += " " + text
                 runs[runs.count - 1].isVolatile = isVolatile
+                lastTexts[lastTexts.count - 1] = text
             } else {
                 runs.append(
                     MeetingLiveTurn(
                         track: track, start: start, end: max(start, end), text: text,
                         isVolatile: isVolatile))
+                lastTexts.append(text)
             }
         }
 
         var items: [(text: String, start: TimeInterval, end: TimeInterval, isVolatile: Bool)] =
             state.finalWords.map {
                 (
-                    $0.text.trimmingCharacters(in: .whitespacesAndNewlines), $0.start, $0.end,
-                    false
+                    $0.text.trimmingCharacters(in: .whitespacesAndNewlines), $0.start,
+                    MeetingTurnRules.effectiveEnd(of: $0), false
                 )
             }
         if let volatile = state.volatile {
