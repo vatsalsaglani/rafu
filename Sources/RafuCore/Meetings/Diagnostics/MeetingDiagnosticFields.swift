@@ -104,6 +104,13 @@ extension MeetingDiagnosticEvent {
         case .sampleRateCorrected(let from, let to):
             name = "sampleRateCorrected"
             fields = [.number("from", from), .number("to", to)]
+        case .microphoneFormat(let format, let isFloat32, let nominalSampleRate):
+            name = "microphoneFormat"
+            fields = [
+                .number("sampleRate", format.sampleRate), .int("channels", format.channelCount),
+                .int("bits", format.bitsPerChannel), .flag("interleaved", format.isInterleaved),
+                .flag("float32", isFloat32), .number("nominalSampleRate", nominalSampleRate),
+            ]
         case .firstBuffer(let track, let frames):
             name = "firstBuffer"
             fields = [.track(track), .int("frames", frames)]

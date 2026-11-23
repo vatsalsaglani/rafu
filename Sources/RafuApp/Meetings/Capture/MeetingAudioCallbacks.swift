@@ -1,4 +1,3 @@
-import AVFoundation
 import CoreAudio
 import RafuCore
 import Synchronization
@@ -124,7 +123,8 @@ nonisolated final class MeetingCaptureRing {
     }
 }
 
-/// The layout of the call-audio tap buffers, read once before start.
+/// The layout of a device's input buffers (the call-audio tap or the
+/// microphone), read once before start.
 nonisolated struct MeetingTapLayout: Sendable {
     var channelCount: Int
     var isInterleaved: Bool
@@ -134,9 +134,11 @@ nonisolated struct MeetingTapLayout: Sendable {
 
 /// Builds the audio callbacks outside any actor.
 nonisolated enum MeetingAudioCallbacks {
-    /// The IO block of the call-audio aggregate device. Reads the tap's
-    /// AudioBufferList in place (no `AVAudioPCMBuffer` per callback).
-    static func tapIOBlock(ring: MeetingCaptureRing, layout: MeetingTapLayout)
+    /// The IO block of a Core Audio device: the call-audio aggregate device
+    /// ("Them") and the input device ("Me"). Reads the input AudioBufferList
+    /// in place (no `AVAudioPCMBuffer` per callback) and never writes the
+    /// output list.
+    static func deviceIOBlock(ring: MeetingCaptureRing, layout: MeetingTapLayout)
         -> AudioDeviceIOBlock
     {
         { _, inputData, inputTime, _, _ in
@@ -146,25 +148,8 @@ nonisolated enum MeetingAudioCallbacks {
         }
     }
 
-    /// The tap block of the microphone input node.
-    static func microphoneTapBlock(ring: MeetingCaptureRing, channelCount: Int, sampleRate: Double)
-        -> AVAudioNodeTapBlock
-    {
-        { buffer, when in
-            let frameCount = Int(buffer.frameLength)
-            guard frameCount > 0, let channels = buffer.floatChannelData else {
-                ring.formatErrors.add(1, ordering: .relaxed)
-                return
-            }
-            let hostTime = when.isHostTimeValid ? when.hostTime : mach_absolute_time()
-            ring.writeChannelZero(
-                channels[0], stride: buffer.stride, frameCount: frameCount, hostTime: hostTime,
-                sampleRate: sampleRate)
-        }
-    }
-
     /// Copies channel 0 of an AudioBufferList into the ring. Shared by the
-    /// tap block and the converter test.
+    /// device IO block and the converter test.
     static func copyChannelZero(
         from list: UnsafePointer<AudioBufferList>, layout: MeetingTapLayout, hostTime: UInt64,
         ring: MeetingCaptureRing

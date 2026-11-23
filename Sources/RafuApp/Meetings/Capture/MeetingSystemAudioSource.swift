@@ -133,7 +133,7 @@ actor MeetingSystemAudioSource: MeetingAudioSource {
             pipeline = newPipeline
             events = eventContinuation
 
-            let ioBlock = MeetingAudioCallbacks.tapIOBlock(ring: ring, layout: layout)
+            let ioBlock = MeetingAudioCallbacks.deviceIOBlock(ring: ring, layout: layout)
             var newProc: AudioDeviceIOProcID?
             try check(
                 .createIOProc,

@@ -1,5 +1,6 @@
 import AVFoundation
 import RafuCore
+import RafuObjCSupport
 
 /// Converts mono Float32 audio at any device rate to the analyzer format
 /// (16 kHz mono Int16, CHECKED in the capture check). Runs off the audio
@@ -52,14 +53,24 @@ nonisolated final class MeetingPCMConverter {
             output.frameLength = 0
             var supplied = false
             var error: NSError?
-            let status = converter.convert(to: output, error: &error) { [input] _, inputStatus in
-                if supplied {
-                    inputStatus.pointee = .noDataNow
-                    return nil
+            var status = AVAudioConverterOutputStatus.error
+            // An NSException from the converter is a converter error, not
+            // an abort of all of Rafu.
+            do {
+                try RafuObjCExceptionGuard.perform {
+                    status = converter.convert(to: output, error: &error) {
+                        [input] _, inputStatus in
+                        if supplied {
+                            inputStatus.pointee = .noDataNow
+                            return nil
+                        }
+                        supplied = true
+                        inputStatus.pointee = .haveData
+                        return input
+                    }
                 }
-                supplied = true
-                inputStatus.pointee = .haveData
-                return input
+            } catch {
+                return false
             }
             guard status != .error, let converted = output.int16ChannelData?[0] else {
                 return false

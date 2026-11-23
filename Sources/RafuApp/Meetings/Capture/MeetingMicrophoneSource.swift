@@ -1,37 +1,49 @@
 import AVFoundation
-import AudioToolbox
 import CoreAudio
 import Foundation
 import RafuCore
 
-/// "Me": the microphone through `AVAudioEngine`. The device comes from
-/// Settings ▸ Meetings ▸ Microphone through `MeetingMicrophonePolicy`
-/// (Automatic picks the built-in microphone over a Bluetooth headset). The
-/// device is set on the input node's audio unit with
-/// `kAudioOutputUnitProperty_CurrentDevice` (global scope, an
-/// `AudioObjectID`, read/write; confirmed in `AudioUnitProperties.h`). No
-/// voice processing: it stopped the call-audio tap in the capture check.
+/// "Me": the microphone through a Core Audio IO block on the input device
+/// itself, the same path as "Them". The device comes from Settings ▸
+/// Meetings ▸ Microphone through `MeetingMicrophonePolicy` (Automatic picks
+/// the built-in microphone over a Bluetooth headset). The format is the
+/// virtual format of the device's first input stream; the rate is the
+/// device's nominal rate (`MeetingInputFormatPolicy`). No voice processing:
+/// it stopped the call-audio tap in the capture check.
 ///
-/// An engine configuration change or a change of the default input device
-/// ends the run with `.interrupted`; the recorder starts it again, which
-/// resolves the device again.
+/// An earlier version used the AVFoundation audio engine and set the device
+/// on its input audio unit. The engine did not see that change, its format
+/// did not match the hardware, and the tap call raised an NSException that
+/// aborted all of Rafu (a Bluetooth headset in call mode). This path makes
+/// no Objective-C call that can raise.
+///
+/// A change of the default input device (when the choice follows it), the
+/// loss of the device or a change of its nominal rate ends the run with
+/// `.interrupted`; the recorder starts it again, which resolves the device
+/// and reads the format again.
 @available(macOS 26, *)
 actor MeetingMicrophoneSource: MeetingAudioSource {
     nonisolated let track: MeetingTrack = .me
 
     private let choice: @Sendable () -> MeetingMicrophoneChoice
     private let listenerQueue = DispatchQueue(label: "dev.vatsalsaglani.rafu.meetings.mic.listen")
-    private var engine: AVAudioEngine?
+    private let ioQueue = DispatchQueue(
+        label: "dev.vatsalsaglani.rafu.meetings.mic.io", qos: .userInteractive)
+
+    private var deviceID = AudioObjectID(kAudioObjectUnknown)
+    private var procID: AudioDeviceIOProcID?
     private var pipeline: MeetingTrackPipeline?
     private var drainTask: Task<Void, Never>?
     private var events: AsyncStream<MeetingAudioSourceEvent>.Continuation?
-    private var configurationObserver: (any NSObjectProtocol)?
     private var listeners: [MeetingPropertyListener] = []
     private var deviceFacts: MeetingAudioDeviceFacts?
     private var coreAudio = MeetingCoreAudio(diagnostics: NoopMeetingDiagnostics(), meeting: nil)
     /// Counts runs, so a late listener call cannot end a newer run.
     private var runID = 0
-    private var startedAt: ContinuousClock.Instant?
+
+    /// The most passes of read-format-then-start when the nominal rate
+    /// changes between the read and the start.
+    private static let maximumPasses = 2
 
     init(choice: @escaping @Sendable () -> MeetingMicrophoneChoice) {
         self.choice = choice
@@ -49,67 +61,55 @@ actor MeetingMicrophoneSource: MeetingAudioSource {
         let resolution = MeetingMicrophonePolicy.resolve(
             choice: choice(), defaultInput: defaultInput, inputs: audio.inputDevices())
         guard let device = resolution.device else { throw MeetingAudioSourceError.noDevice }
+        let objectID = AudioObjectID(device.objectID)
 
-        let engine = AVAudioEngine()
-        let input = engine.inputNode
-        guard let unit = input.audioUnit else {
-            throw MeetingAudioSourceError.failed(call: .setInputDevice, status: -1)
-        }
-        var objectID = device.objectID
-        let setStatus = audio.call(.setInputDevice) {
-            AudioUnitSetProperty(
-                unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0,
-                &objectID, UInt32(MemoryLayout<AudioObjectID>.size))
-        }
-        guard setStatus == noErr else {
-            throw MeetingAudioSourceError.failed(call: .setInputDevice, status: setStatus)
-        }
+        var pass = 0
+        while true {
+            pass += 1
+            let layout = try Self.readLayout(objectID, audio: audio)
 
-        let format = input.outputFormat(forBus: 0)
-        guard format.sampleRate > 0, format.channelCount > 0 else {
-            throw MeetingAudioSourceError.noDevice
+            let (blocks, blockContinuation) = AsyncStream.makeStream(
+                of: MeetingCapturedBlock.self, bufferingPolicy: .bufferingNewest(400))
+            let (eventStream, eventContinuation) = AsyncStream.makeStream(
+                of: MeetingAudioSourceEvent.self)
+            let ring = MeetingCaptureRing()
+            pipeline = MeetingTrackPipeline(ring: ring, continuation: blockContinuation)
+            events = eventContinuation
+
+            do {
+                try openDevice(objectID, ring: ring, layout: layout, audio: audio)
+            } catch {
+                teardown(reason: nil)
+                throw error
+            }
+
+            // The rate can change between the read and the start (a headset
+            // that enters call mode); then each label would be wrong.
+            let (rateNow, rateStatus) = audio.read(
+                objectID, kAudioDevicePropertyNominalSampleRate, as: .readNominalSampleRate,
+                initial: Float64(0))
+            if rateStatus == noErr, rateNow.isFinite, rateNow > 0, rateNow != layout.sampleRate {
+                teardown(reason: nil)
+                guard pass < Self.maximumPasses else {
+                    throw MeetingAudioSourceError.failed(call: .readNominalSampleRate, status: -1)
+                }
+                continue
+            }
+
+            let facts = audio.facts(objectID, input: true)
+            deviceFacts = facts
+            if resolution.kind != .named || resolution.reason == .namedDeviceMissing {
+                addListener(MeetingCoreAudio.systemObject, kAudioHardwarePropertyDefaultInputDevice)
+            }
+            addListener(objectID, kAudioDevicePropertyDeviceIsAlive)
+            addListener(objectID, kAudioDevicePropertyNominalSampleRate)
+            drainTask = Task { await self.drainLoop() }
+
+            return MeetingAudioSourceRun(
+                facts: MeetingAudioSourceFacts(
+                    device: facts, captureSampleRate: layout.sampleRate, microphone: resolution),
+                blocks: blocks, events: eventStream)
         }
-
-        let (blocks, blockContinuation) = AsyncStream.makeStream(
-            of: MeetingCapturedBlock.self, bufferingPolicy: .bufferingNewest(400))
-        let (eventStream, eventContinuation) = AsyncStream.makeStream(
-            of: MeetingAudioSourceEvent.self)
-        let ring = MeetingCaptureRing()
-        let newPipeline = MeetingTrackPipeline(ring: ring, continuation: blockContinuation)
-
-        Self.installTap(on: input, format: format, ring: ring)
-        engine.prepare()
-        do {
-            try engine.start()
-            audio.diagnostics.record(.coreAudioCall(.startDevice, status: noErr), meeting: meeting)
-        } catch {
-            let code = Int32(truncatingIfNeeded: (error as NSError).code)
-            audio.diagnostics.record(.coreAudioCall(.startDevice, status: code), meeting: meeting)
-            input.removeTap(onBus: 0)
-            blockContinuation.finish()
-            eventContinuation.finish()
-            throw MeetingAudioSourceError.failed(call: .startDevice, status: code)
-        }
-
-        self.engine = engine
-        startedAt = .now
-        pipeline = newPipeline
-        events = eventContinuation
-        let facts = audio.facts(device.objectID, input: true)
-        deviceFacts = facts
-        configurationObserver = NotificationCenter.default.addObserver(
-            forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil,
-            using: Self.interruptionHandler(source: self, run: runID))
-        if resolution.kind != .named || resolution.reason == .namedDeviceMissing {
-            addListener(MeetingCoreAudio.systemObject, kAudioHardwarePropertyDefaultInputDevice)
-        }
-        addListener(device.objectID, kAudioDevicePropertyDeviceIsAlive)
-        drainTask = Task { await self.drainLoop() }
-
-        return MeetingAudioSourceRun(
-            facts: MeetingAudioSourceFacts(
-                device: facts, captureSampleRate: format.sampleRate, microphone: resolution),
-            blocks: blocks, events: eventStream)
     }
 
     func stop() async {
@@ -134,30 +134,72 @@ actor MeetingMicrophoneSource: MeetingAudioSource {
         }
     }
 
-    /// The tap block is built in `MeetingAudioCallbacks`, outside the actor.
-    private nonisolated static func installTap(
-        on input: AVAudioInputNode, format: AVAudioFormat, ring: MeetingCaptureRing
-    ) {
-        input.installTap(
-            onBus: 0, bufferSize: 4_096, format: format,
-            block: MeetingAudioCallbacks.microphoneTapBlock(
-                ring: ring, channelCount: Int(format.channelCount), sampleRate: format.sampleRate))
-    }
-
-    private nonisolated static func interruptionHandler(source: MeetingMicrophoneSource, run: Int)
-        -> @Sendable (Notification) -> Void
+    /// Reads the first input stream's format and the nominal rate, records
+    /// them, and applies the format rule.
+    private static func readLayout(_ device: AudioObjectID, audio: MeetingCoreAudio) throws
+        -> MeetingTapLayout
     {
-        { _ in Task { await source.configurationChanged(run: run) } }
+        guard let stream = audio.inputStreamFormat(device) else {
+            throw MeetingAudioSourceError.failed(call: .other, status: -1)
+        }
+        let (nominal, nominalStatus) = audio.read(
+            device, kAudioDevicePropertyNominalSampleRate, as: .readNominalSampleRate,
+            initial: Float64(0))
+        let format = MeetingTapFormat(
+            sampleRate: stream.mSampleRate, channelCount: Int(stream.mChannelsPerFrame),
+            bitsPerChannel: Int(stream.mBitsPerChannel),
+            isInterleaved: stream.mFormatFlags & kAudioFormatFlagIsNonInterleaved == 0)
+        let isFloat32 =
+            stream.mFormatID == kAudioFormatLinearPCM
+            && stream.mFormatFlags & kAudioFormatFlagIsFloat != 0 && stream.mBitsPerChannel == 32
+        let nominalRate = nominalStatus == noErr ? nominal : nil
+        audio.diagnostics.record(
+            .microphoneFormat(format, isFloat32: isFloat32, nominalSampleRate: nominalRate ?? 0),
+            meeting: audio.meeting)
+        let layout: MeetingInputLayout
+        do {
+            layout = try MeetingInputFormatPolicy.layout(
+                streamFormat: format, isFloat32: isFloat32, nominalRate: nominalRate)
+        } catch {
+            throw MeetingAudioSourceError.failed(call: .other, status: -1)
+        }
+        return MeetingTapLayout(
+            channelCount: layout.channelCount, isInterleaved: layout.isInterleaved,
+            isFloat32: true, sampleRate: layout.sampleRate)
     }
 
-    /// The engine changed its configuration. A change in the first second
-    /// after start belongs to the start itself (INFERRED: not measured on
-    /// each device), so it does not end the run.
-    func configurationChanged(run: Int) {
-        guard let startedAt, ContinuousClock.now - startedAt >= .seconds(1) else { return }
-        interrupt(run: run)
+    /// Creates the IO proc on the device and starts it. On a failure the
+    /// caller tears down what was made.
+    private func openDevice(
+        _ device: AudioObjectID, ring: MeetingCaptureRing, layout: MeetingTapLayout,
+        audio: MeetingCoreAudio
+    ) throws {
+        let ioBlock = Self.ioBlock(ring: ring, layout: layout)
+        var newProc: AudioDeviceIOProcID?
+        let createStatus = audio.call(.createIOProc) {
+            AudioDeviceCreateIOProcIDWithBlock(&newProc, device, ioQueue, ioBlock)
+        }
+        guard createStatus == noErr, let newProc else {
+            throw MeetingAudioSourceError.failed(
+                call: .createIOProc, status: createStatus == noErr ? -1 : createStatus)
+        }
+        deviceID = device
+        procID = newProc
+        let startStatus = audio.call(.startDevice) { AudioDeviceStart(device, newProc) }
+        guard startStatus == noErr else {
+            throw MeetingAudioSourceError.failed(call: .startDevice, status: startStatus)
+        }
     }
 
+    /// Built outside the actor: a block formed inside an isolated type
+    /// inherits that isolation under Swift 6 and traps on the audio thread.
+    private nonisolated static func ioBlock(ring: MeetingCaptureRing, layout: MeetingTapLayout)
+        -> AudioDeviceIOBlock
+    {
+        MeetingAudioCallbacks.deviceIOBlock(ring: ring, layout: layout)
+    }
+
+    /// Built outside the actor: Core Audio calls it on `listenerQueue`.
     private nonisolated static func listenerBlock(source: MeetingMicrophoneSource, run: Int)
         -> MeetingPropertyListener.Block
     {
@@ -176,24 +218,27 @@ actor MeetingMicrophoneSource: MeetingAudioSource {
         }
     }
 
+    /// The order of "Them": stop the device, destroy the IO proc, remove the
+    /// listeners, then drain. After `AudioDeviceStop` returns, the IO block
+    /// does not run again, so the ring can go.
     private func teardown(reason: MeetingAudioSourceEvent?) {
-        if let configurationObserver {
-            NotificationCenter.default.removeObserver(configurationObserver)
+        let audio = coreAudio
+        if deviceID != kAudioObjectUnknown, let procID {
+            let stopStatus = AudioDeviceStop(deviceID, procID)
+            audio.call(.stopDevice) { stopStatus }
+            let destroyStatus = AudioDeviceDestroyIOProcID(deviceID, procID)
+            audio.call(.destroyIOProc) { destroyStatus }
         }
-        configurationObserver = nil
+        procID = nil
+        deviceID = AudioObjectID(kAudioObjectUnknown)
         for listener in listeners {
             var address = listener.address
-            coreAudio.call(.removePropertyListener) {
+            audio.call(.removePropertyListener) {
                 AudioObjectRemovePropertyListenerBlock(
                     listener.object, &address, listenerQueue, listener.block)
             }
         }
         listeners = []
-        if let engine {
-            engine.inputNode.removeTap(onBus: 0)
-            engine.stop()
-        }
-        engine = nil
         drainTask?.cancel()
         drainTask = nil
         if let pipeline {

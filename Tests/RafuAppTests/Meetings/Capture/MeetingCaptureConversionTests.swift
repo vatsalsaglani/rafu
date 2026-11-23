@@ -74,7 +74,24 @@ struct MeetingCaptureConversionTests {
         }
     }
 
-    @Test("24 kHz mono from the microphone tap block")
+    /// Runs the device IO block on `buffer` as Core Audio would.
+    private static func runIOBlock(
+        _ block: AudioDeviceIOBlock, input buffer: AVAudioPCMBuffer, hostTime: UInt64
+    ) throws {
+        var inputTime = AudioTimeStamp()
+        inputTime.mHostTime = hostTime
+        inputTime.mFlags = .hostTimeValid
+        var now = inputTime
+        var outputTime = inputTime
+        let format = try #require(
+            AVAudioFormat(
+                commonFormat: .pcmFormatFloat32, sampleRate: 48_000, channels: 1,
+                interleaved: false))
+        let output = try #require(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 16))
+        block(&now, buffer.audioBufferList, &inputTime, output.mutableAudioBufferList, &outputTime)
+    }
+
+    @Test("24 kHz mono through the microphone device IO block")
     func mono24k() async throws {
         let format = try #require(
             AVAudioFormat(
@@ -84,9 +101,11 @@ struct MeetingCaptureConversionTests {
         buffer.frameLength = 2_400
         Self.fill(buffer, amplitudes: [0.5])
         let ring = MeetingCaptureRing(slotCount: 8, slotCapacity: 8_192, timebase: .nanoseconds)
-        let block = MeetingAudioCallbacks.microphoneTapBlock(
-            ring: ring, channelCount: 1, sampleRate: 24_000)
-        block(buffer, AVAudioTime(hostTime: 5_000))
+        let layout = MeetingTapLayout(
+            channelCount: 1, isInterleaved: false, isFloat32: true, sampleRate: 24_000)
+        try Self.runIOBlock(
+            MeetingAudioCallbacks.deviceIOBlock(ring: ring, layout: layout), input: buffer,
+            hostTime: 5_000)
         let blocks = await Self.drain(ring)
         let first = try #require(blocks.first)
         #expect(blocks.count == 1)
@@ -96,21 +115,23 @@ struct MeetingCaptureConversionTests {
         #expect(Self.peak(first.samples) > -12)
     }
 
-    @Test("3-channel input (voice-processing layout): channel 0 is used")
-    func threeChannels() async throws {
-        let channelLayout = try #require(
-            AVAudioChannelLayout(layoutTag: kAudioChannelLayoutTag_DiscreteInOrder | 3))
-        let format = AVAudioFormat(
-            commonFormat: .pcmFormatFloat32, sampleRate: 24_000, interleaved: false,
-            channelLayout: channelLayout)
-        #expect(format.channelCount == 3)
-        for (amplitudes, expectSound) in [([Float(0.5), 0, 0], true), ([0, 0.7, 0.7], false)] {
-            let buffer = try #require(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 2_400))
-            buffer.frameLength = 2_400
+    @Test("2 channels interleaved through the device IO block: channel 0 is used")
+    func stereoInterleavedIOBlock() async throws {
+        let format = try #require(
+            AVAudioFormat(
+                commonFormat: .pcmFormatFloat32, sampleRate: 48_000, channels: 2,
+                interleaved: true))
+        let layout = MeetingTapLayout(
+            channelCount: 2, isInterleaved: true, isFloat32: true, sampleRate: 48_000)
+        for (amplitudes, expectSound) in [([Float(0.5), 0], true), ([0, 0.7], false)] {
+            let buffer = try #require(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 4_800))
+            buffer.frameLength = 4_800
             Self.fill(buffer, amplitudes: amplitudes)
             let ring = MeetingCaptureRing(slotCount: 8, slotCapacity: 8_192, timebase: .nanoseconds)
-            MeetingAudioCallbacks.microphoneTapBlock(
-                ring: ring, channelCount: 3, sampleRate: 24_000)(buffer, AVAudioTime(hostTime: 9))
+            try Self.runIOBlock(
+                MeetingAudioCallbacks.deviceIOBlock(ring: ring, layout: layout), input: buffer,
+                hostTime: 9)
+            #expect(ring.takeCounters().frames == 4_800)
             let blocks = await Self.drain(ring)
             let first = try #require(blocks.first)
             #expect(abs(first.samples.count - 1_600) <= 32)
@@ -120,6 +141,54 @@ struct MeetingCaptureConversionTests {
                 #expect(first.samples.allSatisfy { $0 == 0 })
             }
         }
+    }
+
+    @Test("3 channels, not interleaved: channel 0 is used")
+    func threeChannels() async throws {
+        let channelLayout = try #require(
+            AVAudioChannelLayout(layoutTag: kAudioChannelLayoutTag_DiscreteInOrder | 3))
+        let format = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32, sampleRate: 24_000, interleaved: false,
+            channelLayout: channelLayout)
+        #expect(format.channelCount == 3)
+        let layout = MeetingTapLayout(
+            channelCount: 3, isInterleaved: false, isFloat32: true, sampleRate: 24_000)
+        for (amplitudes, expectSound) in [([Float(0.5), 0, 0], true), ([0, 0.7, 0.7], false)] {
+            let buffer = try #require(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 2_400))
+            buffer.frameLength = 2_400
+            Self.fill(buffer, amplitudes: amplitudes)
+            let ring = MeetingCaptureRing(slotCount: 8, slotCapacity: 8_192, timebase: .nanoseconds)
+            MeetingAudioCallbacks.copyChannelZero(
+                from: buffer.audioBufferList, layout: layout, hostTime: 9, ring: ring)
+            let blocks = await Self.drain(ring)
+            let first = try #require(blocks.first)
+            #expect(abs(first.samples.count - 1_600) <= 32)
+            if expectSound {
+                #expect(Self.peak(first.samples) > -12)
+            } else {
+                #expect(first.samples.allSatisfy { $0 == 0 })
+            }
+        }
+    }
+
+    @Test("A format that is not Float32 counts a format error and writes nothing")
+    func notFloat32() async throws {
+        let format = try #require(
+            AVAudioFormat(
+                commonFormat: .pcmFormatInt16, sampleRate: 48_000, channels: 1,
+                interleaved: true))
+        let buffer = try #require(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 480))
+        buffer.frameLength = 480
+        let ring = MeetingCaptureRing(slotCount: 8, slotCapacity: 8_192, timebase: .nanoseconds)
+        let layout = MeetingTapLayout(
+            channelCount: 1, isInterleaved: true, isFloat32: false, sampleRate: 48_000)
+        try Self.runIOBlock(
+            MeetingAudioCallbacks.deviceIOBlock(ring: ring, layout: layout), input: buffer,
+            hostTime: 1)
+        let counters = ring.takeCounters()
+        #expect(counters.converterErrors == 1)
+        #expect(counters.buffers == 0 && counters.frames == 0)
+        #expect(await Self.drain(ring).isEmpty)
     }
 
     @Test("Buffers that follow in time join one block; a rate change starts a new one")
@@ -202,6 +271,21 @@ struct MeetingCaptureSourceScanTests {
         }
         // Only the ring's init allocates.
         #expect(code.components(separatedBy: ".allocate(").count - 1 == 4)
+    }
+
+    @Test("No Meetings source uses the AVFoundation audio engine or its input tap")
+    func noAudioEngineInMeetings() throws {
+        let base = Self.root().appending(path: "Sources/RafuApp/Meetings")
+        let enumerator = try #require(FileManager.default.enumerator(atPath: base.path))
+        var checked = 0
+        for case let path as String in enumerator where path.hasSuffix(".swift") {
+            let source = try String(contentsOf: base.appending(path: path), encoding: .utf8)
+            checked += 1
+            for forbidden in ["AVAudioEngine", "installTap(", "inputNode"] {
+                #expect(!source.contains(forbidden), "\(path): \(forbidden)")
+            }
+        }
+        #expect(checked >= 20)
     }
 
     @Test("No recording code holds a workspace value")

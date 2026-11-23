@@ -44,6 +44,13 @@ enum MeetingDiagnosticsSamples {
             ),
             ("aggregateDeviceRate", .aggregateDeviceRate(nominalSampleRate: 24000)),
             ("sampleRateCorrected", .sampleRateCorrected(from: 48000, to: 24000)),
+            (
+                "microphoneFormat",
+                .microphoneFormat(
+                    MeetingTapFormat(
+                        sampleRate: 48000, channelCount: 1, bitsPerChannel: 32,
+                        isInterleaved: true), isFloat32: true, nominalSampleRate: 48000)
+            ),
             ("firstBuffer", .firstBuffer(track: .them, frames: 480)),
             (
                 "trackFlow",

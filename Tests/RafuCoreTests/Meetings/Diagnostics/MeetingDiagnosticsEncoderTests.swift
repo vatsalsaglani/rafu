@@ -28,6 +28,8 @@ struct MeetingDiagnosticsEncoderTests {
             #"{"clock":12.65,"event":"aggregateDeviceRate","nominalSampleRate":24000.0,"t":"2023-11-14T22:13:20.250Z"}"#,
         "sampleRateCorrected":
             #"{"clock":12.65,"event":"sampleRateCorrected","from":48000.0,"t":"2023-11-14T22:13:20.250Z","to":24000.0}"#,
+        "microphoneFormat":
+            #"{"bits":32,"channels":1,"clock":12.65,"event":"microphoneFormat","float32":true,"interleaved":true,"nominalSampleRate":48000.0,"sampleRate":48000.0,"t":"2023-11-14T22:13:20.250Z"}"#,
         "firstBuffer":
             #"{"clock":12.65,"event":"firstBuffer","frames":480,"t":"2023-11-14T22:13:20.250Z","track":"them"}"#,
         "trackFlow":
