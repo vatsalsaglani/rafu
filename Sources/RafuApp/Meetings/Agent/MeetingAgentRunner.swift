@@ -38,19 +38,14 @@ actor MeetingAgentRunner: MeetingAgentRunning, MeetingAgentAvailabilityChecking,
     private let environment: [String: String]
     private let clock: @Sendable () -> Date
     private let activity: ActivitySink
+    private let prober: any MeetingAgentProbeService
 
     /// The cancel action of the run in each lane.
     private var lanes: [Lane: @Sendable () -> Void] = [:]
-    private var codexVersions: [String: CachedVersion] = [:]
 
     private struct Lane: Hashable {
         var meeting: MeetingID
         var kind: MeetingAgentRunKind
-    }
-
-    private struct CachedVersion {
-        var modified: Date?
-        var version: String?
     }
 
     init(
@@ -63,7 +58,8 @@ actor MeetingAgentRunner: MeetingAgentRunning, MeetingAgentAvailabilityChecking,
         versionTimeLimit: Duration = MeetingAgentLimits.versionProbeTimeLimit,
         environment: [String: String] = MeetingAgentEnvironment.make(),
         clock: @escaping @Sendable () -> Date = { Date() },
-        activity: @escaping ActivitySink = { _, _, _ in }
+        activity: @escaping ActivitySink = { _, _, _ in },
+        prober: (any MeetingAgentProbeService)? = nil
     ) {
         self.storeProvider = store
         self.diagnostics = diagnostics
@@ -75,6 +71,11 @@ actor MeetingAgentRunner: MeetingAgentRunning, MeetingAgentAvailabilityChecking,
         self.environment = environment
         self.clock = clock
         self.activity = activity
+        self.prober =
+            prober
+            ?? MeetingAgentProber(
+                processRunner: processRunner, locator: locator, environment: environment,
+                runsRoot: runsRoot, versionTimeLimit: versionTimeLimit)
     }
 
     // MARK: - Public API
@@ -137,24 +138,20 @@ actor MeetingAgentRunner: MeetingAgentRunning, MeetingAgentAvailabilityChecking,
         return names.isEmpty ? .noNamesFound : .names(names)
     }
 
+    /// Starts no process: the kept probe result. A CLI with no kept result
+    /// shows as ready; its first run probes it.
     func availability(of cli: MeetingAgentCLI) async -> MeetingAgentAvailability {
-        guard let executable = locator.locate(cli) else { return .notInstalled }
-        switch cli {
-        case .claudeCode:
-            return .ready
-        case .codex:
-            let version = await codexVersion(of: executable)
-            return MeetingAgentVersionRule.isSupportedCodex(version: version)
-                ? .ready : .unsupportedVersion(found: version ?? "unknown")
+        guard locator.locate(cli) != nil else { return .notInstalled }
+        switch await prober.lastResult(of: cli) {
+        case nil, .ready?, .notSignedIn?: return .ready
+        case .notInstalled?: return .notInstalled
+        case .unsupportedVersion(let found)?: return .unsupportedVersion(found: found)
+        case .failed?: return .unsupportedVersion(found: "unknown")
         }
     }
 
     func probe(_ cli: MeetingAgentCLI, refresh: Bool) async -> MeetingAgentProbeResult {
-        switch await availability(of: cli) {
-        case .ready: .ready
-        case .notInstalled: .notInstalled
-        case .unsupportedVersion(let found): .unsupportedVersion(found: found)
-        }
+        await prober.probe(cli, refresh: refresh)
     }
 
     // MARK: - Question
@@ -316,6 +313,11 @@ actor MeetingAgentRunner: MeetingAgentRunning, MeetingAgentAvailabilityChecking,
             throw MeetingAgentError.notInstalled(cli)
         }
         if Task.isCancelled { throw MeetingAgentError.cancelled }
+        if let notReady = await probeBeforeRun(cli) {
+            recordUserError(notReady, meeting: meeting)
+            throw notReady
+        }
+        if Task.isCancelled { throw MeetingAgentError.cancelled }
 
         let started = ContinuousClock.now
         do {
@@ -385,6 +387,10 @@ actor MeetingAgentRunner: MeetingAgentRunning, MeetingAgentAvailabilityChecking,
             RunFailure(error: error, outcome: outcome, cliVersion: version, exitCode: exitCode)
         }
 
+        if parser.initCheck == .refused || parser.forbiddenTool || parser.notLoggedIn {
+            // The kept probe result no longer holds.
+            await prober.invalidate(.claudeCode)
+        }
         if parser.initCheck == .refused {
             throw fail(.unsupportedVersion(.claudeCode), .failed)
         }
@@ -436,10 +442,7 @@ actor MeetingAgentRunner: MeetingAgentRunning, MeetingAgentAvailabilityChecking,
         executable: MeetingAgentExecutable, question: String, kind: MeetingAgentRunKind,
         library: any MeetingLibraryServicing, meeting: MeetingID, sink: StreamSink?
     ) async throws -> (String, String?, Int32?) {
-        let version = await codexVersion(of: executable)
-        guard MeetingAgentVersionRule.isSupportedCodex(version: version) else {
-            throw MeetingAgentError.unsupportedVersion(.codex)
-        }
+        let version = await prober.readyVersion(of: .codex)
         let meetingText: String
         do {
             meetingText = try await library.agentPacketText(of: meeting)
@@ -479,7 +482,13 @@ actor MeetingAgentRunner: MeetingAgentRunning, MeetingAgentAvailabilityChecking,
         func fail(_ error: MeetingAgentError, _ outcome: MeetingAgentRunOutcome) -> RunFailure {
             RunFailure(error: error, outcome: outcome, cliVersion: version, exitCode: exitCode)
         }
-
+        // Codex shows no tool list and its stream is not a full audit log:
+        // each run checks that it wrote no file, with the item-type rule.
+        let wroteFiles = !MeetingAgentRunFolders.isUntouched(run)
+        if parser.notSignedIn || parser.unrecognizedSetting || parser.toolEvent || wroteFiles {
+            await prober.invalidate(.codex)
+        }
+        if wroteFiles { throw fail(.failed, .failed) }
         if parser.notSignedIn { throw fail(.notSignedIn(.codex), .notSignedIn) }
         if parser.unrecognizedSetting { throw fail(.unsupportedVersion(.codex), .failed) }
         if parser.toolEvent { throw fail(.failed, .failed) }
@@ -493,32 +502,23 @@ actor MeetingAgentRunner: MeetingAgentRunning, MeetingAgentAvailabilityChecking,
         return (text, version, exitCode)
     }
 
-    // MARK: Codex version
+    // MARK: Probe
 
-    /// `codex --version` (argument array, the same four-key environment,
-    /// 5 s limit), kept for one executable path and modification date.
-    private func codexVersion(of executable: MeetingAgentExecutable) async -> String? {
-        if let cached = codexVersions[executable.resolvedPath],
-            cached.modified == executable.modified
-        {
-            return cached.version
+    /// Nil when the CLI is ready. A kept result that is not ready is probed
+    /// again: a run is an explicit user action, and the user may have
+    /// signed in since.
+    private func probeBeforeRun(_ cli: MeetingAgentCLI) async -> MeetingAgentError? {
+        var result = await prober.probe(cli, refresh: false)
+        if !result.isReady, result != .notInstalled {
+            result = await prober.probe(cli, refresh: true)
         }
-        let spec = MeetingAgentProcessSpec(
-            executableURL: executable.url, arguments: MeetingAgentArguments.versionProbe,
-            environment: environment, currentDirectoryURL: FileManager.default.temporaryDirectory,
-            standardInput: nil)
-        guard
-            let probe = try? await MeetingAgentDrive.run(
-                spec, parser: MeetingAgentVersionCollector(), processRunner: processRunner,
-                timeLimit: versionTimeLimit,
-                maximumOutputBytes: MeetingAgentLimits.maximumVersionOutputBytes),
-            probe.end == .finished, probe.termination == .exited(0)
-        else { return nil }
-        let version = MeetingAgentVersionRule.version(
-            fromVersionOutput: probe.parser.firstLine ?? "")
-        codexVersions[executable.resolvedPath] = CachedVersion(
-            modified: executable.modified, version: version)
-        return version
+        switch result {
+        case .ready: return nil
+        case .notInstalled: return .notInstalled(cli)
+        case .notSignedIn: return .notSignedIn(cli)
+        case .unsupportedVersion: return .unsupportedVersion(cli)
+        case .failed: return .failed
+        }
     }
 
     // MARK: - Process driving

@@ -111,16 +111,16 @@ struct MeetingAgentArgumentsTests {
         #expect(question.contains("- them: Them"))
     }
 
-    @Test("The version rule accepts only a checked Codex version")
+    @Test("The version rule reads the version of each CLI")
     func versionRule() {
         #expect(
             MeetingAgentVersionRule.version(fromVersionOutput: "codex-cli 0.171.0\n") == "0.171.0")
         #expect(
             MeetingAgentVersionRule.version(fromVersionOutput: "codex-cli 0.172.1") == "0.172.1")
         #expect(MeetingAgentVersionRule.version(fromVersionOutput: "garbage") == nil)
-        #expect(MeetingAgentVersionRule.isSupportedCodex(version: "0.171.0"))
-        #expect(!MeetingAgentVersionRule.isSupportedCodex(version: "0.172.0"))
-        #expect(!MeetingAgentVersionRule.isSupportedCodex(version: nil))
+        #expect(
+            MeetingAgentVersionRule.version(fromVersionOutput: "2.1.330 (Claude Code)\n")
+                == "2.1.330")
     }
 
     @Test("Answer text is cleaned and bounded")

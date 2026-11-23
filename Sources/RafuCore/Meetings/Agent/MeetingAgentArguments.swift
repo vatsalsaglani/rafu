@@ -55,6 +55,22 @@ public enum MeetingAgentArguments {
         ]
     }
 
-    /// The version probe (`codex --version`). It holds no private text.
+    /// The final Codex array with two settings before the last `-` that send
+    /// the model request to Rafu's capture listener on `127.0.0.1:<port>`
+    /// (no model, no account): the probe reads the tool list in that
+    /// request. Never used for a real run.
+    public static func codexCapture(emptyFolder: URL, port: UInt16) -> [String] {
+        var arguments = codex(emptyFolder: emptyFolder)
+        arguments.removeLast()
+        arguments += [
+            "-c",
+            "model_providers.capture={name=\"capture\", base_url=\"http://127.0.0.1:\(port)/v1\", wire_api=\"responses\", request_max_retries=0, stream_max_retries=0}",
+            "-c", "model_provider=\"capture\"",
+            "-",
+        ]
+        return arguments
+    }
+
+    /// The version probe (`--version`). It holds no private text.
     public static let versionProbe = ["--version"]
 }

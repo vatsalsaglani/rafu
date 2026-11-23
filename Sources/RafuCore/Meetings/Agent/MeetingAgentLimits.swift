@@ -24,6 +24,17 @@ public enum MeetingAgentLimits {
     public static let maximumIDsPerRange = 20
     /// The most citations taken from one answer.
     public static let maximumCitations = 200
+    /// The time limit of the small real run of a probe.
+    public static let probeTimeLimit = Duration.seconds(90)
+    /// The time limit of the Codex tool-list capture (no model, no account).
+    public static let captureTimeLimit = Duration.seconds(10)
+    /// The largest request header that the capture listener reads.
+    public static let maximumCaptureHeaderBytes = 32 * 1_024
+    /// The largest request body that the capture listener reads (the saved
+    /// request of codex-cli 0.171.0 was about 35 KB).
+    public static let maximumCaptureBodyBytes = 1_024 * 1_024
+    /// The most connections that the capture listener answers.
+    public static let maximumCaptureConnections = 8
 }
 
 /// The answer text of a reply, cleaned: valid UTF-8, inside the limit, no

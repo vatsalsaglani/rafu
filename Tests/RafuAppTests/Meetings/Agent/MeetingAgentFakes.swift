@@ -11,6 +11,9 @@ nonisolated enum FakeAgentBehaviour: Sendable {
     /// Prints the lines, then waits until it is ended (a CLI that retries
     /// or hangs).
     case hang([String])
+    /// Writes a file with this name in its working directory, then prints
+    /// the lines and exits with the code.
+    case writeFile(String, lines: [String], exit: Int32)
 }
 
 /// What the fake saw at one start, read while the process "ran" (the
@@ -44,6 +47,10 @@ nonisolated final class FakeAgentHandle: MeetingAgentProcessHandle {
             end(.exited(exit))
         case .hang(let lines):
             for line in lines { continuation.yield(Data((line + "\n").utf8)) }
+        case .writeFile(_, let lines, let exit):
+            for line in lines { continuation.yield(Data((line + "\n").utf8)) }
+            continuation.finish()
+            end(.exited(exit))
         }
     }
 
@@ -125,6 +132,11 @@ nonisolated final class FakeAgentProcessRunner: MeetingAgentProcessRunning {
             state.starts.append(record)
             let behaviour =
                 state.behaviours.isEmpty ? .lines([], exit: 1) : state.behaviours.removeFirst()
+            if case .writeFile(let name, _, _) = behaviour {
+                FileManager.default.createFile(
+                    atPath: spec.currentDirectoryURL.appendingPathComponent(name).path,
+                    contents: Data("x".utf8))
+            }
             let handle = FakeAgentHandle(behaviour)
             state.handles.append(handle)
             return handle
@@ -137,13 +149,70 @@ nonisolated final class FakeAgentProcessRunner: MeetingAgentProcessRunning {
 /// A locator that finds each CLI at a fixed fake path.
 nonisolated struct FakeAgentLocator: MeetingAgentLocating {
     var installed: Set<MeetingAgentCLI> = [.claudeCode, .codex]
+    var modified = Date(timeIntervalSince1970: 1)
 
     func locate(_ cli: MeetingAgentCLI) -> MeetingAgentExecutable? {
         guard installed.contains(cli) else { return nil }
         let path = "/fake/bin/\(MeetingAgentExecutableLocator.executableName(for: cli))"
         return MeetingAgentExecutable(
-            url: URL(fileURLWithPath: path), resolvedPath: path,
-            modified: Date(timeIntervalSince1970: 1))
+            url: URL(fileURLWithPath: path), resolvedPath: path, modified: modified)
+    }
+}
+
+/// Kept probe results in memory, for tests.
+nonisolated final class FakeProbeCache: MeetingAgentProbeCacheStoring {
+    private let storage = Mutex<[MeetingAgentCLI: MeetingAgentProbeCacheEntry]>([:])
+
+    func entry(for cli: MeetingAgentCLI) -> MeetingAgentProbeCacheEntry? {
+        storage.withLock { $0[cli] }
+    }
+
+    func setEntry(_ entry: MeetingAgentProbeCacheEntry?, for cli: MeetingAgentCLI) {
+        storage.withLock { $0[cli] = entry }
+    }
+}
+
+/// A probe with fixed results (ready unless set). It starts no process.
+nonisolated final class FakeAgentProber: MeetingAgentProbeService {
+    private struct State {
+        var results: [MeetingAgentCLI: MeetingAgentProbeResult]
+        var probes: [(cli: MeetingAgentCLI, refresh: Bool)] = []
+        var invalidated: [MeetingAgentCLI] = []
+    }
+
+    private let state: Mutex<State>
+
+    init(_ results: [MeetingAgentCLI: MeetingAgentProbeResult] = [:]) {
+        state = Mutex(State(results: results))
+    }
+
+    var probes: [(cli: MeetingAgentCLI, refresh: Bool)] { state.withLock { $0.probes } }
+    var invalidated: [MeetingAgentCLI] { state.withLock { $0.invalidated } }
+
+    func set(_ result: MeetingAgentProbeResult, for cli: MeetingAgentCLI) {
+        state.withLock { $0.results[cli] = result }
+    }
+
+    func probe(_ cli: MeetingAgentCLI, refresh: Bool) async -> MeetingAgentProbeResult {
+        state.withLock {
+            $0.probes.append((cli, refresh))
+            return $0.results[cli] ?? .ready
+        }
+    }
+
+    func lastResult(of cli: MeetingAgentCLI) async -> MeetingAgentProbeResult? {
+        state.withLock { $0.results[cli] }
+    }
+
+    func readyVersion(of cli: MeetingAgentCLI) async -> String? {
+        switch cli {
+        case .claudeCode: "2.1.330"
+        case .codex: "0.171.0"
+        }
+    }
+
+    func invalidate(_ cli: MeetingAgentCLI) async {
+        state.withLock { $0.invalidated.append(cli) }
     }
 }
 
@@ -259,7 +328,8 @@ nonisolated struct AgentTestLibrary {
         _ process: FakeAgentProcessRunner,
         diagnostics: AgentTestDiagnostics = AgentTestDiagnostics(),
         locator: FakeAgentLocator = FakeAgentLocator(), timeLimit: Duration = .seconds(30),
-        activity: @escaping MeetingAgentRunner.ActivitySink = { _, _, _ in }
+        activity: @escaping MeetingAgentRunner.ActivitySink = { _, _, _ in },
+        prober: any MeetingAgentProbeService = FakeAgentProber()
     ) -> MeetingAgentRunner {
         let store = store
         return MeetingAgentRunner(
@@ -267,7 +337,7 @@ nonisolated struct AgentTestLibrary {
             runsRoot: runsRoot, timeLimit: timeLimit,
             environment: MeetingAgentEnvironment.make(
                 path: "/usr/bin:/bin", home: "/Users/test", user: "test"),
-            activity: activity)
+            activity: activity, prober: prober)
     }
 
     /// A ready meeting whose only speaker is `me` (nothing to name).

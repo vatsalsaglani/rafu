@@ -47,10 +47,6 @@ struct MeetingAgentRunnerTests {
         Self.expectNoPrivateText(in: run.spec)
         // The run root is removed.
         #expect(library.leftovers().isEmpty)
-        // The version probe holds no private text either.
-        let probe = try #require(process.starts.first { $0.spec.arguments == ["--version"] })
-        #expect(probe.spec.standardInput == nil)
-        #expect(Set(probe.spec.environment.keys) == MeetingAgentEnvironment.keys)
     }
 
     // 2
@@ -342,23 +338,33 @@ struct MeetingAgentRunnerTests {
     }
 
     // 10
-    @Test("A Codex version that was not checked is not available and starts no exec")
-    func unsupportedCodexVersion() async throws {
+    @Test("A CLI whose probe is not ready starts no run; the probe runs again first")
+    func probeNotReady() async throws {
         let library = AgentTestLibrary()
         defer { library.remove() }
         let meeting = try await library.makeMeeting()
-        let process = FakeAgentProcessRunner([], versionOutput: "codex-cli 0.172.0")
-        let runner = library.makeRunner(process)
+        let process = FakeAgentProcessRunner([])
+        let prober = FakeAgentProber([
+            .codex: .unsupportedVersion(found: "0.172.0"), .claudeCode: .notSignedIn,
+        ])
+        let runner = library.makeRunner(process, prober: prober)
 
         #expect(await runner.availability(of: .codex) == .unsupportedVersion(found: "0.172.0"))
         await #expect(throws: MeetingAgentError.unsupportedVersion(.codex)) {
             try await runner.ask(Self.question, about: meeting, using: .codex)
         }
-        #expect(process.runs.isEmpty)
-        // The version is kept for the same executable: one probe only.
-        #expect(process.starts.count == 1)
-        #expect(await runner.availability(of: .claudeCode) == .ready)
-        #expect(process.starts.count == 1)
+        await #expect(throws: MeetingAgentError.notSignedIn(.claudeCode)) {
+            try await runner.ask(Self.question, about: meeting, using: .claudeCode)
+        }
+        #expect(process.starts.isEmpty)
+        #expect(prober.probes.map(\.refresh) == [false, true, false, true])
+
+        prober.set(.failed(reason: .timedOut), for: .codex)
+        await #expect(throws: MeetingAgentError.failed) {
+            try await runner.ask(Self.question, about: meeting, using: .codex)
+        }
+        #expect(process.starts.isEmpty)
+        #expect(await runner.probe(.codex, refresh: false) == .failed(reason: .timedOut))
     }
 
     @Test("A CLI that is not installed is reported and starts nothing")
@@ -389,6 +395,60 @@ struct MeetingAgentRunnerTests {
             try await runner.ask(Self.question, about: meeting, using: .codex)
         }
         #expect(process.runHandles.first?.terminateCalls == 1)
+    }
+
+    @Test("A Codex run that wrote a file gives no answer and forgets the probe")
+    func codexWroteFile() async throws {
+        let library = AgentTestLibrary()
+        defer { library.remove() }
+        let meeting = try await library.makeMeeting()
+        let process = FakeAgentProcessRunner([
+            .writeFile(
+                "notes.txt",
+                lines: [
+                    S.codexThread, S.codexTurnStarted, S.codexMessage("Ships [t2]."),
+                    S.codexTurnCompleted,
+                ], exit: 0)
+        ])
+        let prober = FakeAgentProber()
+        let runner = library.makeRunner(process, prober: prober)
+        await #expect(throws: MeetingAgentError.failed) {
+            try await runner.ask(Self.question, about: meeting, using: .codex)
+        }
+        #expect(prober.invalidated == [.codex])
+        #expect(try await library.store.conversation(of: meeting).isEmpty)
+        #expect(library.leftovers().isEmpty)
+    }
+
+    @Test("A real run that sees a sign-out, a tool event or a refused init forgets the probe")
+    func runInvalidatesProbe() async throws {
+        let library = AgentTestLibrary()
+        defer { library.remove() }
+        let meeting = try await library.makeMeeting()
+        let badInit = S.claudeInit.replacingOccurrences(
+            of: #"["Glob","Grep","Read"]"#, with: #"["Bash","Glob","Grep","Read"]"#)
+        let mcp =
+            #"{"type":"item.started","item":{"id":"item_1","type":"mcp_tool_call","server":"x"}}"#
+        let process = FakeAgentProcessRunner([
+            .hang([S.codexThread, S.codexTurnStarted, S.codex401]),
+            .hang([S.codexThread, mcp]),
+            .hang([badInit]),
+            .lines([S.claudeInit, S.claudeResult("Ships [t2]")], exit: 0),
+        ])
+        let prober = FakeAgentProber()
+        let runner = library.makeRunner(process, prober: prober)
+        await #expect(throws: MeetingAgentError.notSignedIn(.codex)) {
+            try await runner.ask(Self.question, about: meeting, using: .codex)
+        }
+        await #expect(throws: MeetingAgentError.failed) {
+            try await runner.ask(Self.question, about: meeting, using: .codex)
+        }
+        await #expect(throws: MeetingAgentError.unsupportedVersion(.claudeCode)) {
+            try await runner.ask(Self.question, about: meeting, using: .claudeCode)
+        }
+        _ = try await runner.ask(Self.question, about: meeting, using: .claudeCode)
+        #expect(prober.invalidated == [.codex, .codex, .claudeCode])
+        #expect(try await library.store.conversation(of: meeting).count == 2)
     }
 
     @Test("An answer with a non-zero exit is a failure")

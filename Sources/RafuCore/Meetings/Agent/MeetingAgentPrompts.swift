@@ -99,3 +99,38 @@ public enum MeetingAgentPrompts {
             + "\n# End of meeting text\n"
     }
 }
+
+/// The fixed texts of a probe run. They hold no user text: a probe sends
+/// only these to the provider.
+public enum MeetingAgentProbeTexts {
+    /// `meeting.md` of the probe meeting.
+    public static let meetingFile = """
+        # Probe meeting
+
+        A fixed meeting that Rafu uses to check the agent.
+
+        """
+    /// `transcript.md` of the probe meeting.
+    public static let transcriptFile = """
+        [t1 00:00] Speaker 1: The color of the day is blue.
+        [t2 00:05] Speaker 2: Blue it is.
+
+        """
+    public static let question = "What is the color of the day? Answer in one short sentence."
+
+    /// `question.md` of the Claude Code probe.
+    public static var questionFile: String {
+        MeetingAgentPrompts.questionFile(question: question, kind: .question)
+    }
+
+    /// The standard input of the Codex probe run.
+    public static var codexPacket: String {
+        MeetingAgentPrompts.codexPacket(
+            question: question, kind: .question,
+            meetingText: "=== meeting.md ===\n" + meetingFile + "\n=== transcript.md ===\n"
+                + transcriptFile)
+    }
+
+    /// The standard input of the Codex tool-list capture. No model reads it.
+    public static let captureInput = "Reply with the word ready.\n"
+}
