@@ -186,6 +186,53 @@ final class MeetingsSessionModel {
     }
     func deleteMeeting(_ meeting: MeetingID) { handlers.deleteMeeting(meeting) }
     func noteLibraryChanged() { libraryRevision += 1 }
+
+    // MARK: Hidden agent runs and the summary (owned by the meeting agent package)
+
+    /// The summary of each meeting that the interface asked about or that
+    /// the agent wrote in this launch. A meeting that is not here has no
+    /// known state yet (`refreshSummaryState` reads it).
+    var summaryStates: [MeetingID: MeetingSummaryState] = [:]
+    /// The hidden agent runs in progress, for each meeting.
+    var agentRuns: [MeetingID: [MeetingAgentActivity]] = [:]
+    /// The meetings whose processing shows the "Writing the summary" step.
+    var summaryStepActive: Set<MeetingID> = []
+    @ObservationIgnored var summaryHandlers = MeetingsSummaryHandlers()
+
+    func isAgentRunning(_ kind: MeetingAgentRunKind, for meeting: MeetingID) -> Bool {
+        agentRuns[meeting]?.contains { $0.kind == kind } ?? false
+    }
+
+    /// Writes the summary now (a user action), with no regard to the
+    /// Settings switch.
+    func makeSummary(_ meeting: MeetingID) { summaryHandlers.make(meeting) }
+    func cancelSummary(_ meeting: MeetingID) { summaryHandlers.cancel(meeting) }
+    /// Reads the summary state of one meeting from its notes file.
+    func refreshSummaryState(_ meeting: MeetingID) { summaryHandlers.refresh(meeting) }
+    /// Hides the "Writing the summary" step. The run goes on.
+    func leaveSummaryStep(_ meeting: MeetingID) { summaryStepActive.remove(meeting) }
+
+    /// Records the start (`isRunning` true) or the end of one hidden agent run.
+    func noteAgentRun(_ activity: MeetingAgentActivity, of meeting: MeetingID, isRunning: Bool) {
+        var runs = agentRuns[meeting] ?? []
+        if isRunning {
+            runs.append(activity)
+        } else if let index = runs.firstIndex(of: activity) {
+            runs.remove(at: index)
+        }
+        agentRuns[meeting] = runs.isEmpty ? nil : runs
+    }
+}
+
+/// The actions behind the summary of the session model. The meeting agent
+/// package installs them; a test replaces them to record calls.
+struct MeetingsSummaryHandlers {
+    /// A processing job wrote the text of this meeting (the library state is
+    /// `ready`).
+    var afterProcessing: @MainActor (MeetingID) -> Void = { _ in }
+    var make: @MainActor (MeetingID) -> Void = { _ in }
+    var cancel: @MainActor (MeetingID) -> Void = { _ in }
+    var refresh: @MainActor (MeetingID) -> Void = { _ in }
 }
 
 /// Opens the Meetings window from code that has no SwiftUI environment (the

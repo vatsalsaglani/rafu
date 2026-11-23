@@ -1,13 +1,5 @@
 import Foundation
 
-/// What a hidden meeting agent run is for.
-public enum MeetingAgentRunKind: Hashable, Sendable {
-    /// One question from the user.
-    case question
-    /// Speaker-name suggestions. The question text is made by Rafu.
-    case speakerNames
-}
-
 /// The texts that a hidden meeting agent run gets. Private text (the
 /// question, the meeting) goes only into `question.md` of the meeting copy
 /// (Claude Code) or into the packet on standard input (Codex), never into a
@@ -51,6 +43,24 @@ public enum MeetingAgentPrompts {
                 ids that show the name.
                 - Leave out a label when the text has no evidence for a name.
                 - Never suggest a name for `me`.
+                """
+        case .summary:
+            return """
+                # Rules
+
+                \(common)
+                - Write a short title and a summary of the meeting from the transcript only.
+                - Reply with one JSON object only, and nothing else. Example: \
+                {"title": "Quokka build launch plan", "summary": "The team agreed to ship on \
+                March 14 [t2].", "decisions": [{"text": "Ship on March 14", "owner": null, \
+                "turns": ["t2"]}], "actionItems": [{"text": "Send the release notes", \
+                "owner": "Priya", "turns": ["t5"]}]}
+                - `title`: at most 80 characters, one line, no date.
+                - `summary`: Markdown, at most 200 words. After each claim, cite the turn id in \
+                square brackets, for example [t12].
+                - `decisions` and `actionItems`: at most 20 each. `owner` is a name that the \
+                transcript shows, or null. `turns` lists the turn ids that show the item.
+                - Use an empty list when the meeting has no decision or no action item.
                 """
         }
     }

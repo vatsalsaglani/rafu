@@ -17,7 +17,9 @@ import RafuCore
 /// Private text is never in a process argument, an environment value or a
 /// diagnostics event. The reply is untrusted data: bounded, cleaned, never
 /// run and never used as a path. One run for each meeting at a time.
-actor MeetingAgentRunner: MeetingAgentRunning, MeetingAgentAvailabilityChecking {
+actor MeetingAgentRunner: MeetingAgentRunning, MeetingAgentAvailabilityChecking,
+    MeetingAgentStreaming, MeetingAgentProbing
+{
     typealias StoreProvider = @Sendable () async -> (any MeetingStoring)?
 
     private let storeProvider: StoreProvider
@@ -125,6 +127,45 @@ actor MeetingAgentRunner: MeetingAgentRunning, MeetingAgentAvailabilityChecking 
             let version = await codexVersion(of: executable)
             return MeetingAgentVersionRule.isSupportedCodex(version: version)
                 ? .ready : .unsupportedVersion(found: version ?? "unknown")
+        }
+    }
+
+    // MARK: - Streaming and probing (contract stubs)
+
+    nonisolated func askStream(
+        _ question: String, about meeting: MeetingID, using cli: MeetingAgentCLI
+    ) -> AsyncThrowingStream<MeetingAgentStreamEvent, Error> {
+        let (stream, continuation) = AsyncThrowingStream<MeetingAgentStreamEvent, Error>
+            .makeStream()
+        let task = Task {
+            do {
+                continuation.yield(.started)
+                let reply = try await self.ask(question, about: meeting, using: cli)
+                continuation.yield(.textDelta(reply.text))
+                continuation.yield(.finished(reply))
+                continuation.finish()
+            } catch {
+                continuation.finish(throwing: error)
+            }
+        }
+        continuation.onTermination = { _ in task.cancel() }
+        return stream
+    }
+
+    func cancelRun(_ kind: MeetingAgentRunKind, for meeting: MeetingID) async {}
+
+    func suggestSpeakerNameResult(for meeting: MeetingID, using cli: MeetingAgentCLI)
+        async throws -> MeetingNameSuggestionResult
+    {
+        let names = try await suggestSpeakerNames(for: meeting, using: cli)
+        return names.isEmpty ? .noNamesFound : .names(names)
+    }
+
+    func probe(_ cli: MeetingAgentCLI, refresh: Bool) async -> MeetingAgentProbeResult {
+        switch await availability(of: cli) {
+        case .ready: .ready
+        case .notInstalled: .notInstalled
+        case .unsupportedVersion(let found): .unsupportedVersion(found: found)
         }
     }
 

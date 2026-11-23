@@ -107,10 +107,14 @@ public struct MeetingConversationEntry: Hashable, Codable, Sendable, Identifiabl
     /// The agent that wrote an answer. Nil for a question.
     public var cli: MeetingAgentCLI?
     public var citations: [MeetingCitation]
+    /// The text revision of the meeting when the line was written. An answer
+    /// with an older revision than the meeting answered an older text. Nil
+    /// in a line written before the revision existed.
+    public var textRevision: Int?
 
     public init(
         id: UUID = UUID(), date: Date, role: MeetingConversationRole, text: String,
-        cli: MeetingAgentCLI? = nil, citations: [MeetingCitation] = []
+        cli: MeetingAgentCLI? = nil, citations: [MeetingCitation] = [], textRevision: Int? = nil
     ) {
         self.id = id
         self.date = date
@@ -118,6 +122,7 @@ public struct MeetingConversationEntry: Hashable, Codable, Sendable, Identifiabl
         self.text = text
         self.cli = cli
         self.citations = citations
+        self.textRevision = textRevision
     }
 }
 
