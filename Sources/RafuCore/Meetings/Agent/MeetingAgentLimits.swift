@@ -35,6 +35,14 @@ public enum MeetingAgentLimits {
     public static let maximumCaptureBodyBytes = 1_024 * 1_024
     /// The most connections that the capture listener answers.
     public static let maximumCaptureConnections = 8
+    /// The longest summary title, in characters.
+    public static let maximumSummaryTitleCharacters = 80
+    /// The largest summary text.
+    public static let maximumSummaryBytes = 8 * 1_024
+    /// The most decisions, and the most action items, in one summary.
+    public static let maximumSummaryItems = 20
+    /// The longest decision or action item, in characters.
+    public static let maximumSummaryItemCharacters = 400
 }
 
 /// The answer text of a reply, cleaned: valid UTF-8, inside the limit, no

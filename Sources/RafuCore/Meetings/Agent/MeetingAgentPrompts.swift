@@ -82,6 +82,10 @@ public enum MeetingAgentPrompts {
         return lines.joined(separator: "\n")
     }
 
+    /// The fixed question of a summary run.
+    public static let summaryQuestion =
+        "Write the title and the summary of this meeting, as one JSON object."
+
     /// The content of `question.md` in the meeting copy: the rules, then
     /// the question.
     public static func questionFile(question: String, kind: MeetingAgentRunKind) -> String {

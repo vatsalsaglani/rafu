@@ -26,6 +26,30 @@ struct MeetingAgentLiveProbeTests {
         #expect(((try? FileManager.default.contentsOfDirectory(atPath: base.path)) ?? []).isEmpty)
     }
 
+    /// The summary reply of each real CLI parses into notes.
+    @Test("A real summary run gives notes", arguments: MeetingAgentCLI.allCases)
+    func liveSummary(cli: MeetingAgentCLI) async throws {
+        let library = AgentTestLibrary()
+        defer { library.remove() }
+        let meeting = try await library.makeMeeting()
+        let store = library.store
+        let runner = MeetingAgentRunner(
+            store: { store }, diagnostics: AgentTestDiagnostics(),
+            processRunner: MeetingAgentSystemProcessRunner(registry: MeetingAgentProcessRegistry()),
+            runsRoot: library.runsRoot,
+            prober: MeetingAgentProber(
+                processRunner: MeetingAgentSystemProcessRunner(
+                    registry: MeetingAgentProcessRegistry()),
+                locator: MeetingAgentExecutableLocator(),
+                environment: MeetingAgentEnvironment.make(), runsRoot: library.runsRoot,
+                cache: FakeProbeCache(), toolListCapture: MeetingAgentCodexToolListCapture()))
+        let notes = try await runner.summarize(meeting, using: cli)
+        #expect(!notes.title.isEmpty)
+        #expect(!notes.summaryMarkdown.isEmpty)
+        #expect(notes.cli == cli)
+        #expect(library.leftovers().isEmpty)
+    }
+
     /// Claude Code streams more than one piece; Codex gives one piece at
     /// the end. The final answer cites the synthetic meeting.
     @Test("A real question streams its answer", arguments: MeetingAgentCLI.allCases)

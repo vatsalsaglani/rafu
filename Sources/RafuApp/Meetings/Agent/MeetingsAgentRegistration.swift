@@ -6,22 +6,29 @@ import RafuCore
 // `register(_:)` and never edits `MeetingsFeature.swift`.
 extension MeetingsFeature {
     /// Registers the hidden meeting agent on a Mac that can use Meetings.
-    /// Making the runner starts no process; a run starts only when the
-    /// interface calls `ask` or `suggestSpeakerNames` on a user action.
+    /// Making the runner starts no process. A run starts when the interface
+    /// asks on a user action, when the interface probes a CLI (fixed text
+    /// only), or after a processing job for the title and summary (unless
+    /// Settings ▸ Meetings turns it off).
     func registerAgentParts(
         runsRoot: URL = MeetingAgentRunFolders.defaultRunsRoot,
         snapshotRoot: URL = MeetingAgentRunFolders.defaultSnapshotRoot
     ) {
         guard availability.isAvailable else { return }
         let session = session
-        register(
-            .agentRunner(
-                MeetingAgentRunner(
-                    store: { @MainActor [weak self] in self?.store },
-                    diagnostics: diagnostics, runsRoot: runsRoot,
-                    activity: { @MainActor [weak session] meeting, activity, isRunning in
-                        session?.noteAgentRun(activity, of: meeting, isRunning: isRunning)
-                    })))
+        let runner = MeetingAgentRunner(
+            store: { @MainActor [weak self] in self?.store },
+            diagnostics: diagnostics, runsRoot: runsRoot,
+            activity: { @MainActor [weak session] meeting, activity, isRunning in
+                session?.noteAgentRun(activity, of: meeting, isRunning: isRunning)
+            })
+        register(.agentRunner(runner))
+        // The title and summary after each processing job. The session
+        // handlers keep the coordinator.
+        MeetingSummaryCoordinator(
+            session: session, agent: runner, store: { [weak self] in self?.store }
+        )
+        .install()
 
         // Both roots carry the app variant in their name, so these
         // folders belong to this variant only, and no run of it lives

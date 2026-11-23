@@ -20,7 +20,7 @@ import RafuCore
 /// run and never used as a path. One run of each kind for each meeting at a
 /// time (a question can run while the summary runs).
 actor MeetingAgentRunner: MeetingAgentRunning, MeetingAgentAvailabilityChecking,
-    MeetingAgentStreaming, MeetingAgentProbing
+    MeetingAgentStreaming, MeetingAgentProbing, MeetingAgentSummarizing
 {
     typealias StoreProvider = @Sendable () async -> (any MeetingStoring)?
     /// Called at the start (`true`) and at the end (`false`) of each run.
@@ -155,6 +155,33 @@ actor MeetingAgentRunner: MeetingAgentRunning, MeetingAgentAvailabilityChecking,
         await prober.probe(cli, refresh: refresh)
     }
 
+    // MARK: - Summary
+
+    /// The title and summary of one meeting (one run of kind `summary`).
+    /// The notes carry the text revision that the agent read; the caller
+    /// saves them.
+    func summarize(_ meeting: MeetingID, using cli: MeetingAgentCLI) async throws
+        -> MeetingSummaryNotes
+    {
+        guard
+            case .answer(let run) = try await perform(
+                .summary, meeting: meeting, cli: cli, sink: nil)
+        else { throw MeetingAgentError.failed }
+        let notes: MeetingSummaryNotes
+        do {
+            let known = Set(try await run.library.document(of: meeting).turns.map(\.id))
+            notes = try MeetingSummaryReplyParser.parse(
+                run.text, knownTurns: known, cli: cli, date: clock(),
+                textRevision: run.textRevision ?? 0)
+        } catch {
+            record(run, outcome: .failed, citations: 0, failed: 0, meeting: meeting)
+            throw MeetingAgentError.failed
+        }
+        record(
+            run, outcome: .answered, citations: notes.citations.count, failed: 0, meeting: meeting)
+        return notes
+    }
+
     // MARK: - Question
 
     private func ask(
@@ -205,11 +232,13 @@ actor MeetingAgentRunner: MeetingAgentRunning, MeetingAgentAvailabilityChecking,
     private enum Request: Sendable {
         case user(String)
         case speakerNames
+        case summary
 
         var kind: MeetingAgentRunKind {
             switch self {
             case .user: .question
             case .speakerNames: .speakerNames
+            case .summary: .summary
             }
         }
     }
@@ -306,6 +335,8 @@ actor MeetingAgentRunner: MeetingAgentRunning, MeetingAgentAvailabilityChecking,
             if shown.isEmpty { return .nothingToAsk }
             labels = Set(shown.map(\.label))
             question = MeetingAgentPrompts.speakerNamesQuestion(labels: shown)
+        case .summary:
+            question = MeetingAgentPrompts.summaryQuestion
         }
         let kind = request.kind
 
@@ -633,4 +664,11 @@ nonisolated struct MeetingAgentVersionCollector: MeetingAgentStreamParsing {
         if firstLine == nil { firstLine = String(decoding: line, as: UTF8.self) }
         return .more
     }
+}
+
+/// What the summary coordinator needs from the runner. Tests inject a fake.
+nonisolated protocol MeetingAgentSummarizing: MeetingAgentProbing {
+    func summarize(_ meeting: MeetingID, using cli: MeetingAgentCLI) async throws
+        -> MeetingSummaryNotes
+    func cancelRun(_ kind: MeetingAgentRunKind, for meeting: MeetingID) async
 }

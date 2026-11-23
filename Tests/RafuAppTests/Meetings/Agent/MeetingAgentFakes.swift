@@ -294,10 +294,11 @@ nonisolated struct AgentTestLibrary {
 
     /// A meeting with turns t1 (me), t2 (speaker-1, holds the marker),
     /// t3 (speaker-2), in `state`.
-    func makeMeeting(state: MeetingState = .ready, turnText: String? = nil, turnCount: Int = 3)
-        async throws -> MeetingID
-    {
-        let created = try await store.create(title: "Sync \(Self.marker)", startDate: Date())
+    func makeMeeting(
+        state: MeetingState = .ready, turnText: String? = nil, turnCount: Int = 3,
+        title: String = "Sync \(Self.marker)"
+    ) async throws -> MeetingID {
+        let created = try await store.create(title: title, startDate: Date())
         var turns: [MeetingTurn] = [
             MeetingTurn(
                 id: MeetingTurnID(1), track: .me, speaker: .me, start: 0, end: 4,
@@ -359,5 +360,51 @@ nonisolated struct AgentTestLibrary {
         let snapshots = (try? fileManager.contentsOfDirectory(atPath: snapshotRoot.path)) ?? []
         let runs = (try? fileManager.contentsOfDirectory(atPath: runsRoot.path)) ?? []
         return snapshots + runs
+    }
+}
+
+/// A summary agent with fixed probe results. `summarize` runs `behaviour`.
+nonisolated final class FakeSummarizer: MeetingAgentSummarizing {
+    typealias Behaviour = @Sendable (MeetingID, MeetingAgentCLI) async throws -> MeetingSummaryNotes
+
+    private struct State {
+        var results: [MeetingAgentCLI: MeetingAgentProbeResult]
+        var summarized: [MeetingAgentCLI] = []
+        var cancelled: [MeetingAgentRunKind] = []
+    }
+
+    private let state: Mutex<State>
+    private let behaviour: Behaviour
+    /// Yields at each start of `summarize`.
+    let started: AsyncStream<Void>
+    private let startedContinuation: AsyncStream<Void>.Continuation
+
+    init(
+        _ results: [MeetingAgentCLI: MeetingAgentProbeResult] = [
+            .claudeCode: .ready, .codex: .ready,
+        ], behaviour: @escaping Behaviour
+    ) {
+        state = Mutex(State(results: results))
+        self.behaviour = behaviour
+        (started, startedContinuation) = AsyncStream<Void>.makeStream()
+    }
+
+    var summarized: [MeetingAgentCLI] { state.withLock { $0.summarized } }
+    var cancelled: [MeetingAgentRunKind] { state.withLock { $0.cancelled } }
+
+    func probe(_ cli: MeetingAgentCLI, refresh: Bool) async -> MeetingAgentProbeResult {
+        state.withLock { $0.results[cli] ?? .notInstalled }
+    }
+
+    func summarize(_ meeting: MeetingID, using cli: MeetingAgentCLI) async throws
+        -> MeetingSummaryNotes
+    {
+        state.withLock { $0.summarized.append(cli) }
+        startedContinuation.yield()
+        return try await behaviour(meeting, cli)
+    }
+
+    func cancelRun(_ kind: MeetingAgentRunKind, for meeting: MeetingID) async {
+        state.withLock { $0.cancelled.append(kind) }
     }
 }
