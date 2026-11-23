@@ -213,20 +213,20 @@ struct MeetingsSettingsTests {
             installer: nil, deviceLister: FakeDeviceLister(), suiteName: name)
         let reader = UserDefaultsMeetingPreferences(suiteName: name)
 
-        model.textEngine = .whisperKit
+        model.textEngine = .nemotronEnglish
         model.speakerEngine = .speakerKit
         model.microphone = .device(uid: "abc")
         model.audioRetention = .days7
         model.agentAccessOn = true
 
-        #expect(reader.speechPreferences().textEngine == .whisperKit)
+        #expect(reader.speechPreferences().textEngine == .nemotronEnglish)
         #expect(reader.speechPreferences().speakerEngine == .speakerKit)
         #expect(reader.microphoneChoice() == .device(uid: "abc"))
         #expect(reader.audioRetention() == .days7)
         #expect(reader.agentAccess() == .on)
 
         let defaults = UserDefaults(suiteName: name)
-        #expect(defaults?.string(forKey: MeetingPreferenceKeys.textEngine) == "whisperkit")
+        #expect(defaults?.string(forKey: MeetingPreferenceKeys.textEngine) == "nemotron-en")
         #expect(defaults?.string(forKey: MeetingPreferenceKeys.speakerEngine) == "speakerkit")
         #expect(defaults?.string(forKey: MeetingPreferenceKeys.microphone) == "device:abc")
         #expect(defaults?.string(forKey: MeetingPreferenceKeys.audioRetention) == "days7")
@@ -238,7 +238,7 @@ struct MeetingsSettingsTests {
         // A second model reads what the first wrote.
         let second = MeetingsSettingsModel(
             installer: nil, deviceLister: FakeDeviceLister(), suiteName: name)
-        #expect(second.textEngine == .whisperKit)
+        #expect(second.textEngine == .nemotronEnglish)
         #expect(second.microphone == .device(uid: "abc"))
     }
 
@@ -249,7 +249,7 @@ struct MeetingsSettingsTests {
         let model = MeetingsSettingsModel(
             installer: nil, deviceLister: FakeDeviceLister(), suiteName: name)
         #expect(model.agentAccessOn == false)
-        #expect(model.textEngine == .nemotronEnglish)
+        #expect(model.textEngine == .whisperKit)
         #expect(model.speakerEngine == .nemotron3)
         #expect(model.microphone == .automatic)
         #expect(model.audioRetention == .untilDeleted)
@@ -270,6 +270,11 @@ struct MeetingsSettingsTests {
     @Test func runReadsAvailabilityAndDevices() async {
         let name = suite()
         defer { removeSuite(name) }
+        // WhisperKit is the default; this case is about a stored Nemotron
+        // choice that needs a download.
+        UserDefaults(suiteName: name)?.set(
+            MeetingTextEngineID.nemotronEnglish.rawValue,
+            forKey: MeetingPreferenceKeys.textEngine)
         let model = MeetingsSettingsModel(
             installer: FakeSettingsInstaller(),
             textEngines: [

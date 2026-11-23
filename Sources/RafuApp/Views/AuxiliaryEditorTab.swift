@@ -35,23 +35,25 @@ struct AuxiliaryEditorTabItem: View {
     let close: () -> Void
 
     var body: some View {
+        let title = tab.displayTitle
         AttachedWorkbenchTab(isSelected: isSelected, usesDocumentWidth: true, select: select) {
             HStack(spacing: 6) {
-                Label(tab.title, systemImage: tab.symbol)
+                Label(title, systemImage: tab.symbol)
                     .lineLimit(1)
+                    .truncationMode(.tail)
                     .workbenchTabLabel(
-                        tab.title, value: isSelected ? "Selected" : "", isSelected: isSelected,
+                        title, value: isSelected ? "Selected" : "", isSelected: isSelected,
                         select: select)
                 AttachedWorkbenchTabCloseButton(
-                    accessibilityLabel: "Close \(tab.title)",
-                    help: "Close \(tab.title)",
+                    accessibilityLabel: "Close \(title)",
+                    help: "Close \(title)",
                     action: close
                 )
                 .opacity(isHovering || isSelected ? 1 : 0)
             }
         }
         .onHover { isHovering = $0 }
-        .help(tab.title)
+        .help(title)
         .accessibilityElement(children: .contain)
     }
 }

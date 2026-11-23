@@ -1,10 +1,10 @@
 import RafuCore
 import SwiftUI
 
-/// The first-use sheet "Download speech models". The Meetings window shows
-/// it; this is its content. Neither button changes the stored engine choice,
-/// and a running download goes on after the sheet closes (the pane shows its
-/// progress).
+/// The first-use sheet "Choose a speech model". The Meetings window shows
+/// it; this is its content. WhisperKit comes first, as the recommended
+/// model. "Done" does not change the stored engine choice, and a running
+/// download goes on after the sheet closes (the pane shows its progress).
 struct MeetingsModelDownloadSheet: View {
     let feature: MeetingsFeature
     @Environment(\.dismiss) private var dismiss
@@ -20,20 +20,22 @@ struct MeetingsModelDownloadSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Download speech models").font(.title3.weight(.semibold))
+            Text("Choose a speech model").font(.title3.weight(.semibold))
             Text(
-                "Rafu uses Apple speech until a model is installed. Models stay on this Mac. Rafu downloads one only when you press Download."
+                "Rafu writes the text on this Mac. Apple speech is used until a model is installed."
             )
             .font(.callout).foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 6) {
+                RafuChip(text: "Recommended")
+                MeetingModelRow(model: .whisperLargeV3, settings: model)
+            }
+            Divider()
             MeetingModelRow(model: .nemotronEnglish1120, settings: model)
             Divider()
             MeetingModelRow(model: .nemotron3Fast32, settings: model)
             HStack {
                 Spacer()
-                Button("Use Apple speech for now") { dismiss() }
-                    .buttonStyle(RafuSecondaryButtonStyle())
-                    .help("Close this sheet. Rafu uses Apple speech until a model is installed.")
                 Button("Done") { dismiss() }
                     .buttonStyle(RafuProminentButtonStyle())
                     .keyboardShortcut(.defaultAction)

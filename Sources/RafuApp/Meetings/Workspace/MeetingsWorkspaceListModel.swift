@@ -33,3 +33,17 @@ final class MeetingsWorkspaceListModel {
         isLoaded = true
     }
 }
+
+extension MeetingsSessionModel {
+    /// Replaces the title cache with a full list. It writes only on a
+    /// change, so the tab labels do not redraw after each read.
+    func noteMeetingTitles(_ titles: [(MeetingID, String)]) {
+        let fresh = Dictionary(titles, uniquingKeysWith: { first, _ in first })
+        if fresh != meetingTitles { meetingTitles = fresh }
+    }
+
+    /// Sets the title of one meeting, for a tab that read one summary.
+    func noteMeetingTitle(_ meeting: MeetingID, _ title: String) {
+        if meetingTitles[meeting] != title { meetingTitles[meeting] = title }
+    }
+}

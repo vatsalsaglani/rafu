@@ -450,7 +450,8 @@ struct RafuConfirmPopup: View {
                 .padding(16)
             let order = Self.footerOrder(actions)
             let defaultID = defaultIndex.map { actions[$0].id }
-            RafuPopupFooter(hints: [("esc", "Cancel")]) {
+            // No "esc Cancel" hint: the footer has a Cancel button.
+            RafuPopupFooter {
                 ForEach(order.leading) { action in
                     actionButton(action, isDefault: false)
                 }

@@ -1,9 +1,10 @@
 import RafuCore
 import SwiftUI
 
-/// The left column of the Meetings window: the title, Record, the meeting
-/// list in groups, and "Open Folder…". It pins to the top; the empty state
-/// expands and centres.
+/// The left column of the Meetings window: the pinned "New Recording" row,
+/// then the meetings in the groups Today, Yesterday and Earlier. It pins
+/// to the top; the empty state expands and centres. The arrow keys move the
+/// selection while the list has focus.
 struct MeetingsListColumn: View {
     let feature: MeetingsFeature
     let model: MeetingsWindowModel
@@ -11,29 +12,22 @@ struct MeetingsListColumn: View {
     let onRename: (MeetingSummaryRecord) -> Void
     let onDelete: (MeetingSummaryRecord) -> Void
 
-    @Environment(\.openWindow) private var openWindow
+    @FocusState private var isListFocused: Bool
     @Environment(\.rafuTheme) private var theme
 
     private var session: MeetingsSessionModel { feature.session }
 
     var body: some View {
-        VStack(spacing: 0) {
-            RafuUtilityPanelHeader(title: "Meetings") {
-                EmptyView()
-            } actions: {
-                MeetingsRecordButton(feature: feature, commands: commands, prominent: false)
+        VStack(alignment: .leading, spacing: 0) {
+            MeetingsNewRecordingRow(session: session) {
+                session.windowSelection = nil
+                isListFocused = true
             }
-            Divider()
+            .padding(.horizontal, RafuMetrics.space2)
+            .padding(.top, RafuMetrics.space2)
+            .padding(.bottom, RafuMetrics.space1)
             listBody
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            Divider()
-            Button("Open Folder…", systemImage: "folder") {
-                openWindow(id: "workspace")
-            }
-            .buttonStyle(RafuSecondaryButtonStyle(compact: true))
-            .help("Open a workspace window beside Meetings")
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(RafuMetrics.space2)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
@@ -50,7 +44,7 @@ struct MeetingsListColumn: View {
                 Text("The meetings could not be read.")
                     .foregroundStyle(theme.palette.textSecondary)
                     .multilineTextAlignment(.center)
-                Button("Try again") { model.retry() }
+                Button("Try Again") { model.retry() }
                     .buttonStyle(RafuSecondaryButtonStyle(compact: true))
                     .help("Read the meetings again")
             }
@@ -59,8 +53,8 @@ struct MeetingsListColumn: View {
         case .loaded:
             if model.isEmpty {
                 RafuPanelEmptyState(
-                    icon: "waveform", title: "No meetings yet", message: "Press Record to start.",
-                    compact: true
+                    icon: "waveform", title: "No meetings yet",
+                    message: "Your recordings show here.", compact: true
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -70,145 +64,109 @@ struct MeetingsListColumn: View {
     }
 
     private var list: some View {
-        @Bindable var session = session
-        return List(selection: $session.windowSelection) {
-            ForEach(model.sections) { section in
-                Section(section.group.rawValue) {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 1) {
+                ForEach(model.sections) { section in
+                    MeetingsListSectionLabel(title: section.group.rawValue)
                     ForEach(section.rows) { row in
-                        MeetingsListRow(
-                            row: row,
-                            status: MeetingsWindowPresentation.status(
-                                for: row.summary, recorderState: session.recorderState,
-                                step: session.processing[row.id]),
-                            canDelete: commands.canDelete(row.id),
-                            onRename: { onRename(row.summary) },
-                            onDelete: { onDelete(row.summary) }
-                        )
-                        .tag(row.id)
+                        rowView(row)
                     }
                 }
             }
+            .padding(.horizontal, RafuMetrics.space2)
+            .padding(.bottom, RafuMetrics.space2)
         }
-        .listStyle(.sidebar)
-        .scrollContentBackground(.hidden)
+        .focusable()
+        .focused($isListFocused)
+        .focusEffectDisabled()
+        .onKeyPress(.downArrow) { moveSelection(by: 1) }
+        .onKeyPress(.upArrow) { moveSelection(by: -1) }
+        .accessibilityLabel("Meetings")
     }
-}
 
-/// The Record button: not active when a recording cannot start, with the
-/// reason as help text. It never starts a second recording.
-struct MeetingsRecordButton: View {
-    let feature: MeetingsFeature
-    let commands: MeetingsWindowCommands
-    let prominent: Bool
-
-    @Environment(\.rafuTheme) private var theme
-
-    var body: some View {
-        let session = feature.session
-        let reason = MeetingsWindowPresentation.recordDisabledReason(
-            availability: feature.availability, recorderState: session.recorderState,
-            isDriverInstalled: session.isDriverInstalled)
-        let button = Button {
-            commands.record()
-        } label: {
-            Label {
-                Text("Record")
-            } icon: {
-                Image(systemName: "circle.fill")
-                    .foregroundStyle(reason == nil ? theme.palette.error : theme.palette.textMuted)
-            }
+    private func rowView(_ row: MeetingsListRowModel) -> some View {
+        let isSelected = session.windowSelection == row.id
+        return MeetingsListRowButton(
+            meeting: row.id, title: row.title, readyLine: row.subtitle,
+            state: row.summary.state, session: session, isSelected: isSelected
+        ) {
+            session.windowSelection = row.id
+            isListFocused = true
         }
-        .disabled(reason != nil || !session.canStartRecording)
-        .help(reason ?? "Start a new recording")
-        .accessibilityLabel("Record")
-        .accessibilityHint(reason ?? "Starts a new recording")
-
-        if prominent {
-            button
-                .buttonStyle(RafuProminentButtonStyle())
-                .keyboardShortcut(.defaultAction)
-        } else {
-            button.buttonStyle(RafuSecondaryButtonStyle(compact: true))
-        }
-    }
-}
-
-/// One meeting row: the title, the subtitle, the state word with a shape,
-/// and a "…" menu that the keyboard reaches. The same actions are in the
-/// context menu.
-struct MeetingsListRow: View {
-    let row: MeetingsListRowModel
-    let status: MeetingsRowStatus?
-    let canDelete: Bool
-    let onRename: () -> Void
-    let onDelete: () -> Void
-
-    @Environment(\.rafuTheme) private var theme
-
-    var body: some View {
-        HStack(alignment: .top, spacing: RafuMetrics.space2) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(row.summary.title.isEmpty ? "Untitled meeting" : row.summary.title)
-                    .foregroundStyle(theme.palette.textPrimary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                Text(row.subtitle)
-                    .font(.caption)
-                    .foregroundStyle(theme.palette.textMuted)
-                    .lineLimit(1)
-                if let status {
-                    MeetingsStatusLabel(status: status)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            Menu {
-                actions
-            } label: {
-                Image(systemName: "ellipsis")
-            }
-            .menuStyle(.button)
-            .menuIndicator(.hidden)
-            .buttonStyle(RafuIconButtonStyle(size: 22, iconSize: 11))
-            .fixedSize()
-            .accessibilityLabel("Meeting actions")
-            .help("Rename or delete this meeting")
-        }
-        .padding(.vertical, 2)
-        .contextMenu { actions }
+        .contextMenu { rowMenu(row) }
     }
 
     @ViewBuilder
-    private var actions: some View {
-        Button("Rename…", action: onRename)
-        Button("Delete…", role: .destructive, action: onDelete)
-            .disabled(!canDelete)
+    private func rowMenu(_ row: MeetingsListRowModel) -> some View {
+        Button("Rename…") { onRename(row.summary) }
+        if MeetingsWorkspacePresentation.canRetry(
+            state: row.summary.state, meeting: row.id, recorder: session.recorderState,
+            step: session.processing[row.id])
+        {
+            Button("Try Again") { commands.retryProcessing(row.id) }
+        }
+        Divider()
+        Button("Delete…", role: .destructive) { onDelete(row.summary) }
+            .disabled(!commands.canDelete(row.id))
+    }
+
+    private func moveSelection(by step: Int) -> KeyPress.Result {
+        let next = MeetingsWindowPresentation.movedSelection(
+            session.windowSelection, by: step, in: model.orderedIDs)
+        guard next != session.windowSelection else { return .ignored }
+        session.windowSelection = next
+        return .handled
     }
 }
 
-/// A state word with its shape. The colour only repeats the word.
-struct MeetingsStatusLabel: View {
-    let status: MeetingsRowStatus
+/// A group label of the list: "Today", "Yesterday", "Earlier".
+private struct MeetingsListSectionLabel: View {
+    let title: String
 
     @Environment(\.rafuTheme) private var theme
 
     var body: some View {
-        Label {
-            Text(status.word)
-        } icon: {
-            Image(systemName: status.symbol)
-                .imageScale(.small)
-                .foregroundStyle(color)
-        }
-        .font(.caption)
-        .foregroundStyle(theme.palette.textSecondary)
+        Text(title)
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(theme.palette.textMuted)
+            .padding(.horizontal, RafuMetrics.space2)
+            .padding(.top, RafuMetrics.space3)
+            .padding(.bottom, RafuMetrics.space1)
+            .accessibilityAddTraits(.isHeader)
     }
+}
 
-    private var color: Color {
-        switch status {
-        case .recording: theme.palette.error
-        case .paused, .stopping: theme.palette.textSecondary
-        case .processing: theme.palette.accent
-        case .failed: theme.palette.warning
+/// The pinned first row: it clears the selection, so the start page shows.
+/// It is not active while a recording runs.
+private struct MeetingsNewRecordingRow: View {
+    let session: MeetingsSessionModel
+    let action: () -> Void
+
+    @Environment(\.rafuTheme) private var theme
+
+    var body: some View {
+        let isBusy = MeetingsWindowPresentation.isRecorderBusy(session.recorderState)
+        RafuHoverRow(isSelected: session.windowSelection == nil && !isBusy) {
+            Button(action: action) {
+                HStack(spacing: RafuMetrics.space2) {
+                    Image(systemName: "plus.circle")
+                        .font(.system(size: 12))
+                        .foregroundStyle(theme.palette.textSecondary)
+                        .frame(width: 16, height: 16)
+                        .accessibilityHidden(true)
+                    Text("New Recording")
+                        .font(.system(size: 13))
+                        .foregroundStyle(theme.palette.textPrimary)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, RafuMetrics.space2)
+                .padding(.vertical, RafuMetrics.space1 + 2)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
         }
+        .disabled(isBusy)
+        .help(isBusy ? "A recording is in progress" : "Show the start page")
+        .accessibilityHint(isBusy ? "A recording is in progress" : "Shows the start page")
     }
 }
