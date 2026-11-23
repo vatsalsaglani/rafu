@@ -24,10 +24,13 @@ nonisolated enum MeetingsListGroup: String, Hashable, Sendable, CaseIterable {
     case earlier = "Earlier"
 }
 
-/// One row of the meeting list: the summary and its precomputed subtitle.
+/// One row of the meeting list: the summary and its precomputed second
+/// line for a ready meeting ("Today 12:06 · 6 min").
 nonisolated struct MeetingsListRowModel: Hashable, Sendable, Identifiable {
     var summary: MeetingSummaryRecord
     var subtitle: String
+
+    var title: String { MeetingsWorkspacePresentation.displayTitle(summary.title) }
 
     var id: MeetingID { summary.id }
 }
@@ -67,7 +70,7 @@ nonisolated enum MeetingsRowStatus: Hashable, Sendable {
         case .paused: "pause.fill"
         case .stopping: "stop.fill"
         case .processing: "circle.dashed"
-        case .failed: "exclamationmark.triangle.fill"
+        case .failed: "exclamationmark.triangle"
         }
     }
 }
@@ -98,12 +101,13 @@ nonisolated struct MeetingsWarningRow: Hashable, Sendable, Identifiable {
     var id: MeetingsLiveWarning { warning }
 }
 
-/// What the processing view shows.
+/// What the content shows for a stopped meeting that is not ready.
 nonisolated enum MeetingsProcessingDisplay: Hashable, Sendable {
-    /// `fraction` is nil for an indeterminate step.
-    case running(label: String, fraction: Double?, showsModelNote: Bool)
-    /// Processing does not run. The view offers "Try again" and "Delete…".
-    case stopped(message: String)
+    /// The processing card: the step, the bar and the three steps.
+    case running(MeetingsProcessingProgress)
+    /// Processing does not run. The failed card offers "Try Again" and
+    /// "Delete…".
+    case stopped(MeetingsFailureReason)
 }
 
 nonisolated enum MeetingsWindowPresentation {
@@ -142,51 +146,13 @@ nonisolated enum MeetingsWindowPresentation {
         }
     }
 
-    /// For example "Today 10:30 · 31 min · 14.2 MB". A zero duration or a
-    /// zero size is left out.
+    /// For example "Today 10:30 · 31 min". A zero duration is left out.
     static func subtitle(
         for summary: MeetingSummaryRecord, now: Date, calendar: Calendar, locale: Locale
     ) -> String {
-        var style = Date.FormatStyle(date: .omitted, time: .shortened)
-        style.locale = locale
-        style.calendar = calendar
-        style.timeZone = calendar.timeZone
-        let time = summary.startDate.formatted(style)
-        let day: String
-        switch group(for: summary.startDate, now: now, calendar: calendar) {
-        case .today: day = "Today"
-        case .yesterday: day = "Yesterday"
-        case .earlier:
-            var dayStyle = Date.FormatStyle().month(.abbreviated).day()
-            dayStyle.locale = locale
-            dayStyle.calendar = calendar
-            dayStyle.timeZone = calendar.timeZone
-            day = summary.startDate.formatted(dayStyle)
-        }
-        var parts = ["\(day) \(time)"]
-        if let duration = durationText(summary.duration) { parts.append(duration) }
-        if let size = sizeText(summary.sizes.totalBytes) { parts.append(size) }
-        return parts.joined(separator: " · ")
-    }
-
-    /// "45 s", "31 min", "1 h 5 min"; nil for zero.
-    static func durationText(_ seconds: TimeInterval) -> String? {
-        guard seconds.isFinite, seconds >= 1 else { return nil }
-        if seconds < 60 { return "\(Int(seconds)) s" }
-        let minutes = Int((seconds / 60).rounded())
-        if minutes < 60 { return "\(minutes) min" }
-        let hours = minutes / 60
-        let rest = minutes % 60
-        return rest == 0 ? "\(hours) h" : "\(hours) h \(rest) min"
-    }
-
-    /// Decimal units, one fraction digit: "14.2 MB"; nil for zero.
-    static func sizeText(_ bytes: Int64) -> String? {
-        guard bytes > 0 else { return nil }
-        let value = Double(bytes)
-        if value < 1_000_000 { return "\(max(1, Int((value / 1_000).rounded()))) KB" }
-        if value < 1_000_000_000 { return String(format: "%.1f MB", value / 1_000_000) }
-        return String(format: "%.2f GB", value / 1_000_000_000)
+        MeetingsFormat.meetingLine(
+            start: summary.startDate, duration: summary.duration, now: now, calendar: calendar,
+            locale: locale)
     }
 
     /// The state of a row. The live recorder state wins, then a processing
@@ -206,9 +172,11 @@ nonisolated enum MeetingsWindowPresentation {
         if let step { return step.isFailed ? .failed : .processing }
         switch summary.state {
         case .ready: return nil
-        // Not live and no processing step: the recording or the processing
-        // was cut off (for example, the app quit). The user can try again.
-        case .recording, .paused, .processing, .failed: return .failed
+        case .failed: return .failed
+        // Not live and no processing step: the short moment between the
+        // last step and the library change. The launch sweep marks a
+        // meeting that was cut off (the app quit) as failed.
+        case .recording, .paused, .processing: return .processing
         }
     }
 
@@ -244,7 +212,31 @@ nonisolated enum MeetingsWindowPresentation {
         return nil
     }
 
+    /// The selection after an arrow key: the next or the previous meeting
+    /// in list order. Up from the first meeting clears the selection (the
+    /// start page); down from no selection takes the first meeting.
+    static func movedSelection(
+        _ selection: MeetingID?, by step: Int, in ordered: [MeetingID]
+    ) -> MeetingID? {
+        guard !ordered.isEmpty, step != 0 else { return selection }
+        guard let selection, let index = ordered.firstIndex(of: selection) else {
+            return step > 0 ? ordered.first : selection
+        }
+        let next = index + step
+        if next < 0 { return nil }
+        return ordered[min(next, ordered.count - 1)]
+    }
+
     // MARK: Record
+
+    /// True while a recording starts, runs, pauses or stops: "New
+    /// Recording" is not active then.
+    static func isRecorderBusy(_ state: MeetingRecorderState) -> Bool {
+        switch state {
+        case .starting, .recording, .paused, .stopping: true
+        case .idle, .problem: false
+        }
+    }
 
     /// Why Record is not active, or nil when it is.
     static func recordDisabledReason(
@@ -293,7 +285,8 @@ nonisolated enum MeetingsWindowPresentation {
     static func liveHeader(_ state: MeetingRecorderState) -> MeetingsLiveHeader? {
         switch state {
         case .starting: MeetingsLiveHeader(word: "Starting…", symbol: "circle", isRecording: false)
-        case .recording: MeetingsLiveHeader(word: "Rec", symbol: "circle.fill", isRecording: true)
+        case .recording:
+            MeetingsLiveHeader(word: "Recording", symbol: "circle.fill", isRecording: true)
         case .paused: MeetingsLiveHeader(word: "Paused", symbol: "pause.fill", isRecording: false)
         case .stopping:
             MeetingsLiveHeader(word: "Stopping…", symbol: "stop.fill", isRecording: false)
@@ -344,25 +337,24 @@ nonisolated enum MeetingsWindowPresentation {
         }
     }
 
-    /// For example "Text: Apple speech (Nemotron English is not installed)".
-    /// An engine with no availability entry is not installed.
+    /// For example "Text: WhisperKit, on this Mac.", or "Text: Apple
+    /// speech, on this Mac." with Download when the preferred engine needs
+    /// a model. An engine with no availability entry is not installed.
     static func engineLine(
         preference: MeetingTextEngineID,
         availability: [MeetingTextEngineID: MeetingEngineAvailability]
     ) -> MeetingsEngineLine {
         let used = resolvedFinalTextEngine(preference: preference, availability: availability)
+        let text = "Text: \(engineName(used)), on this Mac."
         if used == preference {
-            return MeetingsEngineLine(text: "Text: \(engineName(used))", offersDownload: false)
+            return MeetingsEngineLine(text: text, offersDownload: false)
         }
-        let preferred = engineName(preference)
         switch availability[preference] {
         case .unavailable(let reason):
             return MeetingsEngineLine(
-                text: "Text: \(engineName(used)) (\(preferred): \(reason))", offersDownload: false)
+                text: text + " \(engineName(preference)): \(reason)", offersDownload: false)
         case .needsModel, .ready, nil:
-            return MeetingsEngineLine(
-                text: "Text: \(engineName(used)) (\(preferred) is not installed)",
-                offersDownload: true)
+            return MeetingsEngineLine(text: text, offersDownload: true)
         }
     }
 
@@ -374,30 +366,21 @@ nonisolated enum MeetingsWindowPresentation {
 
     // MARK: Processing
 
+    /// The processing card, or the failed card. No step and no failure
+    /// reads as "Finishing" (never "Processing stopped"): the runner clears
+    /// the step just before the library reports the ready meeting.
     static func processingDisplay(
         state: MeetingState?, step: MeetingsProcessingStep?
     ) -> MeetingsProcessingDisplay {
-        if let step {
-            switch step {
-            case .failed: return .stopped(message: "Processing stopped. The audio is kept.")
-            case .text(_, let fraction):
-                return .running(
-                    label: step.label, fraction: min(max(fraction, 0), 1), showsModelNote: false)
-            case .preparingModel:
-                return .running(label: step.label, fraction: nil, showsModelNote: true)
-            case .waiting, .speakers, .finishing:
-                return .running(label: step.label, fraction: nil, showsModelNote: false)
-            }
+        if let reason = MeetingsStatePresentation.failure(state: state, step: step) {
+            return .stopped(reason)
         }
-        if case .failed = state {
-            return .stopped(message: "Processing stopped. The audio is kept.")
-        }
-        return .stopped(message: "Processing stopped. Try again.")
+        return .running(MeetingsStatePresentation.processingProgress(step: step))
     }
 }
 
 /// The first-use download sheet rule: shown one time, when the sheet exists,
-/// Meetings is available, and Nemotron English is not installed.
+/// Meetings is available, and the WhisperKit model is not installed.
 nonisolated enum MeetingsFirstUseSheetRule {
     static func shouldShow(
         hasSheet: Bool, isAvailable: Bool, isModelInstalled: Bool, defaults: UserDefaults

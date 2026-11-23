@@ -36,6 +36,18 @@ nonisolated enum WorkspaceAuxiliaryTab: Hashable, Identifiable {
         if case .gitDiff = self { return true }
         return false
     }
+
+    /// The tab label. A meeting tab shows the meeting title from the
+    /// observed title cache of the Meetings session, else "Meeting".
+    @MainActor
+    var displayTitle: String {
+        if case .meeting(let meeting) = self,
+            let title = MeetingsFeatureFactory.shared.feature?.session.meetingTitles[meeting]
+        {
+            return title
+        }
+        return title
+    }
 }
 
 /// Names the diff that `WorkspaceSession.gitOpenDiff` holds. Equality is the

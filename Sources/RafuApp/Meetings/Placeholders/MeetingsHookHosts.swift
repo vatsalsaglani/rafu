@@ -46,6 +46,10 @@ struct MeetingsNavigatorPanelView: View {
         VStack(spacing: 0) {
             RafuUtilityPanelHeader(title: "Meetings") {
                 EmptyView()
+            } actions: {
+                if let feature = factory.feature {
+                    MeetingsNavigatorHeaderActions(feature: feature)
+                }
             }
             Group {
                 if let feature = factory.feature, let hook = feature.navigatorView {

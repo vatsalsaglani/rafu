@@ -36,13 +36,11 @@ struct MeetingsWelcomeCardView: View {
                     .help("Open Meetings (⌘⇧M)")
                 }
                 ForEach(MeetingsWorkspacePresentation.newest(list.rows)) { row in
-                    RafuHoverRow {
-                        Button {
-                            openMeetings(selecting: row.id)
-                        } label: {
-                            MeetingsListRowLabel(row: row, session: session)
-                        }
-                        .buttonStyle(.plain)
+                    MeetingsListRowButton(
+                        meeting: row.id, title: row.title, readyLine: row.readyLine,
+                        state: row.state, session: session
+                    ) {
+                        openMeetings(selecting: row.id)
                     }
                 }
             }

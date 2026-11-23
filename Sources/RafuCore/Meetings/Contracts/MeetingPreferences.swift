@@ -18,7 +18,9 @@ public struct MeetingSpeechPreferences: Hashable, Codable, Sendable {
     public var textEngine: MeetingTextEngineID
     public var speakerEngine: MeetingSpeakerEngineID
 
-    public static let defaultTextEngine: MeetingTextEngineID = .nemotronEnglish
+    /// WhisperKit: the recommended model of the first-use sheet. Until it is
+    /// installed, the final text uses Apple speech.
+    public static let defaultTextEngine: MeetingTextEngineID = .whisperKit
     public static let defaultSpeakerEngine: MeetingSpeakerEngineID = .nemotron3
 
     public init(

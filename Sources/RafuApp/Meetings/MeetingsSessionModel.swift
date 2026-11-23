@@ -153,6 +153,10 @@ final class MeetingsSessionModel {
     /// The meeting that the Meetings window shows.
     var windowSelection: MeetingID?
 
+    /// The display title of each listed meeting, for the meeting tab label.
+    /// The lists write it after each read; titles only, never text.
+    var meetingTitles: [MeetingID: String] = [:]
+
     /// True after the pipeline package installed its handlers.
     var isDriverInstalled = false
     @ObservationIgnored var handlers = MeetingsSessionHandlers()

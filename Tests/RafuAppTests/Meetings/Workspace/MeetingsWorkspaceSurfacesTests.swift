@@ -1,6 +1,8 @@
 import Foundation
+import Observation
 import RafuCore
 import SwiftUI
+import Synchronization
 import Testing
 
 @testable import RafuApp
@@ -61,6 +63,42 @@ struct MeetingsWorkspaceSurfacesTests {
         // A second click selects the same tab and adds no second one.
         workspace.openMeetingTab(meeting)
         #expect(workspace.auxiliaryTabs == [.meeting(meeting)])
+    }
+
+    @MainActor
+    @Test("The title cache holds each listed title and writes only on a change")
+    func titleCache() {
+        let model = MeetingsSessionModel()
+        let first = MeetingID()
+        let second = MeetingID()
+        model.noteMeetingTitles([(first, "Weekly"), (second, "Standup")])
+        #expect(model.meetingTitles == [first: "Weekly", second: "Standup"])
+        model.noteMeetingTitle(first, "Weekly sync")
+        #expect(model.meetingTitles[first] == "Weekly sync")
+
+        // The same list again: no write, so no tab label redraws.
+        let changed = Mutex(false)
+        withObservationTracking {
+            _ = model.meetingTitles
+        } onChange: {
+            changed.withLock { $0 = true }
+        }
+        model.noteMeetingTitles([(first, "Weekly sync"), (second, "Standup")])
+        #expect(!changed.withLock { $0 })
+        // A deleted meeting leaves the cache with the next full list.
+        model.noteMeetingTitles([(second, "Standup")])
+        #expect(changed.withLock { $0 })
+        #expect(model.meetingTitles == [second: "Standup"])
+    }
+
+    @MainActor
+    @Test("A meeting tab label falls back to Meeting; other tabs keep their title")
+    func tabLabel() {
+        #expect(WorkspaceAuxiliaryTab.settings.displayTitle == "Settings")
+        let unknown = MeetingID()
+        if MeetingsFeatureFactory.shared.feature?.session.meetingTitles[unknown] == nil {
+            #expect(WorkspaceAuxiliaryTab.meeting(unknown).displayTitle == "Meeting")
+        }
     }
 
     @MainActor

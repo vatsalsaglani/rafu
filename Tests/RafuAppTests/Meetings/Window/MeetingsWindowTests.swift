@@ -1,5 +1,7 @@
 import Foundation
+import Observation
 import RafuCore
+import Synchronization
 import Testing
 
 @testable import RafuApp
@@ -54,14 +56,14 @@ struct MeetingsWindowPresentationTests {
             ).isEmpty)
     }
 
-    @Test("Subtitle: day, time, duration and size")
+    @Test("Subtitle: day, time and duration; no size")
     func subtitle() {
         // 10:30 UTC on the same day.
         let row = Self.summary("a", hoursAgo: 4.5, duration: 31 * 60, bytes: 14_200_000)
         #expect(
             MeetingsWindowPresentation.subtitle(
                 for: row, now: Self.now, calendar: Self.calendar, locale: Self.locale)
-                == "Today 10:30 · 31 min · 14.2 MB")
+                == "Today 10:30 · 31 min")
         let live = Self.summary("b", hoursAgo: 20)
         #expect(
             MeetingsWindowPresentation.subtitle(
@@ -69,27 +71,16 @@ struct MeetingsWindowPresentationTests {
                 == "Yesterday 19:00")
     }
 
-    @Test("Duration and size texts")
-    func durationAndSize() {
-        #expect(MeetingsWindowPresentation.durationText(0) == nil)
-        #expect(MeetingsWindowPresentation.durationText(45) == "45 s")
-        #expect(MeetingsWindowPresentation.durationText(31 * 60) == "31 min")
-        #expect(MeetingsWindowPresentation.durationText(65 * 60) == "1 h 5 min")
-        #expect(MeetingsWindowPresentation.durationText(120 * 60) == "2 h")
-        #expect(MeetingsWindowPresentation.sizeText(0) == nil)
-        #expect(MeetingsWindowPresentation.sizeText(400_000) == "400 KB")
-        #expect(MeetingsWindowPresentation.sizeText(14_200_000) == "14.2 MB")
-        #expect(MeetingsWindowPresentation.sizeText(1_250_000_000) == "1.25 GB")
-    }
-
     @Test("State word for each stored state, with no live recording and no step")
     func storedStateWords() {
+        // No step and not failed: the moment before the library change
+        // ("Finishing"), never a failure.
         let cases: [(MeetingState, String?)] = [
             (.ready, nil),
-            (.processing, "Stopped — try again"),
+            (.processing, "Processing"),
             (.failed(reasonCode: "x"), "Stopped — try again"),
-            (.recording, "Stopped — try again"),
-            (.paused, "Stopped — try again"),
+            (.recording, "Processing"),
+            (.paused, "Processing"),
         ]
         for (state, word) in cases {
             let row = Self.summary("a", hoursAgo: 1, state: state)
@@ -215,7 +206,8 @@ struct MeetingsWindowPresentationTests {
 
     @Test("Live header, timer, meter value, engine names")
     func liveTexts() {
-        #expect(MeetingsWindowPresentation.liveHeader(.recording(MeetingID()))?.word == "Rec")
+        #expect(
+            MeetingsWindowPresentation.liveHeader(.recording(MeetingID()))?.word == "Recording")
         #expect(MeetingsWindowPresentation.liveHeader(.paused(MeetingID()))?.word == "Paused")
         #expect(MeetingsWindowPresentation.liveHeader(.starting)?.word == "Starting…")
         #expect(MeetingsWindowPresentation.liveHeader(.stopping(MeetingID()))?.word == "Stopping…")
@@ -241,39 +233,137 @@ struct MeetingsWindowPresentationTests {
     @Test("Engine line names the engine in use and offers Download")
     func engineLine() {
         let missing = MeetingsWindowPresentation.engineLine(
-            preference: .nemotronEnglish, availability: [.appleSpeech: .ready])
-        #expect(missing.text == "Text: Apple speech (Nemotron English is not installed)")
+            preference: .whisperKit, availability: [.appleSpeech: .ready])
+        #expect(missing.text == "Text: Apple speech, on this Mac.")
         #expect(missing.offersDownload)
         let ready = MeetingsWindowPresentation.engineLine(
-            preference: .nemotronEnglish,
-            availability: [.appleSpeech: .ready, .nemotronEnglish: .ready])
-        #expect(ready == MeetingsEngineLine(text: "Text: Nemotron English", offersDownload: false))
+            preference: .whisperKit,
+            availability: [.appleSpeech: .ready, .whisperKit: .ready])
+        #expect(
+            ready
+                == MeetingsEngineLine(text: "Text: WhisperKit, on this Mac.", offersDownload: false)
+        )
         let unavailable = MeetingsWindowPresentation.engineLine(
             preference: .whisperKit, availability: [.whisperKit: .unavailable(reason: "No helper")])
-        #expect(unavailable.text == "Text: Apple speech (WhisperKit: No helper)")
+        #expect(unavailable.text == "Text: Apple speech, on this Mac. WhisperKit: No helper")
         #expect(!unavailable.offersDownload)
     }
 
     @Test("Processing display for each step and state")
     func processingDisplay() {
-        #expect(
-            MeetingsWindowPresentation.processingDisplay(
+        guard
+            case .running(let text) = MeetingsWindowPresentation.processingDisplay(
                 state: .processing, step: .text(track: .them, fraction: 0.25))
-                == .running(
-                    label: "Writing the text (Them) 25%", fraction: 0.25, showsModelNote: false))
+        else {
+            Issue.record("expected the processing card")
+            return
+        }
+        // The Them track is the second half of the text step.
+        #expect(text.label == "Writing the text · 63%")
+        #expect(text.fraction == 0.625)
+        #expect(text.stepTitle == "Writing the text")
+        #expect(text.stages.map(\.progress) == [.current, .waiting, .waiting])
         #expect(
-            MeetingsWindowPresentation.processingDisplay(state: .processing, step: .preparingModel)
-                == .running(label: "Preparing model", fraction: nil, showsModelNote: true))
+            text.stages.map(\.title) == ["Writing the text", "Finding the speakers", "Finishing"])
+
+        guard
+            case .running(let model) = MeetingsWindowPresentation.processingDisplay(
+                state: .processing, step: .preparingModel)
+        else {
+            Issue.record("expected the processing card")
+            return
+        }
+        #expect(model.fraction == nil)
+        #expect(model.showsModelNote)
+
+        guard
+            case .running(let speakers) = MeetingsWindowPresentation.processingDisplay(
+                state: .processing, step: .speakers)
+        else {
+            Issue.record("expected the processing card")
+            return
+        }
+        #expect(speakers.label == "Finding the speakers")
+        #expect(speakers.stages.map(\.progress) == [.done, .current, .waiting])
+
         #expect(
             MeetingsWindowPresentation.processingDisplay(
-                state: .processing, step: .failed(reasonCode: "x"))
-                == .stopped(message: "Processing stopped. The audio is kept."))
+                state: .processing, step: .failed(reasonCode: MeetingProcessingFailure.noAudio))
+                == .stopped(
+                    MeetingsFailureReason(
+                        sentence: "The recording has no sound.",
+                        short: "No sound in the recording")))
         #expect(
-            MeetingsWindowPresentation.processingDisplay(state: .failed(reasonCode: "x"), step: nil)
-                == .stopped(message: "Processing stopped. The audio is kept."))
+            MeetingsWindowPresentation.processingDisplay(
+                state: .failed(reasonCode: MeetingProcessingFailure.cancelled), step: nil)
+                == .stopped(
+                    MeetingsFailureReason(
+                        sentence: "Processing was cancelled.", short: "Processing was cancelled")
+                ))
         #expect(
-            MeetingsWindowPresentation.processingDisplay(state: .processing, step: nil)
-                == .stopped(message: "Processing stopped. Try again."))
+            MeetingsWindowPresentation.processingDisplay(
+                state: .failed(reasonCode: MeetingProcessingFailure.textFailed), step: nil)
+                == .stopped(
+                    MeetingsFailureReason(
+                        sentence: "The speech model stopped.", short: "The speech model stopped")
+                ))
+    }
+
+    /// Regression: the runner clears the step a moment before the library
+    /// reports the ready meeting. The content showed "Processing stopped.
+    /// Try again." in that moment.
+    @Test("No step and no failure reads as Finishing, never as stopped")
+    func noStepIsFinishing() {
+        let states: [MeetingState?] = [.processing, .recording, .paused, nil]
+        for state in states {
+            guard
+                case .running(let progress) = MeetingsWindowPresentation.processingDisplay(
+                    state: state, step: nil)
+            else {
+                Issue.record("\(String(describing: state)) must not read as stopped")
+                continue
+            }
+            #expect(progress.label == "Finishing")
+            #expect(progress.fraction == nil)
+            #expect(progress.stages.map(\.progress) == [.done, .done, .current])
+        }
+        guard
+            case .running(let finishing) = MeetingsWindowPresentation.processingDisplay(
+                state: .processing, step: .finishing)
+        else {
+            Issue.record("expected the processing card")
+            return
+        }
+        #expect(finishing.label == "Finishing")
+    }
+
+    @Test("The arrow keys move the selection in list order")
+    func movedSelection() {
+        let first = MeetingID()
+        let second = MeetingID()
+        let third = MeetingID()
+        let ordered = [first, second, third]
+        func move(_ selection: MeetingID?, _ step: Int) -> MeetingID? {
+            MeetingsWindowPresentation.movedSelection(selection, by: step, in: ordered)
+        }
+        #expect(move(nil, 1) == first)
+        #expect(move(first, 1) == second)
+        #expect(move(third, 1) == third)
+        #expect(move(second, -1) == first)
+        #expect(move(first, -1) == nil)
+        #expect(move(nil, -1) == nil)
+        #expect(MeetingsWindowPresentation.movedSelection(first, by: 1, in: []) == first)
+    }
+
+    @Test("New Recording is not active while the recorder is busy")
+    func recorderBusy() {
+        let id = MeetingID()
+        #expect(MeetingsWindowPresentation.isRecorderBusy(.starting))
+        #expect(MeetingsWindowPresentation.isRecorderBusy(.recording(id)))
+        #expect(MeetingsWindowPresentation.isRecorderBusy(.paused(id)))
+        #expect(MeetingsWindowPresentation.isRecorderBusy(.stopping(id)))
+        #expect(!MeetingsWindowPresentation.isRecorderBusy(.idle))
+        #expect(!MeetingsWindowPresentation.isRecorderBusy(.problem(.deviceLost)))
     }
 
     // MARK: 4. Warnings
@@ -317,7 +407,7 @@ struct MeetingsWindowPresentationTests {
 
     // MARK: 6. No transcript outside the live view
 
-    @Test("Only the live view reads turns; the window model holds no turn text")
+    @Test("No window file reads turns; the live body is in the shared status views")
     func noTurnTextInWindowModel() throws {
         let folder = Self.packageRoot().appending(path: "Sources/RafuApp/Meetings/Window")
         let files = try FileManager.default.contentsOfDirectory(
@@ -327,11 +417,9 @@ struct MeetingsWindowPresentationTests {
         for file in files {
             let text = try String(contentsOf: file, encoding: .utf8)
             #expect(!text.contains("MeetingTurn"), "\(file.lastPathComponent) uses MeetingTurn")
-            if file.lastPathComponent != "MeetingsLiveView.swift" {
-                #expect(
-                    !text.contains("liveTurns") && !text.contains("MeetingLiveTurn"),
-                    "\(file.lastPathComponent) reads live turns")
-            }
+            #expect(
+                !text.contains("liveTurns") && !text.contains("MeetingLiveTurn"),
+                "\(file.lastPathComponent) reads live turns")
         }
     }
 
@@ -467,6 +555,36 @@ struct MeetingsWindowActionTests {
         #expect(empty == [])
         #expect(model.isEmpty)
         #expect(model.loadState == .loaded)
+    }
+
+    /// Regression: the summaries were not observed, so the content column
+    /// kept a stale "processing" summary after a reload and showed a false
+    /// "Processing stopped".
+    @Test("A reload that changes a summary redraws a reader of that summary")
+    func summariesAreObserved() {
+        let model = MeetingsWindowModel()
+        let id = MeetingID()
+        let start = Date()
+        model.apply(
+            [
+                MeetingSummaryRecord(
+                    id: id, title: "A", startDate: start, duration: 60, state: .processing)
+            ], now: start, calendar: .current, locale: .current)
+        let changed = Mutex(false)
+        withObservationTracking {
+            _ = model.summary(for: id)
+        } onChange: {
+            changed.withLock { $0 = true }
+        }
+        model.apply(
+            [
+                MeetingSummaryRecord(
+                    id: id, title: "A", startDate: start, duration: 60, state: .ready)
+            ],
+            now: start, calendar: .current, locale: .current)
+        #expect(changed.withLock { $0 })
+        #expect(model.summary(for: id)?.state == .ready)
+        #expect(model.orderedIDs == [id])
     }
 
     // MARK: 7. Registration

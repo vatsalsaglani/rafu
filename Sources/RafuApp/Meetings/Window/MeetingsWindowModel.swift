@@ -19,9 +19,16 @@ final class MeetingsWindowModel {
     /// Goes up when the user presses "Try again" after a failed read.
     private(set) var retryToken = 0
 
-    @ObservationIgnored private var summaries: [MeetingID: MeetingSummaryRecord] = [:]
+    /// Observed: the content column reads a summary for the selection, and
+    /// must redraw when a reload changes its state (for example processing
+    /// to ready). Ignored, the column kept the old "processing" summary after
+    /// the step was cleared and showed a false "Processing stopped".
+    private(set) var summaries: [MeetingID: MeetingSummaryRecord] = [:]
 
     var isEmpty: Bool { sections.isEmpty }
+
+    /// The listed meetings in list order (newest first), for the arrow keys.
+    var orderedIDs: [MeetingID] { sections.flatMap { $0.rows.map(\.id) } }
 
     func summary(for meeting: MeetingID?) -> MeetingSummaryRecord? {
         meeting.flatMap { summaries[$0] }

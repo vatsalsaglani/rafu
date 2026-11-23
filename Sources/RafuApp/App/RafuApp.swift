@@ -48,7 +48,7 @@ struct RafuApplication: App {
             MeetingsWindowRoot()
                 .rafuMotionScope()
         }
-        .defaultSize(width: 900, height: 620)
+        .defaultSize(width: 1180, height: 760)
         .commandsRemoved()
 
         Settings {

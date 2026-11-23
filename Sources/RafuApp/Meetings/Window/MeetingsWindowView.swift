@@ -2,15 +2,28 @@ import RafuCore
 import SwiftUI
 
 /// The Meetings window (the `.windowView` hook): the meeting list on the
-/// left and the content on the right. On macOS 15 it shows the placeholder.
+/// frame and the content on a raised deck card, like a workspace window.
+/// It follows Settings ▸ Appearance ▸ Window background: in Frosted, one
+/// behind-window blur and one tint lie under the frame. On macOS 15 it
+/// shows the placeholder.
 struct MeetingsWindowView: View {
     let feature: MeetingsFeature
 
     @AppStorage("themeChoice") private var themeChoice = RafuThemeChoice.system.rawValue
     @AppStorage("themeRevision") private var themeRevision = 0
+    @AppStorage(WindowSurfacePreference.styleKey) private var windowSurfaceStyle =
+        WindowSurfacePreference.Style.solid.rawValue
+    @AppStorage(WindowSurfacePreference.frostLevelKey) private var windowSurfaceFrost =
+        WindowSurfacePreference.FrostLevel.balanced.rawValue
+    @AppStorage(WindowSurfacePreference.frostContentKey) private var windowSurfaceFrostsContent =
+        true
     @Environment(\.colorScheme) private var systemScheme
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
 
     var body: some View {
+        let resolvedTheme = theme
+        let surface = windowSurface(resolvedTheme)
         Group {
             if feature.availability.isAvailable {
                 MeetingsWindowSplitView(feature: feature)
@@ -18,8 +31,34 @@ struct MeetingsWindowView: View {
                 MeetingsPlaceholderView(availability: feature.availability)
             }
         }
-        .rafuTheme(theme)
+        .background {
+            // Frosted: the one blur and the one frame tint, below every
+            // frame surface (which then paints nothing). Solid: nothing
+            // here; the frame surfaces paint the frame.
+            if surface.isFrosted {
+                WindowFrostBackdrop(
+                    tint: resolvedTheme.palette.appBackground,
+                    tintOpacity: surface.tintOpacity
+                )
+                .ignoresSafeArea()
+            }
+        }
+        .environment(\.rafuWindowSurface, surface)
+        .rafuTheme(resolvedTheme)
         .preferredColorScheme(preferredColorScheme)
+    }
+
+    /// Resolved like a workspace window: Reduce Transparency and Increase
+    /// Contrast force Solid.
+    private func windowSurface(_ theme: RafuTheme) -> WindowSurfacePreference.Resolved {
+        WindowSurfacePreference.resolve(
+            style: windowSurfaceStyle,
+            level: windowSurfaceFrost,
+            frostsContent: windowSurfaceFrostsContent,
+            isDark: theme.isDark,
+            reduceTransparency: reduceTransparency,
+            increaseContrast: colorSchemeContrast == .increased
+        )
     }
 
     private var theme: RafuTheme {
@@ -62,15 +101,27 @@ private struct MeetingsWindowSplitView: View {
             .frame(width: 240)
             .frame(maxHeight: .infinity, alignment: .top)
             .rafuFrameSurface(.sidebar)
-            Divider()
-            MeetingsContentColumn(
-                feature: feature, model: model, commands: commands,
-                onDownload: { showsDownloadSheet = true },
-                onDelete: { deleteTarget = $0 }
+            WorkbenchDeckSurface {
+                MeetingsContentColumn(
+                    feature: feature, model: model, commands: commands,
+                    onDownload: { showsDownloadSheet = true },
+                    onDelete: { deleteTarget = $0 }
+                )
+                .frame(minWidth: 360, maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .rafuDeckFill(theme.palette.editorBackground, .deck)
+            }
+            .padding(
+                EdgeInsets(
+                    top: RafuMetrics.space2, leading: RafuMetrics.deckInsetLeading,
+                    bottom: RafuMetrics.deckInsetBottom, trailing: RafuMetrics.deckInsetTrailing)
             )
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            .background(theme.palette.editorBackground)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .layoutPriority(1)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        // One frame fill under the list and the deck lane, so the deck's
+        // shadow shows on the frame. Frosted: it paints nothing.
+        .rafuFrameSurface(.app)
         .task(
             id: ReloadKey(
                 revision: session.libraryRevision, live: session.liveMeeting,
@@ -80,6 +131,8 @@ private struct MeetingsWindowSplitView: View {
             session.windowSelection = MeetingsWindowPresentation.validSelection(
                 session.windowSelection, listed: listed, liveMeeting: session.liveMeeting,
                 processing: Set(session.processing.keys))
+            session.noteMeetingTitles(
+                model.sections.flatMap(\.rows).map { ($0.id, $0.title) })
         }
         .onChange(of: session.liveMeeting) { old, new in
             if old == nil, let new { session.windowSelection = new }
@@ -139,7 +192,7 @@ private struct MeetingsWindowSplitView: View {
         guard !didCheckFirstUse else { return }
         didCheckFirstUse = true
         let installed =
-            feature.modelInstaller?.state(for: .nemotronEnglish1120)?.isInstalled == true
+            feature.modelInstaller?.state(for: .whisperLargeV3)?.isInstalled == true
         if MeetingsFirstUseSheetRule.shouldShow(
             hasSheet: feature.modelDownloadSheet != nil,
             isAvailable: feature.availability.isAvailable, isModelInstalled: installed,
@@ -154,8 +207,8 @@ private struct MeetingsWindowSplitView: View {
     }
 }
 
-/// The content column: the banner, then the start, live, processing or
-/// detail view for the selection.
+/// The content column: the banner, then the start page, the live body, the
+/// processing or failed card, or the detail view for the selection.
 private struct MeetingsContentColumn: View {
     let feature: MeetingsFeature
     let model: MeetingsWindowModel
@@ -192,11 +245,21 @@ private struct MeetingsContentColumn: View {
                 feature: feature, commands: commands, onDownload: onDownload,
                 microphoneReader: MeetingsCoreAudioMicrophoneReader())
         case .live:
-            MeetingsLiveView(session: session, commands: commands, title: summary?.title)
+            MeetingLiveBody(session: session, commands: commands, title: summary?.title)
         case .processing(let meeting):
-            MeetingsProcessingView(
-                meeting: meeting, summary: summary, step: step, commands: commands,
-                onDelete: { summary.map(onDelete) })
+            let title = MeetingsWorkspacePresentation.displayTitle(summary?.title ?? "")
+            switch MeetingsWindowPresentation.processingDisplay(state: summary?.state, step: step) {
+            case .running(let progress):
+                MeetingProcessingCard(title: title, progress: progress) {
+                    commands.cancelProcessing(meeting)
+                }
+            case .stopped(let reason):
+                MeetingFailedCard(
+                    title: title, reason: reason,
+                    canDelete: summary != nil && commands.canDelete(meeting),
+                    onRetry: { commands.retryProcessing(meeting) },
+                    onDelete: { summary.map(onDelete) })
+            }
         case .detail(let meeting):
             if let hook = feature.meetingDetailView {
                 hook(feature, meeting)

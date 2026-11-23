@@ -73,6 +73,8 @@ struct RafuPopupComponentsTests {
         #expect(popup.contains("cancelButton(isDefault: defaultIndex == nil)"))
         #expect(popup.contains(".onExitCommand(perform: cancel)"))
         #expect(popup.contains("Self.footerOrder(actions)"))
+        // The footer has a Cancel button, so no "esc Cancel" hint repeats it.
+        #expect(!popup.contains("(\"esc\", \"Cancel\")"))
         // The destructive branch has no keyboard shortcut.
         let destructive = try #require(popup.range(of: "if action.isDestructive {"))
         let next = try #require(

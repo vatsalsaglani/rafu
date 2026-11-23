@@ -31,39 +31,48 @@ struct MeetingsWorkspacePresentationTests {
 
     // MARK: Rows
 
-    @Test("A row subtitle has the day, the time and the length")
+    @Test("A row second line has the day, the time and the length")
     func rowSubtitle() throws {
         let rows = MeetingsWorkspacePresentation.rows(
             from: [Self.summary(start: Self.date(hour: 10, minute: 30))],
             now: Self.now, calendar: Self.calendar, locale: Self.locale)
         let row = try #require(rows.first)
-        #expect(row.dateText == "Today 10:30")
-        #expect(row.durationText == "31 min")
-        #expect(
-            MeetingsWorkspacePresentation.subtitle(row: row, badge: nil) == "Today 10:30 · 31 min")
+        #expect(row.readyLine == "Today 10:30 · 31 min")
+        let short = MeetingsWorkspacePresentation.rows(
+            from: [Self.summary(start: Self.date(hour: 10, minute: 30), duration: 0)],
+            now: Self.now, calendar: Self.calendar, locale: Self.locale)
+        #expect(short.first?.readyLine == "Today 10:30")
     }
 
     @Test("Yesterday and an older day read plainly")
     func olderDays() {
-        let yesterday = MeetingsWorkspacePresentation.dateText(
-            for: Self.date(hour: 16, minute: 5, daysAgo: 1), now: Self.now,
+        let yesterday = MeetingsFormat.dayAndTime(
+            Self.date(hour: 16, minute: 5, daysAgo: 1), now: Self.now,
             calendar: Self.calendar, locale: Self.locale)
         #expect(yesterday == "Yesterday 16:05")
-        let older = MeetingsWorkspacePresentation.dateText(
-            for: Self.date(hour: 9, minute: 0, daysAgo: 5), now: Self.now,
+        let older = MeetingsFormat.dayAndTime(
+            Self.date(hour: 9, minute: 0, daysAgo: 5), now: Self.now,
             calendar: Self.calendar, locale: Self.locale)
+        // The time follows the user's clock setting ("9:00" or "09:00").
+        #expect(older.hasPrefix("16 Nov "))
         #expect(older.hasSuffix("9:00"))
-        #expect(!older.hasPrefix("Today"))
-        #expect(!older.hasPrefix("Yesterday"))
+        let lastYear = MeetingsFormat.day(
+            Self.date(hour: 9, minute: 0, daysAgo: 400), now: Self.now,
+            calendar: Self.calendar, locale: Self.locale)
+        #expect(lastYear.hasSuffix("2025"))
     }
 
-    @Test("Length text")
+    @Test("One duration format: seconds, minutes, hours; no zero")
     func durationText() {
-        #expect(MeetingsWorkspacePresentation.durationText(0) == "Under 1 min")
-        #expect(MeetingsWorkspacePresentation.durationText(59) == "Under 1 min")
-        #expect(MeetingsWorkspacePresentation.durationText(60) == "1 min")
-        #expect(MeetingsWorkspacePresentation.durationText(3_900) == "1 h 05 min")
-        #expect(MeetingsWorkspacePresentation.durationText(.nan) == "Under 1 min")
+        #expect(MeetingsFormat.duration(0) == nil)
+        #expect(MeetingsFormat.duration(0.4) == nil)
+        #expect(MeetingsFormat.duration(.nan) == nil)
+        #expect(MeetingsFormat.duration(32) == "32 s")
+        #expect(MeetingsFormat.duration(59.9) == "59 s")
+        #expect(MeetingsFormat.duration(60) == "1 min")
+        #expect(MeetingsFormat.duration(6 * 60 + 10) == "6 min")
+        #expect(MeetingsFormat.duration(72 * 60) == "1 h 12 min")
+        #expect(MeetingsFormat.duration(120 * 60) == "2 h")
     }
 
     @Test("Rows are newest first and an empty title gets a name")
@@ -91,41 +100,82 @@ struct MeetingsWorkspacePresentationTests {
 
     // MARK: State
 
-    @Test("Each meeting state has a word and a shape, or none when ready")
-    func badges() throws {
-        let id = MeetingID()
-        func badge(_ state: MeetingState, step: MeetingsProcessingStep? = nil)
-            -> MeetingsStatusBadge?
-        {
-            MeetingsWorkspacePresentation.badge(
-                state: state, meeting: id, recorder: .idle, processing: step)
-        }
-        #expect(badge(.ready) == nil)
-        #expect(badge(.recording)?.word == "Recording")
-        #expect(badge(.paused)?.word == "Paused")
-        #expect(badge(.processing)?.word == "Processing")
-        #expect(badge(.processing, step: .failed(reasonCode: "interrupted"))?.word == "Failed")
-        #expect(badge(.failed(reasonCode: "x"))?.word == "Failed")
-        let symbols = Set(
-            [
-                badge(.recording), badge(.paused), badge(.processing),
-                badge(.failed(reasonCode: "x")),
-            ].compactMap { $0?.symbol })
-        #expect(symbols.count == 4)
+    private func display(
+        _ state: MeetingState, id: MeetingID = MeetingID(),
+        recorder: MeetingRecorderState = .idle, step: MeetingsProcessingStep? = nil
+    ) -> MeetingsRowDisplay {
+        MeetingsStatePresentation.rowDisplay(
+            meeting: id, state: state, readyLine: "Today 12:06 · 6 min", recorder: recorder,
+            elapsed: 133, step: step)
+    }
+
+    @Test("Each row state has its icon and its second line")
+    func rowDisplays() {
+        let ready = display(.ready)
+        #expect(ready.symbol == "waveform")
+        #expect(ready.subtitle == "Today 12:06 · 6 min")
+        #expect(!ready.showsProgress)
+        #expect(ready.spokenState == nil)
+
+        let processing = display(.processing, step: .text(track: .me, fraction: 0.5))
+        #expect(processing.symbol == "circle.dashed")
+        #expect(processing.subtitle == "Writing the text · 25%")
+        #expect(processing.showsProgress)
+        #expect(processing.progress == 0.25)
+
+        // No gear: processing is a dashed ring.
+        let finishing = display(.processing)
+        #expect(finishing.symbol == "circle.dashed")
+        #expect(finishing.subtitle == "Finishing")
+        #expect(finishing.progress == nil)
+        #expect(!finishing.canRetry)
+
+        let failed = display(.failed(reasonCode: MeetingProcessingFailure.noAudio))
+        #expect(failed.symbol == "exclamationmark.triangle")
+        #expect(failed.subtitle == "No sound in the recording")
+        #expect(failed.spokenState == "Failed. No sound in the recording")
+        #expect(failed.canRetry)
+
+        let stepFailed = display(.processing, step: .failed(reasonCode: "interrupted"))
+        #expect(stepFailed.tone == .failed)
+        #expect(stepFailed.canRetry)
+
+        let symbols = Set([ready, processing, failed].map(\.symbol))
+        #expect(symbols.count == 3)
     }
 
     @Test("The live recorder state wins for the meeting that records")
-    func liveBadge() {
+    func liveRow() {
         let id = MeetingID()
-        let other = MeetingID()
-        func word(_ recorder: MeetingRecorderState, _ meeting: MeetingID) -> String? {
-            MeetingsWorkspacePresentation.badge(
-                state: .ready, meeting: meeting, recorder: recorder, processing: nil)?.word
-        }
-        #expect(word(.recording(id), id) == "Recording")
-        #expect(word(.paused(id), id) == "Paused")
-        #expect(word(.stopping(id), id) == "Stopping")
-        #expect(word(.recording(id), other) == nil)
+        let recording = display(.recording, id: id, recorder: .recording(id))
+        #expect(recording.symbol == "circle.fill")
+        #expect(recording.subtitle == "Recording · 02:13")
+        #expect(recording.spokenState == "Recording, 2 minutes 13 seconds")
+        #expect(
+            MeetingsStatePresentation.rowAccessibilityLabel(title: "Weekly", display: recording)
+                == "Weekly, Recording, 2 minutes 13 seconds")
+        #expect(display(.ready, id: id, recorder: .paused(id)).subtitle == "Paused · 02:13")
+        #expect(display(.ready, id: id, recorder: .stopping(id)).subtitle == "Stopping…")
+        #expect(display(.ready, id: id, recorder: .recording(MeetingID())).tone == .ready)
+    }
+
+    @Test("Try Again is offered only for a failed meeting that is not live")
+    func retryRule() {
+        let id = MeetingID()
+        let failed = MeetingState.failed(reasonCode: "x")
+        #expect(
+            MeetingsWorkspacePresentation.canRetry(
+                state: failed, meeting: id, recorder: .idle, step: nil))
+        #expect(
+            !MeetingsWorkspacePresentation.canRetry(
+                state: .processing, meeting: id, recorder: .idle, step: nil))
+        #expect(
+            MeetingsWorkspacePresentation.canRetry(
+                state: .processing, meeting: id, recorder: .idle,
+                step: .failed(reasonCode: "x")))
+        #expect(
+            !MeetingsWorkspacePresentation.canRetry(
+                state: .ready, meeting: id, recorder: .idle, step: nil))
     }
 
     @Test("A live meeting cannot be deleted")
@@ -173,9 +223,9 @@ struct MeetingsWorkspacePresentationTests {
         #expect(text(.idle) == "Record a meeting")
         #expect(text(.starting) == "Starting the recording")
         #expect(text(.stopping(id)) == "Stopping the recording")
-        #expect(MeetingsWorkspacePresentation.spokenDuration(5) == "5 seconds")
-        #expect(MeetingsWorkspacePresentation.spokenDuration(61) == "1 minute 1 second")
-        #expect(MeetingsWorkspacePresentation.spokenDuration(3_605) == "1 hour 0 minutes 5 seconds")
+        #expect(MeetingsFormat.spokenDuration(5) == "5 seconds")
+        #expect(MeetingsFormat.spokenDuration(61) == "1 minute 1 second")
+        #expect(MeetingsFormat.spokenDuration(3_605) == "1 hour 0 minutes 5 seconds")
     }
 
     // MARK: Tab content
@@ -185,62 +235,58 @@ struct MeetingsWorkspacePresentationTests {
         recorder: MeetingRecorderState = .idle, step: MeetingsProcessingStep? = nil
     ) -> MeetingsTabContent {
         MeetingsWorkspacePresentation.tabContent(
-            summary: summary, isLoaded: loaded, meeting: id, recorder: recorder, elapsed: 65,
+            summary: summary, isLoaded: loaded, meeting: id, recorder: recorder,
             processing: step)
     }
 
-    @Test("A ready meeting shows the detail, a processing one its step")
+    @Test("The tab shows the processing and failed cards in the tab")
     func tabForStates() {
         let ready = Self.summary(start: Self.now, state: .ready)
         #expect(tab(ready, id: ready.id) == .detail)
 
         let processing = Self.summary(start: Self.now, state: .processing)
-        guard
-            case .status(let badge, let line, let canRetry) = tab(
-                processing, id: processing.id, step: .speakers)
+        guard case .processing(let progress) = tab(processing, id: processing.id, step: .speakers)
         else {
-            Issue.record("expected a status")
+            Issue.record("expected the processing card")
             return
         }
-        #expect(badge.word == "Processing")
-        #expect(line == "Finding speakers")
-        #expect(!canRetry)
+        #expect(progress.label == "Finding the speakers")
+
+        // No step yet: "Finishing", not a failure.
+        guard case .processing(let finishing) = tab(processing, id: processing.id) else {
+            Issue.record("expected the processing card")
+            return
+        }
+        #expect(finishing.label == "Finishing")
 
         guard
-            case .status(let failedBadge, _, let failedRetry) = tab(
+            case .failed(let reason) = tab(
                 processing, id: processing.id, step: .failed(reasonCode: "interrupted"))
         else {
-            Issue.record("expected a status")
+            Issue.record("expected the failed card")
             return
         }
-        #expect(failedBadge.word == "Failed")
-        #expect(failedRetry)
+        #expect(reason.short == "Rafu stopped before the end")
 
-        let failed = Self.summary(start: Self.now, state: .failed(reasonCode: "x"))
-        guard case .status(let word, _, let retry) = tab(failed, id: failed.id) else {
-            Issue.record("expected a status")
-            return
-        }
-        #expect(word.word == "Failed")
-        #expect(retry)
+        let failed = Self.summary(
+            start: Self.now, state: .failed(reasonCode: MeetingProcessingFailure.cancelled))
+        #expect(
+            tab(failed, id: failed.id)
+                == .failed(
+                    MeetingsFailureReason(
+                        sentence: "Processing was cancelled.", short: "Processing was cancelled"))
+        )
     }
 
-    @Test("The live meeting shows the timer, an unknown id shows deleted")
+    @Test("The live meeting shows the live body, an unknown id shows deleted")
     func tabForLiveAndUnknown() {
         let live = Self.summary(start: Self.now, state: .recording)
-        #expect(
-            tab(live, id: live.id, recorder: .recording(live.id))
-                == .status(
-                    badge: MeetingsStatusBadge(word: "Recording", symbol: "record.circle"),
-                    line: "01:05", canRetry: false))
+        #expect(tab(live, id: live.id, recorder: .recording(live.id)) == .live)
+        #expect(tab(live, id: live.id, recorder: .paused(live.id)) == .live)
         #expect(tab(nil, id: MeetingID()) == .deleted)
         #expect(tab(nil, id: MeetingID(), loaded: false) == .loading)
         // A meeting that the store has not written yet, but records now.
         let id = MeetingID()
-        if case .status(let badge, _, _) = tab(nil, id: id, recorder: .recording(id)) {
-            #expect(badge.word == "Recording")
-        } else {
-            Issue.record("expected a status")
-        }
+        #expect(tab(nil, id: id, recorder: .recording(id)) == .live)
     }
 }
