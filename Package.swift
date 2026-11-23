@@ -123,6 +123,10 @@ let package = Package(
     ],
     targets: [
         .target(name: "RafuCore"),
+        // A tiny Objective-C guard that turns an NSException raised by an
+        // AVFoundation call into a Swift error, so a Meetings or Voice audio
+        // failure cannot abort the whole app. Swift cannot catch NSException.
+        .target(name: "RafuObjCSupport"),
         // SPIKE: credential-free widget snapshot model, shared by the app
         // and the sandboxed widget extension.
         .target(
@@ -151,6 +155,7 @@ let package = Package(
             name: "RafuApp",
             dependencies: [
                 "RafuCore",
+                "RafuObjCSupport",
                 "RafuWidgetShared",
                 .product(name: "MarkdownUI", package: "swift-markdown-ui"),
                 .product(name: "Neon", package: "Neon"),
@@ -232,7 +237,7 @@ let package = Package(
         ),
         .testTarget(
             name: "RafuAppTests",
-            dependencies: ["RafuApp", "RafuWidgetShared"],
+            dependencies: ["RafuApp", "RafuObjCSupport", "RafuWidgetShared"],
             exclude: ["Fixtures/workbench-converged-surfaces.json"]
         ),
     ],
