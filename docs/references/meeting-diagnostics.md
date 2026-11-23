@@ -66,6 +66,7 @@ Numbers have three decimals at most; a number that is not finite is `null`. A fi
 | `playingProcesses` | `count`, `bundleIDs` | capture |
 | `coreAudioCall` | `call` (enum of the Core Audio call), `status` (OSStatus, 0 is success) | capture |
 | `tapFormat` | `sampleRate`, `channels`, `bits`, `interleaved` | capture |
+| `microphoneFormat` | `sampleRate`, `channels`, `bits`, `interleaved`, `float32`, `nominalSampleRate` (the first input stream's virtual format and the device nominal rate; `nominalSampleRate` is 0 when that read failed) | capture ("Me", at each Start pass) |
 | `aggregateDeviceRate` | `nominalSampleRate` | capture |
 | `sampleRateCorrected` | `from`, `to` | capture |
 | `firstBuffer` | `track` (`me`, `them`), `frames` | capture |
@@ -114,10 +115,11 @@ Private text shows as `<private>` in a normal log; the files hold the full facts
 
 ## How to read a log for the common failures
 
-Open the exported `<meeting id>.jsonl` and read from the `header` line down. The order of the events is the order of the work: `permissions`, `devices`, `microphoneChoice`, `playingProcesses`, the `coreAudioCall` lines, `tapFormat`, `aggregateDeviceRate`, `firstBuffer`, then `trackFlow` every 10 s.
+Open the exported `<meeting id>.jsonl` and read from the `header` line down. The order of the events is the order of the work: `permissions`, `devices`, `microphoneChoice`, `playingProcesses`, the `coreAudioCall` lines, `tapFormat`, `microphoneFormat`, `aggregateDeviceRate`, `firstBuffer`, then `trackFlow` every 10 s.
 
 - **No "Them" buffers.** No `firstBuffer` with `track: them`, or `trackFlow` for `them` with `buffers: 0`. Check `permissions.systemAudio` first (`denied` or `notDetermined`). Then check each `coreAudioCall` for `createProcessTap`, `createAggregateDevice`, `createIOProc` and `startDevice` with a `status` other than 0. A tap gives no buffers until the Mac plays sound; the first `firstBuffer` can come many seconds after Start, so also compare `clock` and `playingProcesses.count`. `silentBuffers` close to `buffers` means the tap runs and the Mac plays silence.
 - **Wrong sample rate (garbled or fast text).** Compare `tapFormat.sampleRate` with `aggregateDeviceRate.nominalSampleRate` and `devices.output.rate`. The plan's rule is to trust the aggregate device rate. A `sampleRateCorrected` line (`from`, `to`) shows the correction ran; its absence with different rates is the bug. A `deviceChanged` line after Start can change the rate.
+- **"Me" does not start, or the "Me" text is wrong.** Read `microphoneFormat`. `float32: false` is an unsupported device format, and Start fails with a `coreAudioCall` of `other`, status -1. `nominalSampleRate: 0` means the rate read failed; the layout then uses the stream `sampleRate`. A second `microphoneFormat` line in one Start means the rate changed between the read and the start (the code makes at most two passes); if Start then fails, the `coreAudioCall` is `readNominalSampleRate` with status -1. Compare "Me" `trackFlow.frames` per 10 s with the rate times 10. Several `deviceChanged` lines in a short time with `track: me` show a rebuild loop.
 - **Lost permission.** `permissions` with `denied` or `notDetermined` for `microphone` or `systemAudio`, a non-zero `status` on the first Core Audio call, and a `userFacingError` with `place: capture`. The checks run at each Start, so a rebuilt Rafu Lightning that lost its grant shows here at the next recording.
 - **Helper exit.** `helperExited` with `exitCode` or `signal` (for example 9 is a kill), `wallSeconds` and `peakFootprintBytes`; then `helperRestarted.reason` (`crashed`, `unresponsive`, `memoryPressure`, `protocolError`) and `liveSessionRestarted`. A `peakFootprintBytes` near the 1.0 GB limit with `memoryPressure` is the footprint limit working. An `engineError` just before the exit carries the domain and code.
 - **Slow or missing live text.** `textEngineLoaded` (`cold`, `loadMilliseconds`), `firstLiveText.ms`, then `liveTextWindow` delay and `words` each 60 s; `words: 0` while `trackFlow` shows loud audio means the engine is not producing text.

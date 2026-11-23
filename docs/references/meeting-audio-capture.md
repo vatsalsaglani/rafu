@@ -12,6 +12,8 @@
 - **Status:** session 1 is done and its results are below. Sessions 2 and 3 (real calls in each call app; the rule
   for permissions after a rebuild) are hand checks for the user. Each row that they would fill says "not measured
   (morning hand check)".
+- **Update 2026-11-23:** "Me" no longer uses `AVAudioEngine`. It records through a Core Audio IO block on the selected
+  input device. See "Me records through a Core Audio IO block" below; its live checks are pending.
 - No transcript text is in this note. No account names are recorded.
 
 ## Rule or observed behavior
@@ -177,8 +179,84 @@ tree, and the app launched. macOS 27.2 as before; the handoff gives no other ver
 - **Final audio files start at meeting time 0.** The speech adapters rely on this.
 - **A level alone cannot clear a "no audio" warning.** When no audio arrives, the recorder keeps the last level.
 
+### "Me" records through a Core Audio IO block (2026-11-23)
+
+Merged on `main` (commits `af21657a`, `fa1d0039`, merge `4fd12f7a`, review fixes `9b2341f5`). Both test modes passed
+on `main` (4,442 app tests and 1,071 core tests, in parallel and in serial mode). Built
+and tested on macOS 27.2 and Swift 6.4.2 as above. **The live checks in the table below are pending.**
+
+**The crash that led to it.** With a Bluetooth headset as the default input and a browser call running, the Automatic
+rule picked the built-in microphone and the old code set it on the input audio unit directly
+(`kAudioOutputUnitProperty_CurrentDevice`). `AVAudioEngine` does not see that change. `outputFormat(forBus: 0)` then
+disagreed with the hardware, and `installTap` raised an `NSException`. Swift cannot catch it, so the whole app aborted.
+Frames: `AVAudioEngineGraph::InstallTapOnNode`, `-[AVAudioNode installTapOnBus:bufferSize:format:error:block:]`,
+`MeetingMicrophoneSource.installTap`, `start`, `MeetingRecorder.performStart`. The crash report was in
+`rafu-crash-logs.txt` (an untracked file in the repository root).
+
+**The new path.** Meetings capture no longer uses `AVAudioEngine`, `installTap` or `inputNode` (a source-policy test
+enforces it). `MeetingMicrophoneSource` works like `MeetingSystemAudioSource`:
+
+1. Resolve the device with the unchanged Automatic rule.
+2. Read the device's first input stream (`kAudioDevicePropertyStreams`, input scope) and its
+   `kAudioStreamPropertyVirtualFormat`, and read `kAudioDevicePropertyNominalSampleRate`. The pure rule
+   `MeetingInputFormatPolicy` in `RafuCore` decides the layout. The rate label is the device nominal rate, else the
+   stream rate; a format that is not Float32 throws, and Start fails cleanly.
+3. Record the new `microphoneFormat` diagnostics event (see [`meeting-diagnostics.md`](meeting-diagnostics.md)).
+4. `AudioDeviceCreateIOProcIDWithBlock` on a `.userInteractive` queue, then `AudioDeviceStart`.
+5. Read the nominal rate again. If it changed between the first read and the start (a headset that enters call mode),
+   tear down and repeat once: at most two passes. Then Start fails with call name `readNominalSampleRate`, status -1.
+   A small window remains between the second rate read and the listener registration. It is not fixed; watch for it in
+   the live checks.
+6. Add listeners: the default input device (when the choice follows it), `kAudioDevicePropertyDeviceIsAlive` and
+   `kAudioDevicePropertyNominalSampleRate`. Any of them ends the run with `.interrupted` and the recorder starts a new
+   run (the same rebuild as before: up to three tries, 500 ms apart).
+
+**Rules that came out of the review.**
+
+- **IO blocks on a queue run synchronously.** The `AudioHardware.h` header says "All IOBlocks are dispatched
+  synchronously". So when `AudioDeviceStop` returns, the block does not run again, and it is safe to release the ring.
+  Teardown order: `AudioDeviceStop`, `AudioDeviceDestroyIOProcID`, remove listeners, cancel and run the drain, finish
+  the streams.
+- **A device with input and output streams gives the IO block an output buffer list.** The block now writes silence to
+  it (`memset`), so the call does not play stale data. A live check with a USB headset is pending.
+- **Listener blocks are `@convention(block)`.** Removal by block identity needs the same block object. A Swift closure
+  can bridge to a new block object on each call, and the removal would then not match.
+- **The stride comes from each buffer's `mNumberChannels`,** not from the format's channel count. A 3-channel
+  non-interleaved device (the voice-processing shape seen earlier) gives stride 1; an interleaved stereo buffer gives
+  stride 2. Channel 0 is copied.
+- **The AVFoundation calls that stay are guarded** by the Objective-C exception guard; see
+  [`objc-exception-guard.md`](objc-exception-guard.md). Voice keeps `AVAudioEngine` (it needs voice processing).
+
+**Launch sweep of a cut-off meeting.** At launch, a meeting that the app left in `recording`, `paused` or
+`failed(interrupted)` is deleted when all of these hold: no final audio file larger than the CAF header, no journal, 0 s
+recovered, 0 turns, it is not the live meeting and it is not in a processing job. Every read that fails keeps the
+meeting. Deleting also removes its diagnostics file and clears the window selection. A meeting with a journal is kept,
+recovered and marked `interrupted` as before. The rule is the pure function `MeetingEmptyRecordingRule`. Interaction
+with audio retention: a meeting that was cut off during processing has audio and no text. When retention later deletes
+that audio, the next launch deletes the row with no message. This is intended.
+
+**Live checks (Rafu Lightning only; cannot be unit tested).** Bluetooth headset as default input and output, a browser
+call running. The user runs them on another Mac.
+
+| # | Check | Expected | Result |
+|---|---|---|---|
+| 1 | Record with Microphone = Automatic | No crash. "Me" from the built-in microphone. Diagnostics: `microphoneChoice` with reason `builtInOverCallHeadset`, the `microphoneFormat` event, `firstBuffer` on both tracks, "Me" `trackFlow` frames per 10 s close to the rate times 10, 0 converter errors | PENDING |
+| 2 | Microphone = the headset | 16 or 24 kHz; text at normal speed | PENDING |
+| 3 | Connect the headset during a recording | `deviceChanged`; one gap per track; recording continues | PENDING |
+| 4 | Disconnect the headset during a recording | The same; no `deviceLost` stop | PENDING |
+| 5 | Pause and Resume with the headset | Works | PENDING |
+| 6 | Built-in microphone and speakers | No change from before | PENDING |
+| 7 | Force-quit Rafu Lightning while recording, then relaunch | The meeting is kept; "Try again" gives text. A failed Start with no audio leaves no row | PENDING |
+| 8 | Voice push-to-talk | Still works | PENDING |
+
+Also watch in these checks: one rebuild and no loop when the headset enters call mode; a USB headset (input and output
+streams) for clicks or silence; and a rebuild that fails 3 times in 1.5 s during a Bluetooth route change (report with
+the diagnostics; the recorder was not changed).
+
 ## Why it matters
 
+- A wrong audio-unit setup under `AVAudioEngine` does not fail with an error. It raises an `NSException` that ends the
+  whole app. The Core Audio IO block path has no such call, and the calls that stay are guarded.
 - The process tap is the only way to get the Them track without a virtual audio driver. It needs its own privacy key
   and its own TCC service, separate from the microphone. Without the key, the tap fails silently with silent buffers.
 - Ad-hoc signing changes the CDHash on every source change. Session 1 showed that a changed CDHash sometimes keeps the
@@ -343,3 +421,9 @@ footprint -p <localspeechrecognition pid>       # Footprint, neural (nofootprint
   [`app-variants-and-state-isolation.md`](app-variants-and-state-isolation.md).
 - The speech spike results and the capture check brief are in the primary checkout under `.rafu/` (not tracked).
 - Code pattern for a `nonisolated` tap block: `Sources/RafuApp/Voice/VoiceAudioIO.swift` (`installTap`).
+- The Objective-C exception guard: [`objc-exception-guard.md`](objc-exception-guard.md).
+- "Me" capture: `Sources/RafuApp/Meetings/Capture/MeetingMicrophoneSource.swift`,
+  `Sources/RafuApp/Meetings/Capture/MeetingAudioCallbacks.swift` (`deviceIOBlock`),
+  `Sources/RafuCore/Meetings/Recording/MeetingCapturePolicies.swift` (`MeetingInputFormatPolicy`),
+  `Sources/RafuCore/Meetings/Processing/MeetingProcessingPlan.swift` (`MeetingEmptyRecordingRule`),
+  `Sources/RafuApp/Meetings/Session/MeetingsSessionDriver.swift` (`markInterruptedMeetings`).

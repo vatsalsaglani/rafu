@@ -1,6 +1,7 @@
 # ADR 0048: Meeting capture and on-device speech
 
-- **Status:** Accepted (2026-11-23), amended 2026-11-23. See "Amendment 2026-11-23". Capture behaviour is measured on
+- **Status:** Accepted (2026-11-23), amended 2026-11-23 (twice: the speech engines, then the "Me" capture method). See
+  "Amendment 2026-11-23" and "Amendment 2026-11-23: the capture method of Me". Capture behaviour is measured on
   one Mac only (session 1 of the capture check); see the note about meeting audio capture
   ([`meeting-audio-capture.md`](../references/meeting-audio-capture.md)).
 - **Date:** 2026-11-22
@@ -61,7 +62,8 @@ Words wrong, on the user's voice with the Mac microphone:
 
 This list is the current decision. It already includes the amendment.
 
-1. **Two tracks.** The microphone is "Me". "Them" is all sound that the Mac plays, except Rafu's own. This is the
+1. **Two tracks.** The microphone is "Me", recorded through a Core Audio IO block on the selected input device (see
+   "Amendment 2026-11-23: the capture method of Me"). "Them" is all sound that the Mac plays, except Rafu's own. This is the
    global call-audio tap that the capture check measured. A tap for one call app is later work. (The wording "all
    sound that the Mac plays" is decided by the advisor for the user on 2026-11-23, to be confirmed.)
 2. **Platform.** Meetings needs macOS 26. The package minimum stays macOS 15. On macOS 15 Meetings is not available:
@@ -180,7 +182,9 @@ capture. Behaviour on macOS 26 is not measured.
 - **The Swift 6 tap-block trap.** A `installTap` block that is formed inside a `@MainActor` class inherits main-actor
   isolation. The block runs on the audio thread, and the check app crashed on the first microphone buffer
   (`EXC_BREAKPOINT` in the isolation check). Fix: build the block in a `nonisolated` static function that returns a
-  `@Sendable` closure. The tree already has this pattern in `VoiceAudioIO.installTap`.
+  `@Sendable` closure. The tree already has this pattern in `VoiceAudioIO.installTap`. Meetings no longer uses
+  `installTap` (see the amendment about the capture method of "Me"); the rule stays for Voice, which keeps
+  `AVAudioEngine`.
 - **The global tap.** It works on the built-in speakers and on AirPods. It gives no buffers until sound plays: the
   first buffer of "Them" came 12.65 s after Start in one run, and 15.0 s in another.
 - **The 24 kHz rule.** When AirPods are in call mode, the output runs at 24 kHz, but the tap format said 48 kHz. The
@@ -212,6 +216,38 @@ capture. Behaviour on macOS 26 is not measured.
 - **"Them" is all sound that the Mac plays** in version 1. The start view says "Records all sound that this Mac
   plays". Music or a video that plays during the call is also recorded.
 
+## Amendment 2026-11-23: the capture method of Me
+
+**Decision (taken in the work package "Meetings capture without AVAudioEngine", after a live crash).** "Me" is
+recorded through a Core Audio IO block on the selected input device
+(`AudioDeviceCreateIOProcIDWithBlock`), the same path as "Them". Meetings capture does not use `AVAudioEngine`,
+`installTap` or `inputNode`. A test enforces it for every file under `Sources/RafuApp/Meetings`.
+
+**Why.** With a Bluetooth headset as the default input and a browser call running, the Automatic microphone rule set the
+built-in microphone on the input audio unit of the engine. The engine did not see that change. Its format did not match
+the hardware, `installTap` raised an `NSException`, Swift could not catch it, and the whole app aborted. A path that has
+no engine has no such mismatch. The evidence is in the note about meeting audio capture
+([`meeting-audio-capture.md`](../references/meeting-audio-capture.md)).
+
+**What stays the same.** The Automatic microphone rule, the 16 kHz mono output, the journal format, no voice processing,
+the `MeetingAudioSource` protocol and the recorder state machine.
+
+**What is new.**
+
+- The format comes from the first input stream of the device. The rate label is the device nominal rate, read before and
+  after the start (at most two passes). A format that is not Float32 fails the Start with a clear error.
+- The AVFoundation calls that stay (the converters in Meetings and in Apple speech, and `installTap` in Voice) are
+  wrapped by a small Objective-C exception guard, one call per guarded block
+  ([`objc-exception-guard.md`](../references/objc-exception-guard.md)).
+- At launch, a cut-off meeting with no audio, no journal, no recovered seconds and no turns is deleted. Before, each
+  crash left a "Failed" row with no audio. A meeting with any audio or text is kept.
+
+**Status.** Merged on `main`. Both test modes passed. The live checks with a Bluetooth headset are **pending**; the
+decision stands unless they show a fault.
+
+**Consequence.** The recorder was not changed. If a live check shows that "Me" fails to rebuild during a Bluetooth route
+change (the recorder tries three times, 500 ms apart), report it with the diagnostics before changing the restart rule.
+
 ## Alternatives considered
 
 - **Apple speech only.** Rejected on 2026-11-23: 34.4 percent words wrong against 21.1 percent for Nemotron on the
@@ -225,6 +261,9 @@ capture. Behaviour on macOS 26 is not measured.
   final text only.
 - **One mixed track.** Rejected. It loses the difference between "Me" and "Them".
 - **A separate capture path for macOS 15.** Rejected. The user chose one path.
+- **Keep `AVAudioEngine` for "Me" and only catch the exception.** Not chosen. The engine does not see a device that is
+  set on its input audio unit, so the mismatch stays, and the engine can be in a bad state after an exception. The
+  engine is removed from Meetings capture, and the guard covers only the calls that stay.
 
 ## Consequences
 
@@ -254,6 +293,8 @@ Only what is not measured yet:
 - Real calls in each call app (Zoom, Teams, Google Meet in Chrome, FaceTime).
 - AirPods output quality when the Mac microphone is the input.
 - Helper memory at 2 hours, for each of the four models.
+- The live checks of the new "Me" path with a Bluetooth headset (eight checks, in the note about meeting audio
+  capture), including a USB headset with input and output streams.
 
 ## Related paths
 

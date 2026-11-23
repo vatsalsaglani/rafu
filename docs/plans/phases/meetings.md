@@ -4,7 +4,8 @@
   `main`; both test modes were green; the launch was verified). The hand checks for the user and the "fix soon" list
   are in "Status log" below. The three decision records are accepted. Session 1 of the capture check is done (see the
   note about meeting audio capture). The Codex standard-input re-check is done and passed (see the note about hidden
-  meeting agent limits).
+  meeting agent limits). A later package replaced the `AVAudioEngine` path of "Me" with a Core Audio IO block (merged on
+  2026-11-23; its live checks are pending, see "Status log").
 - **Depends on:** the three decision records listed below; the checks in the first stage.
 - **Gate:** the proof stage at the end of this document.
 
@@ -222,6 +223,29 @@ before any fan-out (see `docs/plans/phases/README.md`, "Source-path mapping and 
 - Process cleanup on quit: the hidden agent and the speech helper end when the app quits.
 
 ## Status log
+
+**2026-11-23: "Me" capture without AVAudioEngine (fix of a live crash).** Merged on `main` (commits `af21657a`,
+`fa1d0039`, merge `4fd12f7a`, review fixes `9b2341f5`). Both test modes passed (the handoff gives the counts as
+4,442 app tests and 1,071 core tests, in parallel and in serial mode). **The eight live checks with a Bluetooth headset
+are pending** (the user runs them on another Mac; the table is in the note about meeting audio capture). What changed:
+
+- "Me" records through a Core Audio IO block on the selected input device. A Bluetooth headset as default input with a
+  browser call running had aborted the whole app (an `NSException` from `installTap`). Details:
+  [`meeting-audio-capture.md`](../../references/meeting-audio-capture.md).
+- A new small Objective-C target catches an `NSException` at the AVFoundation calls that stay:
+  [`objc-exception-guard.md`](../../references/objc-exception-guard.md).
+- New diagnostics event `microphoneFormat`
+  ([`meeting-diagnostics.md`](../../references/meeting-diagnostics.md)).
+- **Launch sweep rule.** At launch, a meeting left in recording, paused or failed with the code `interrupted` is deleted
+  when all of these hold: no final audio file larger than the CAF header, no journal, 0 s recovered, 0 turns, it is not
+  the live meeting and it is not in a processing job. Every failed read keeps the meeting. The delete also removes its
+  diagnostics file and clears the window selection. Before this, each crash left a "Failed" row with no audio. A
+  meeting cut off during processing has audio and no text; when audio retention later deletes that audio, the next
+  launch deletes the row with no message (intended).
+- The decision about meeting capture and on-device speech
+  ([`0048`](../../decisions/0048-meeting-capture-and-on-device-speech.md)) has an amendment.
+- Known small window, not fixed: between the second nominal-rate read and the listener registration. Watch for it in the
+  live checks.
 
 **2026-11-23: version 1 implemented.** The shared contracts, wave 1, wave 2 and the integration are merged. Both test
 modes (parallel and `--no-parallel`) were green on the merged tree, and the launch was verified. The handoff did not
