@@ -35,6 +35,9 @@ struct MeetingAnswerMarkdown: View {
             }
         }
         .textSelection(.enabled)
+        // SwiftUI draws a link run in the tint colour, not in the Markdown
+        // link style's colour, so the citations need the accent tint.
+        .tint(theme.palette.accent)
         .frame(maxWidth: .infinity, alignment: .leading)
         .environment(\.openURL, Self.openAction(onCite: onCite))
     }

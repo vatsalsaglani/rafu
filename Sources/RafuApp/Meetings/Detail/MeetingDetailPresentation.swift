@@ -294,25 +294,47 @@ nonisolated enum MeetingDetailPresentation {
         return result
     }
 
-    /// The Markdown that an answer shows: each verified `[t12]` becomes
-    /// `[02:13 Shilpa](rafu-meeting-turn:t12)`; each other mark is dropped.
-    /// The speaker name is escaped, so a name cannot make a link.
+    /// The Markdown that an answer shows: each verified `[t12]` becomes a
+    /// link with the turn's time only, `[02:13](rafu-meeting-turn:t12)`;
+    /// each other mark is dropped. The speaker name shows on the chips
+    /// below the text, so no name goes into the Markdown.
+    ///
+    /// Models often write marks side by side (`[t5][t2]` or `[t5] [t2]`), so
+    /// citations next to each other are joined with ", ", and a citation
+    /// right after a word gets one space: "up to 00:06, 00:10." and never
+    /// "up to00:0600:10".
     static func answerMarkdown(
         _ text: String, verified: Set<MeetingTurnID>, refs: [MeetingTurnID: MeetingTurnRef],
         names: MeetingSpeakerNames
     ) -> String {
         var result = ""
+        var lastWasCitation = false
+        // Whitespace after a citation, kept until the next segment shows
+        // whether it goes between two citations (then ", " replaces it).
+        var heldSpace = ""
         for segment in answerSegments(text: text, verified: verified) {
             switch segment {
             case .text(let part):
-                result += part
+                if lastWasCitation, part.allSatisfy(\.isWhitespace) {
+                    heldSpace += part
+                    continue
+                }
+                result += heldSpace + part
+                heldSpace = ""
+                lastWasCitation = false
             case .citation(let id, let isVerified):
-                guard isVerified, let label = citationLabel(id, refs: refs, names: names)
-                else { continue }
-                result += "[\(escapedLinkLabel(label))](\(turnLinkScheme):\(id.text))"
+                guard isVerified, let ref = refs[id] else { continue }
+                if lastWasCitation {
+                    result += ", "
+                } else if let last = result.last, !last.isWhitespace, !"([".contains(last) {
+                    result += " "
+                }
+                heldSpace = ""
+                result += "[\(MeetingsFormat.clock(ref.start))](\(turnLinkScheme):\(id.text))"
+                lastWasCitation = true
             }
         }
-        return result
+        return result + heldSpace
     }
 
     /// Streamed text before its citations are checked: every mark is

@@ -86,7 +86,7 @@ struct MeetingDetailPresentationTests {
             names: names)
         #expect(
             markdown
-                == "**Friday** [02:13 Shilpa](rafu-meeting-turn:t2). Not . Owner [1:02:05 Me](rafu-meeting-turn:t5)[02:13 Shilpa](rafu-meeting-turn:t2)."
+                == "**Friday** [02:13](rafu-meeting-turn:t2). Not . Owner [1:02:05](rafu-meeting-turn:t5), [02:13](rafu-meeting-turn:t2)."
         )
         #expect(!markdown.contains("[t"))
         let chips = MeetingDetailPresentation.citationChips(
@@ -102,14 +102,32 @@ struct MeetingDetailPresentationTests {
         #expect(MeetingDetailPresentation.streamingMarkdown("Yes [t2].") == "Yes .")
     }
 
+    @Test("Side-by-side citations get a space and a comma, never run together")
+    func citationSpacing() {
+        let refs: [MeetingTurnID: MeetingTurnRef] = [
+            MeetingTurnID(3): MeetingTurnRef(start: 6, speaker: .me),
+            MeetingTurnID(4): MeetingTurnRef(start: 10, speaker: .me),
+        ]
+        let verified: Set = [MeetingTurnID(3), MeetingTurnID(4)]
+        func render(_ text: String) -> String {
+            MeetingDetailPresentation.answerMarkdown(
+                text, verified: verified, refs: refs, names: MeetingSpeakerNames())
+        }
+        let both = "[00:06](rafu-meeting-turn:t3), [00:10](rafu-meeting-turn:t4)"
+        #expect(render("up to[t3][t4]. So") == "up to \(both). So")
+        #expect(render("up to [t3] [t4]. So") == "up to \(both). So")
+        #expect(render("(see [t3])") == "(see [00:06](rafu-meeting-turn:t3))")
+        #expect(render("[t3] then") == "[00:06](rafu-meeting-turn:t3) then")
+    }
+
     @Test("A speaker name cannot make a link or formatting in a citation label")
     func citationLabelEscaping() {
         let refs = [MeetingTurnID(1): MeetingTurnRef(start: 0, speaker: .speaker(1))]
         let names = MeetingSpeakerNames(names: [.speaker(1): "Eve](https://evil.example) [x"])
         let markdown = MeetingDetailPresentation.answerMarkdown(
             "[t1]", verified: [MeetingTurnID(1)], refs: refs, names: names)
-        #expect(
-            markdown == #"[00:00 Eve\]\(https://evil.example\) \[x](rafu-meeting-turn:t1)"#)
+        // The inline link carries the time only; the name is not in it.
+        #expect(markdown == "[00:00](rafu-meeting-turn:t1)")
         #expect(
             MeetingDetailPresentation.escapedLinkLabel(#"a\*b_`<>"#) == #"a\\\*b\_\`\<\>"#)
     }
