@@ -122,6 +122,95 @@ actor FakeMeetingAgentRunner: MeetingAgentRunning, MeetingAgentAvailabilityCheck
     }
 }
 
+/// A fake streaming agent. It never starts a process: `askStream` sends
+/// the given events, then stores the question and the answer and finishes,
+/// or ends with `failure`.
+actor FakeStreamingMeetingAgentRunner: MeetingAgentRunning, MeetingAgentStreaming,
+    MeetingAgentProbing
+{
+    let store: MeetingStore
+    let events: [MeetingAgentStreamEvent]
+    let answer: String
+    let failure: MeetingAgentError?
+    let nameResult: MeetingNameSuggestionResult
+    let probes: [MeetingAgentCLI: MeetingAgentProbeResult]
+    private(set) var cancelledRuns: [MeetingAgentRunKind] = []
+
+    init(
+        store: MeetingStore, events: [MeetingAgentStreamEvent] = [], answer: String = "Done.",
+        failure: MeetingAgentError? = nil,
+        nameResult: MeetingNameSuggestionResult = .noNamesFound,
+        probes: [MeetingAgentCLI: MeetingAgentProbeResult] = [.claudeCode: .ready]
+    ) {
+        self.store = store
+        self.events = events
+        self.answer = answer
+        self.failure = failure
+        self.nameResult = nameResult
+        self.probes = probes
+    }
+
+    nonisolated func askStream(
+        _ question: String, about meeting: MeetingID, using cli: MeetingAgentCLI
+    ) -> AsyncThrowingStream<MeetingAgentStreamEvent, Error> {
+        let (stream, continuation) = AsyncThrowingStream<MeetingAgentStreamEvent, Error>
+            .makeStream()
+        let store = store
+        let events = events
+        let answer = answer
+        let failure = failure
+        let task = Task {
+            continuation.yield(.started)
+            for event in events { continuation.yield(event) }
+            if let failure {
+                continuation.finish(throwing: failure)
+                return
+            }
+            do {
+                try await store.appendConversation(
+                    MeetingConversationEntry(date: Date(), role: .question, text: question),
+                    to: meeting)
+                try await store.appendConversation(
+                    MeetingConversationEntry(date: Date(), role: .answer, text: answer, cli: cli),
+                    to: meeting)
+                continuation.yield(
+                    .finished(MeetingAgentReply(cli: cli, text: answer, citations: [])))
+                continuation.finish()
+            } catch {
+                continuation.finish(throwing: error)
+            }
+        }
+        continuation.onTermination = { _ in task.cancel() }
+        return stream
+    }
+
+    func ask(_ question: String, about meeting: MeetingID, using cli: MeetingAgentCLI)
+        async throws -> MeetingAgentReply
+    {
+        throw MeetingAgentError.failed
+    }
+
+    func suggestSpeakerNames(for meeting: MeetingID, using cli: MeetingAgentCLI)
+        async throws -> [MeetingSpeakerLabel: String]
+    {
+        [:]
+    }
+
+    func cancelRun(_ kind: MeetingAgentRunKind, for meeting: MeetingID) async {
+        cancelledRuns.append(kind)
+    }
+
+    func suggestSpeakerNameResult(for meeting: MeetingID, using cli: MeetingAgentCLI)
+        async throws -> MeetingNameSuggestionResult
+    {
+        nameResult
+    }
+
+    func probe(_ cli: MeetingAgentCLI, refresh: Bool) async -> MeetingAgentProbeResult {
+        probes[cli] ?? .notInstalled
+    }
+}
+
 /// A store that forwards to a real store, but whose first summary read
 /// gives an old version, so the first rename meets a version conflict.
 actor StaleOnceStore: MeetingLibraryServicing {

@@ -7,7 +7,7 @@ extension MeetingsFeature {
     func registerDetailParts() {
         register(
             .meetingDetailView { feature, meeting in
-                AnyView(MeetingDetailView(feature: feature, meeting: meeting))
+                AnyView(MeetingView(feature: feature, meeting: meeting))
             })
     }
 }
