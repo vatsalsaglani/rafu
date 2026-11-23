@@ -30,7 +30,7 @@ struct NotchSettingsSection: View {
         var text =
             "Choose the sections the notch panel offers. Agents stays on if you turn every section off. Now Playing reads system media through the bundled adapter; with that off, it reads Music and Spotify only and asks macOS for permission the first time you connect it."
         text +=
-            " In the menu bar, the companion is an item that opens a card with Agents, Up next, and Usage, and shows how many agents need you."
+            " In the menu bar, the companion is an item that opens a card with Agents, Up next, Usage, and Meetings, and shows how many agents need you."
         if isIsland {
             text +=
                 " On a Mac with a Dynamic Island, the pill below the island opens usage details only."

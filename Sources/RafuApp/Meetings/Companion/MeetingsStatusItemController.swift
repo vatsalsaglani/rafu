@@ -2,8 +2,9 @@ import AppKit
 import Observation
 import RafuCore
 
-/// The Meetings item in the menu bar. Made after the first use of Meetings
-/// in a run, and kept until Rafu quits (`MeetingsStatusSurfaces`).
+/// The Meetings item in the menu bar. Made at launch on a Mac that can run
+/// Meetings (`MeetingsFeatureFactory.prepareStatusAtLaunch()`), and kept
+/// until Rafu quits (`MeetingsStatusSurfaces`).
 ///
 /// The button draws `MeetingsStatusPolicy.statusItem`: a waveform at rest,
 /// "● 12:47" while a recording runs, a pause symbol and the time while it

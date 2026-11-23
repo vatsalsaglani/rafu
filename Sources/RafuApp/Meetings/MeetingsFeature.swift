@@ -107,6 +107,9 @@ final class MeetingsFeature {
     /// The shared state of the live recording and of processing.
     let session = MeetingsSessionModel()
 
+    @ObservationIgnored private var hasRegisteredStatusParts = false
+    @ObservationIgnored private var hasRegisteredRemainingParts = false
+
     /// The kinds registered so far, for tests and diagnostics.
     private(set) var registeredKinds: Set<MeetingsFeaturePart.Kind> = []
 
@@ -159,21 +162,42 @@ final class MeetingsFeature {
         diagnosticsExporter(self)
     }
 
-    /// Calls each package's registration function. Each one lives in that
-    /// package's own folder and starts empty.
+    /// Calls each package's registration function, in two steps. Each one
+    /// lives in that package's own folder and starts empty.
     func registerBuiltInParts() {
+        registerStatusParts()
+        registerRemainingParts()
+    }
+
+    /// The first step: only what the status surfaces need (the menu bar
+    /// item, the floating bar, the notch section, the menu commands). The
+    /// diagnostics recorder, the library, the recorder, the session driver
+    /// and the companion. Making them opens no device, asks for no
+    /// permission, loads no speech engine and starts no process. Runs once.
+    func registerStatusParts() {
+        guard !hasRegisteredStatusParts else { return }
+        hasRegisteredStatusParts = true
         registerDiagnosticsParts()
         registerLibraryParts()
         registerRecorderParts()
+        registerSessionParts()
+        registerCompanionParts()
+    }
+
+    /// The second step: the speech engines, the model catalog, and the
+    /// views and tools of the entry points that the user opens. Runs once,
+    /// after the first step (it makes the first step if that is missing).
+    func registerRemainingParts() {
+        registerStatusParts()
+        guard !hasRegisteredRemainingParts else { return }
+        hasRegisteredRemainingParts = true
         registerAppleSpeechParts()
         registerModelCatalogParts()
         registerSpeechWorkerParts()
-        registerSessionParts()
         registerSettingsParts()
         registerDetailParts()
         registerWindowParts()
         registerWorkspaceParts()
-        registerCompanionParts()
         registerAgentParts()
     }
 }
@@ -200,15 +224,34 @@ final class MeetingsFeatureFactory {
         self.availability = availability
     }
 
-    /// The feature, made on the first call.
+    /// The feature with the status parts only (the recorder, the session,
+    /// the menu bar item and the floating bar), made on the first call. The
+    /// app calls this at launch on a Mac that can run Meetings, so the
+    /// status surfaces exist before the user opens Meetings.
     @discardableResult
-    func resolve() -> MeetingsFeature {
+    func resolveStatus() -> MeetingsFeature {
         if let feature { return feature }
         let made = MeetingsFeature(availability: availability, updatesCompanionGate: isShared)
         makeCount += 1
         feature = made
-        if isShared { made.registerBuiltInParts() }
+        if isShared { made.registerStatusParts() }
         return made
+    }
+
+    /// The feature with all parts: the first call makes it, and a feature
+    /// that only has the status parts gets the others.
+    @discardableResult
+    func resolve() -> MeetingsFeature {
+        let made = resolveStatus()
+        if isShared { made.registerRemainingParts() }
+        return made
+    }
+
+    /// Launch: makes the status parts when Meetings can run on this Mac;
+    /// does nothing on macOS 15.
+    func prepareStatusAtLaunch() {
+        guard availability.isAvailable else { return }
+        resolveStatus()
     }
 }
 
@@ -221,7 +264,17 @@ nonisolated final class MeetingsCompanionGate: Sendable {
 
     var isRecorderRegistered: Bool { recorderRegistered.withLock { $0 } }
 
+    /// Posted (on the calling thread) when the value changes, so the
+    /// companion model computes its sections again.
+    static let didChangeNotification = Notification.Name("RafuMeetingsCompanionGateDidChange")
+
     func setRecorderRegistered(_ value: Bool) {
-        recorderRegistered.withLock { $0 = value }
+        let changed = recorderRegistered.withLock { current in
+            defer { current = value }
+            return current != value
+        }
+        if changed {
+            NotificationCenter.default.post(name: Self.didChangeNotification, object: self)
+        }
     }
 }

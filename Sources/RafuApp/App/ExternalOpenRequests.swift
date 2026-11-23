@@ -105,6 +105,10 @@ final class RafuAppDelegate: NSObject, NSApplicationDelegate {
         // `WorkspaceSession`, and it stays free of `import
         // UserNotifications` itself — the static method is the seam.
         SystemTerminalAttentionNotifier.registerCategoryAndDelegate()
+        // The Meetings status parts only (menu bar item, floating bar,
+        // notch section): no speech engine, device or process. Before the
+        // companion, so its first tab list has Meetings.
+        MeetingsFeatureFactory.shared.prepareStatusAtLaunch()
         // The resting strip is app-global, not per-window — activate it
         // once at launch (idempotent; a no-op on a non-notch/disabled
         // machine, terminal-notch-hud.md NC-B).

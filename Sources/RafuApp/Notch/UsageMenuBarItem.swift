@@ -20,7 +20,7 @@ import SwiftUI
 /// A click (or a touch-screen tap, which macOS delivers as a click) toggles
 /// the menu bar card: a borderless panel that hangs from the status item
 /// with concave shoulders (`CompanionMenuPanel`), holding the shared
-/// `CompanionSectionHost` with Agents, Up next, and Usage. It closes on the
+/// `CompanionSectionHost` with Agents, Up next, Usage, and Meetings. It closes on the
 /// same triggers as a transient popover (`CompanionMenuPanelClosePolicy`).
 /// While the card is open, bells land in its Up next feed
 /// (`NotchCompanionModel.menuPopoverWillShow()` / `menuPopoverDidClose()`;

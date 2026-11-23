@@ -303,6 +303,14 @@ final class NotchCompanionModel: NSObject {
             name: NSApplication.didChangeScreenParametersNotification,
             object: nil
         )
+        // The Meetings section joins the tabs when the Meetings recorder
+        // registers (`MeetingsCompanionGate`), which can be after launch.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(self.meetingsGateDidChange),
+            name: MeetingsCompanionGate.didChangeNotification,
+            object: MeetingsCompanionGate.shared
+        )
     }
 
     deinit {
@@ -315,6 +323,13 @@ final class NotchCompanionModel: NSObject {
     @objc
     private func screenParametersDidChange() {
         activateIfEnabled()
+    }
+
+    /// The Meetings section was added or removed: compute the tabs again for
+    /// every host. Reads the stored preferences and never writes them.
+    @objc
+    func meetingsGateDidChange() {
+        applySurfacePolicy()
     }
 
     // MARK: - Registry
