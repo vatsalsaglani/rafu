@@ -513,7 +513,11 @@ struct CompanionTabBar: View {
         HStack(spacing: CompanionChromeMetrics.tabAccessorySpacing) {
             HStack(spacing: CompanionChromeMetrics.tabOptionSpacing) {
                 ForEach(Array(sections.enumerated()), id: \.element) { index, section in
-                    tab(section, index: index, equalWidth: equalWidths)
+                    tab(
+                        section, index: index, equalWidth: equalWidths,
+                        showsTitle: CompanionChromeMetrics.showsTabTitle(
+                            selected: model.selection(for: host) == section,
+                            tabCount: sections.count))
                 }
             }
             .frame(maxWidth: equalWidths ? .infinity : nil)
@@ -573,7 +577,9 @@ struct CompanionTabBar: View {
             .contentShape(Circle())
     }
 
-    private func tab(_ section: NotchSection, index: Int, equalWidth: Bool) -> some View {
+    private func tab(
+        _ section: NotchSection, index: Int, equalWidth: Bool, showsTitle: Bool
+    ) -> some View {
         let selected = model.selection(for: host) == section
         let badge = badgeText(for: section)
         return Button {
@@ -582,9 +588,11 @@ struct CompanionTabBar: View {
             HStack(spacing: RafuMetrics.space1) {
                 Image(systemName: section.symbol)
                     .font(.system(size: 11, weight: .medium))
-                Text(section.title)
-                    .font(.system(size: 12, weight: selected ? .semibold : .medium))
-                    .lineLimit(1)
+                if showsTitle {
+                    Text(section.title)
+                        .font(.system(size: 12, weight: selected ? .semibold : .medium))
+                        .lineLimit(1)
+                }
                 if let badge {
                     Text(badge.text)
                         .font(.system(size: 11, weight: .semibold, design: .rounded))

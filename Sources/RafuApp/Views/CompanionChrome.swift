@@ -31,6 +31,9 @@ nonisolated enum CompanionChromeMetrics {
     /// Above this many tabs the options take their own widths, so a long
     /// title ("Now Playing") is not cut.
     static let equalWidthTabLimit = 3
+    /// Above this many tabs only the selected tab shows its title; the
+    /// others show their icon and count, so five tabs fit the panel.
+    static let titledTabLimit = 4
     /// The tab row's outer padding.
     static let tabBarHorizontalPadding: CGFloat = 16
     static let tabBarTopPadding: CGFloat = 10
@@ -52,6 +55,13 @@ nonisolated enum CompanionChromeMetrics {
 
     static func tabOptionHeight(for host: CompanionHost) -> CGFloat {
         host == .menuBar ? tabOptionHeightRegular : tabOptionHeightCompact
+    }
+
+    /// Whether a tab shows its title. Every tab does in a row of up to
+    /// `titledTabLimit`; in a longer row only the selected one does. The
+    /// accessibility label and the help text always carry the title.
+    static func showsTabTitle(selected: Bool, tabCount: Int) -> Bool {
+        selected || tabCount <= titledTabLimit
     }
 
     /// Equal widths for a short tab row; own widths for a long one.

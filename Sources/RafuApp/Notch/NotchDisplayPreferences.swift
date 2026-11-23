@@ -83,9 +83,9 @@ nonisolated enum NotchSection: String, CaseIterable, Identifiable, Sendable {
     /// The sections that `host` offers:
     /// - the notch panel (or the plain-display pill): `visible` unchanged;
     /// - the island card: Usage only (ADR 0037, decision 4);
-    /// - the menu bar card: Agents, Up next, and Usage from `visible`, never
-    ///   Now Playing, and always Usage, because the status item is the usage
-    ///   glance.
+    /// - the menu bar card: Agents, Up next, Usage and Meetings from
+    ///   `visible`, never Now Playing, and always Usage, because the status
+    ///   item is the usage glance.
     static func offered(_ visible: [NotchSection], host: CompanionHost) -> [NotchSection] {
         switch host {
         case .notchPanel:
@@ -93,8 +93,11 @@ nonisolated enum NotchSection: String, CaseIterable, Identifiable, Sendable {
         case .islandCard:
             return [.usage]
         case .menuBar:
-            let menu: Set<NotchSection> = [.ensembles, .upNext, .usage]
-            return allCases.filter { menu.contains($0) && ($0 == .usage || visible.contains($0)) }
+            // A fixed order, not `allCases`: that list has Meetings only
+            // while the Meetings gate is open, and `visible` already
+            // carries that decision.
+            let menu: [NotchSection] = [.ensembles, .upNext, .usage, .meetings]
+            return menu.filter { $0 == .usage || visible.contains($0) }
         }
     }
 

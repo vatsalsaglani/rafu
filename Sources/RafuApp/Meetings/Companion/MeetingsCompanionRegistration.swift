@@ -79,7 +79,14 @@ enum MeetingsStatusActions {
         toggleFloatingBar: () -> Void = {}
     ) {
         switch action {
-        case .startRecording: session.startRecording()
+        case .startRecording:
+            // At launch the app's feature has the status parts only. A
+            // recording needs the speech engines too, so complete the
+            // registration first (the app's own session only: a test
+            // session never makes the shared feature).
+            let factory = MeetingsFeatureFactory.shared
+            if factory.feature?.session === session { factory.resolve() }
+            session.startRecording()
         case .pause: session.pause()
         case .resume: session.resume()
         case .stop: session.stop()
