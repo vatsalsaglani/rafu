@@ -225,8 +225,7 @@ before any fan-out (see `docs/plans/phases/README.md`, "Source-path mapping and 
 ## Status log
 
 **2026-11-23: "Me" capture without AVAudioEngine (fix of a live crash).** Merged on `main` (commits `af21657a`,
-`fa1d0039`, merge `4fd12f7a`, review fixes `9b2341f5`). Both test modes passed (the handoff gives the counts as
-4,442 app tests and 1,071 core tests, in parallel and in serial mode). **The eight live checks with a Bluetooth headset
+`fa1d0039`, merge `4fd12f7a`, review fixes `9b2341f5`). Both test modes passed (4,442 app tests and 1,071 core tests, in parallel and in serial mode). **The eight live checks with a Bluetooth headset
 are pending** (the user runs them on another Mac; the table is in the note about meeting audio capture). What changed:
 
 - "Me" records through a Core Audio IO block on the selected input device. A Bluetooth headset as default input with a
