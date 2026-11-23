@@ -43,6 +43,9 @@ nonisolated enum MeetingsSettingsPresentation {
     static let retentionNote = "Rafu needs the audio to make the text again with another engine."
     static let agentsNote =
         "Agents in Ensemble terminals can then search and read your meetings through Rafu's tools. An agent sends what it reads to its own provider."
+    static let autoSummaryTitle = "Write a title and summary after each meeting"
+    static let autoSummaryNote =
+        "Rafu sends the transcript and the speaker names to the provider of the chosen agent. The audio is never sent."
     static let diagnosticsNote =
         "Device names, app identifiers, error codes and timings. No transcript, no audio."
 

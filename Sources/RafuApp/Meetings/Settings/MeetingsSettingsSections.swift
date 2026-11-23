@@ -23,6 +23,7 @@ struct MeetingsSettingsSections: View {
 private struct MeetingsAvailableSettingsSections: View {
     let feature: MeetingsFeature
     @State private var model: MeetingsSettingsModel
+    @AppStorage(MeetingAutoSummaryPreference.key) private var autoSummary = true
 
     init(feature: MeetingsFeature) {
         self.feature = feature
@@ -48,6 +49,7 @@ private struct MeetingsAvailableSettingsSections: View {
             modelsSection
             microphoneSection
             keepAudioSection
+            summarySection
             agentsSection
             diagnosticsSection
         }
@@ -178,6 +180,15 @@ private struct MeetingsAvailableSettingsSections: View {
             noteText(MeetingsSettingsPresentation.retentionNote)
         } header: {
             Text("Keep audio")
+        }
+    }
+
+    private var summarySection: some View {
+        Section {
+            Toggle(MeetingsSettingsPresentation.autoSummaryTitle, isOn: $autoSummary)
+            noteText(MeetingsSettingsPresentation.autoSummaryNote)
+        } header: {
+            Text("Summary")
         }
     }
 
