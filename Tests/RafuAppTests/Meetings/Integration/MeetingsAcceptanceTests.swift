@@ -168,7 +168,8 @@ final class AcceptanceRig {
             store: { store }, diagnostics: runtime.recorder, processRunner: process,
             locator: FakeAgentLocator(), runsRoot: runsRoot, timeLimit: .seconds(30),
             environment: MeetingAgentEnvironment.make(
-                path: "/usr/bin:/bin", home: "/Users/test", user: "test"))
+                path: "/usr/bin:/bin", home: "/Users/test", user: "test"),
+            prober: FakeAgentProber())
         // The runner is registered before any view could read it.
         feature.register(.agentRunner(agentRunner))
         feature.registerSettingsParts()
