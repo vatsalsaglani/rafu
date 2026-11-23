@@ -2,6 +2,7 @@ import AVFoundation
 import CoreMedia
 import Foundation
 import RafuCore
+import RafuObjCSupport
 import Speech
 
 // The thin adapter over Apple's `SpeechAnalyzer` and `SpeechTranscriber`
@@ -268,14 +269,23 @@ nonisolated enum AppleSpeechPCM {
         else { return nil }
         var supplied = false
         var error: NSError?
-        let status = converter.convert(to: output, error: &error) { _, inputStatus in
-            if supplied {
-                inputStatus.pointee = .endOfStream
-                return nil
+        var status = AVAudioConverterOutputStatus.error
+        // An NSException from the converter gives no buffer, not an abort of
+        // all of Rafu.
+        do {
+            try RafuObjCExceptionGuard.perform {
+                status = converter.convert(to: output, error: &error) { _, inputStatus in
+                    if supplied {
+                        inputStatus.pointee = .endOfStream
+                        return nil
+                    }
+                    supplied = true
+                    inputStatus.pointee = .haveData
+                    return input
+                }
             }
-            supplied = true
-            inputStatus.pointee = .haveData
-            return input
+        } catch {
+            return nil
         }
         guard status != .error, output.frameLength > 0 else { return nil }
         return output

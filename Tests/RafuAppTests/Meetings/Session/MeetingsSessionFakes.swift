@@ -26,6 +26,7 @@ final class SessionFakeRecorder: MeetingRecorderControlling, MeetingsRecorderFee
         var peaks: [MeetingTrack: Double] = [.me: -160, .them: -160]
         var facts: MeetingRecorderStartFacts?
         var recoverCalls: [MeetingID] = []
+        var recoversFromJournal = false
         var outputWasSpeakers = false
         var startCount = 0
     }
@@ -51,8 +52,13 @@ final class SessionFakeRecorder: MeetingRecorderControlling, MeetingsRecorderFee
     func dismissProblem() async { stateBroadcast.send(.idle) }
 
     func recoverAbandoned(_ meeting: MeetingID) async throws -> MeetingJournalRecoveryReport {
-        state.withLock { $0.recoverCalls.append(meeting) }
-        throw CocoaError(.fileNoSuchFile)
+        let real = state.withLock {
+            $0.recoverCalls.append(meeting)
+            return $0.recoversFromJournal
+        }
+        guard real else { throw CocoaError(.fileNoSuchFile) }
+        return try MeetingAudioJournalRecovery.recover(
+            audioFolder: try await store.audioFolder(for: meeting))
     }
 
     // Test controls.
@@ -62,6 +68,10 @@ final class SessionFakeRecorder: MeetingRecorderControlling, MeetingsRecorderFee
     func failNextStart(_ error: MeetingRecorderError) { state.withLock { $0.startError = error } }
     func setPeak(_ track: MeetingTrack, _ dbfs: Double) {
         state.withLock { $0.peaks[track] = dbfs }
+    }
+    /// Recovery reads the real journal instead of throwing.
+    func setRecoversFromJournal(_ value: Bool) {
+        state.withLock { $0.recoversFromJournal = value }
     }
     func setOutputWasSpeakers(_ value: Bool) { state.withLock { $0.outputWasSpeakers = value } }
     func send(_ event: MeetingRecorderEvent) { eventBroadcast.send(event) }

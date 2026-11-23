@@ -226,6 +226,9 @@ public enum MeetingDiagnosticEvent: Hashable, Codable, Sendable {
     case tapFormat(MeetingTapFormat)
     case aggregateDeviceRate(nominalSampleRate: Double)
     case sampleRateCorrected(from: Double, to: Double)
+    /// The stream format of the "Me" input device and its nominal rate (0
+    /// when the read failed), read before the IO block starts.
+    case microphoneFormat(MeetingTapFormat, isFloat32: Bool, nominalSampleRate: Double)
 
     // Flow (capture).
     case firstBuffer(track: MeetingTrack, frames: Int)

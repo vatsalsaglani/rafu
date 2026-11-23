@@ -138,6 +138,58 @@ public enum MeetingSampleRatePolicy {
     }
 }
 
+/// The layout of the "Me" input device's buffers, as the IO block reads
+/// them.
+public struct MeetingInputLayout: Hashable, Sendable {
+    public var channelCount: Int
+    public var isInterleaved: Bool
+    public var sampleRate: Double
+
+    public init(channelCount: Int, isInterleaved: Bool, sampleRate: Double) {
+        self.channelCount = channelCount
+        self.isInterleaved = isInterleaved
+        self.sampleRate = sampleRate
+    }
+
+    /// The floats between two frames of channel 0 in the first buffer: the
+    /// channel count when interleaved, 1 when not.
+    public var stride: Int { isInterleaved ? channelCount : 1 }
+}
+
+/// Why the "Me" input format cannot be used.
+public enum MeetingInputFormatError: Error, Hashable, Sendable {
+    /// The samples are not 32-bit floats.
+    case unsupportedFormat
+    /// The stream has no channels.
+    case noChannels
+    /// Neither the device nor the stream gave a usable rate.
+    case noSampleRate
+}
+
+/// The format rule for the "Me" input device. The rate is the device's
+/// nominal rate when it is a finite rate above 0, else the stream rate (the
+/// same trust order as the call-audio rule: a call-mode headset can run at
+/// a rate that the stream format does not say).
+public enum MeetingInputFormatPolicy {
+    public static func layout(
+        streamFormat: MeetingTapFormat, isFloat32: Bool, nominalRate: Double?
+    ) throws(MeetingInputFormatError) -> MeetingInputLayout {
+        guard isFloat32 else { throw .unsupportedFormat }
+        guard streamFormat.channelCount >= 1 else { throw .noChannels }
+        let rate: Double
+        if let nominalRate, nominalRate.isFinite, nominalRate > 0 {
+            rate = nominalRate
+        } else if streamFormat.sampleRate.isFinite, streamFormat.sampleRate > 0 {
+            rate = streamFormat.sampleRate
+        } else {
+            throw .noSampleRate
+        }
+        return MeetingInputLayout(
+            channelCount: streamFormat.channelCount, isInterleaved: streamFormat.isInterleaved,
+            sampleRate: rate)
+    }
+}
+
 /// What the health check found on one track.
 public enum MeetingTrackFinding: Hashable, Sendable {
     /// No buffer for the limit while one was expected.

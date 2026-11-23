@@ -1,6 +1,7 @@
 import AVFoundation
 import Foundation
 import RafuCore
+import RafuObjCSupport
 import Synchronization
 
 /// The microphone side, as `VoiceSession` sees it. Tests inject a fake.
@@ -176,7 +177,15 @@ final class VoiceAudioIO: VoiceAudioCapturing, VoiceAudioPlaying {
             converter: converter, monoFormat: monoFormat, outputFormat: outputFormat,
             continuation: continuation)
         self.framer = framer
-        Self.installTap(on: input, format: inputFormat, framer: framer)
+        do {
+            try Self.installTap(on: input, format: inputFormat, framer: framer)
+        } catch {
+            // The engine raised (a format that does not match the hardware):
+            // no tap, no capture, and Rafu keeps running.
+            continuation.finish()
+            self.framer = nil
+            throw VoiceAudioError.noInput
+        }
         tapInstalled = true
         captureContinuation = continuation
         return stream
@@ -214,12 +223,16 @@ final class VoiceAudioIO: VoiceAudioCapturing, VoiceAudioPlaying {
         }
     }
 
-    /// The tap block, built outside the main actor.
+    /// The tap block, built outside the main actor. The install call can
+    /// raise an NSException; the guard turns it into a thrown error.
     private nonisolated static func installTap(
         on input: AVAudioInputNode, format: AVAudioFormat, framer: VoiceCaptureFramer
-    ) {
-        input.installTap(onBus: 0, bufferSize: 2_048, format: format) { buffer, _ in
+    ) throws {
+        let block: AVAudioNodeTapBlock = { buffer, _ in
             framer.consume(buffer)
+        }
+        try RafuObjCExceptionGuard.perform {
+            input.installTap(onBus: 0, bufferSize: 2_048, format: format, block: block)
         }
     }
 

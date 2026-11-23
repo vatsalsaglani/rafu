@@ -277,6 +277,74 @@ struct MeetingsSessionDriverTests {
         #expect(harness.probe.calls(of: .nemotronEnglish) == [.me])
     }
 
+    @Test("A cut-off recording with no audio and no text is deleted at launch")
+    func emptyInterruptedDeleted() async throws {
+        let harness = SessionHarness()
+        defer { harness.finish() }
+        harness.recorder.setRecoversFromJournal(true)
+        let empty = try await harness.store.create(title: "Failed start", startDate: Date())
+        await harness.startDriver()
+
+        #expect(await harness.summary(of: empty.id) == nil)
+        #expect(harness.recorder.recoverCalls == [empty.id])
+        #expect(harness.session.processing[empty.id] == nil)
+    }
+
+    @Test("A cut-off recording with a journal is kept, recovered and marked interrupted")
+    func journalInterruptedKept() async throws {
+        let harness = SessionHarness()
+        defer { harness.finish() }
+        harness.recorder.setRecoversFromJournal(true)
+        let made = try await harness.store.create(title: "Crash", startDate: Date())
+        let folder = try await harness.store.audioFolder(for: made.id)
+        let writer = MeetingAudioJournalWriter(audioFolder: folder, segmentSeconds: 1)
+        try writer.prepare()
+        for index in 0..<10 {
+            try writer.append(
+                track: .me, samples: [Int16](repeating: 900, count: 1_600),
+                startTime: Double(index) * 0.1)
+        }
+        try writer.flush()
+        await harness.startDriver()
+
+        #expect(await harness.state(of: made.id) == .failed(reasonCode: "interrupted"))
+        let final = MeetingJournalLayout.finalAudioFile(.me, in: folder)
+        let size = try FileManager.default.attributesOfItem(atPath: final.path)[.size] as? Int
+        #expect((size ?? 0) > MeetingCAFFileWriter.headerSize)
+    }
+
+    @Test("An older interrupted meeting with nothing in it is deleted; one with audio is kept")
+    func oldInterruptedSwept() async throws {
+        let harness = SessionHarness()
+        defer { harness.finish() }
+        let interrupted = MeetingState.failed(reasonCode: "interrupted")
+        let empty = try await harness.store.create(title: "Empty", startDate: Date())
+        try await harness.store.setState(interrupted, of: empty.id, expectedVersion: empty.version)
+        let kept = try await harness.store.create(title: "Audio", startDate: Date())
+        try await harness.store.setState(interrupted, of: kept.id, expectedVersion: kept.version)
+        let folder = try await harness.store.audioFolder(for: kept.id)
+        SessionFakeRecorder.writeFinalFile(MeetingJournalLayout.finalAudioFile(.them, in: folder))
+        let other = try await harness.store.create(title: "Other failure", startDate: Date())
+        try await harness.store.setState(
+            .failed(reasonCode: "text-failed"), of: other.id, expectedVersion: other.version)
+        await harness.startDriver()
+
+        #expect(await harness.summary(of: empty.id) == nil)
+        #expect(await harness.state(of: kept.id) == interrupted)
+        #expect(await harness.state(of: other.id) == .failed(reasonCode: "text-failed"))
+    }
+
+    @Test("A ready meeting with no audio is never deleted at launch")
+    func readyNeverSwept() async throws {
+        let harness = SessionHarness()
+        defer { harness.finish() }
+        harness.recorder.setRecoversFromJournal(true)
+        let ready = try await harness.store.create(title: "Done", startDate: Date())
+        try await harness.store.setState(.ready, of: ready.id, expectedVersion: ready.version)
+        await harness.startDriver()
+        #expect(await harness.state(of: ready.id) == .ready)
+    }
+
     @Test("Delete removes the meeting; delete of the live meeting is refused")
     func deleteMeeting() async throws {
         let harness = SessionHarness()

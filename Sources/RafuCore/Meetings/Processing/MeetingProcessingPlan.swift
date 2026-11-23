@@ -111,6 +111,27 @@ public enum MeetingInterruptedRule {
     }
 }
 
+/// Which cut-off meetings hold nothing and are deleted at launch. A failed
+/// Start or a crash before the first audio left a meeting row with no
+/// audio; each one showed as a "Failed" row that the user could not use.
+/// All four conditions must hold, so a meeting with any audio or text is
+/// never deleted.
+public enum MeetingEmptyRecordingRule {
+    /// True only when the meeting is recording, paused or failed with the
+    /// code `interrupted`, has no final audio file larger than the CAF
+    /// header, journal recovery gave 0 s, and it has no turns.
+    public static func shouldDelete(
+        state: MeetingState, hasFinalAudio: Bool, recoveredSeconds: TimeInterval, turnCount: Int
+    ) -> Bool {
+        switch state {
+        case .recording, .paused: break
+        case .failed(let code) where code == MeetingProcessingFailure.interrupted: break
+        case .processing, .ready, .failed: return false
+        }
+        return !hasFinalAudio && recoveredSeconds == 0 && turnCount == 0
+    }
+}
+
 /// The short stable codes of a failed processing job, stored in
 /// `MeetingState.failed(reasonCode:)`.
 public enum MeetingProcessingFailure {

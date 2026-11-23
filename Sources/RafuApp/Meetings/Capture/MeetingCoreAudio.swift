@@ -95,6 +95,28 @@ nonisolated struct MeetingCoreAudio: Sendable {
         }
     }
 
+    /// The virtual format of the device's first input stream: the format
+    /// that its IO block receives in the first buffer of the input list.
+    /// Nil when a read fails (each failure is recorded as `.other`).
+    func inputStreamFormat(_ device: AudioObjectID) -> AudioStreamBasicDescription? {
+        var address = Self.address(
+            kAudioDevicePropertyStreams, scope: kAudioObjectPropertyScopeInput)
+        var size: UInt32 = 0
+        guard
+            call(.other, { AudioObjectGetPropertyDataSize(device, &address, 0, nil, &size) })
+                == noErr, size >= UInt32(MemoryLayout<AudioStreamID>.size)
+        else { return nil }
+        var streams = [AudioStreamID](
+            repeating: 0, count: Int(size) / MemoryLayout<AudioStreamID>.size)
+        guard
+            call(.other, { AudioObjectGetPropertyData(device, &address, 0, nil, &size, &streams) })
+                == noErr, let first = streams.first, first != kAudioObjectUnknown
+        else { return nil }
+        let (format, status) = read(
+            first, kAudioStreamPropertyVirtualFormat, initial: AudioStreamBasicDescription())
+        return status == noErr ? format : nil
+    }
+
     func facts(_ device: AudioObjectID, input: Bool) -> MeetingAudioDeviceFacts {
         let scope = input ? kAudioObjectPropertyScopeInput : kAudioObjectPropertyScopeOutput
         return MeetingAudioDeviceFacts(

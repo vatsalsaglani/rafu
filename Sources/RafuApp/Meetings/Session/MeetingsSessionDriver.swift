@@ -350,22 +350,87 @@ final class MeetingsSessionDriver {
 
     /// Marks each meeting that the app left in recording, paused or
     /// processing as failed with the code `interrupted`. It does not
-    /// process them: the user selects "Try again".
+    /// process them: the user selects "Try again". A cut-off meeting with
+    /// no audio and no text is deleted instead (`MeetingEmptyRecordingRule`),
+    /// and so is an older `interrupted` meeting with nothing in it.
     private func markInterruptedMeetings() async {
         guard let store = feature?.store, let all = try? await store.list() else { return }
+        let older = all.filter { $0.startDate < createdAt }
         let found = MeetingInterruptedRule.interrupted(
-            all.filter { $0.startDate < createdAt }, liveMeeting: session.liveMeeting,
-            activeJobs: runner.activeMeetings)
+            older, liveMeeting: session.liveMeeting, activeJobs: runner.activeMeetings)
         for meeting in found {
             guard !Task.isCancelled else { return }
-            guard meeting.id != session.liveMeeting, meeting.id != activeMeeting,
-                !runner.isActive(meeting.id)
-            else { continue }
+            guard isSweepable(meeting.id) else { continue }
             if meeting.state == .recording || meeting.state == .paused {
-                _ = try? await feeds?.recoverAbandoned(meeting.id)
+                // A recovery that throws or finds only damaged segments
+                // keeps the meeting: there can be audio in it.
+                let report = try? await feeds?.recoverAbandoned(meeting.id)
+                if let report, report.result != .failed,
+                    await deleteIfEmpty(
+                        meeting, recoveredSeconds: report.recoveredSeconds, store: store)
+                {
+                    continue
+                }
             }
             await runner.markFailed(meeting.id, code: MeetingProcessingFailure.interrupted)
         }
+        let interrupted = MeetingState.failed(reasonCode: MeetingProcessingFailure.interrupted)
+        for meeting in older where meeting.state == interrupted {
+            guard !Task.isCancelled else { return }
+            guard isSweepable(meeting.id) else { continue }
+            await deleteIfEmpty(meeting, recoveredSeconds: 0, store: store)
+        }
         try? await store.applyAudioRetention(preferences.audioRetention(), now: Date())
+    }
+
+    /// Not the live meeting and not in a processing job.
+    private func isSweepable(_ meeting: MeetingID) -> Bool {
+        meeting != session.liveMeeting && meeting != activeMeeting && !runner.isActive(meeting)
+    }
+
+    /// Deletes the meeting when the empty-recording rule says so. Each
+    /// read that fails keeps the meeting.
+    @discardableResult
+    private func deleteIfEmpty(
+        _ meeting: MeetingSummaryRecord, recoveredSeconds: TimeInterval,
+        store: any MeetingStoring
+    ) async -> Bool {
+        guard let folder = try? await store.audioFolder(for: meeting.id),
+            let audio = await Self.emptyRecordingAudio(in: folder),
+            let page = try? await store.turns(of: meeting.id, after: nil, limit: 1)
+        else { return false }
+        guard
+            MeetingEmptyRecordingRule.shouldDelete(
+                state: meeting.state, hasFinalAudio: audio.hasFinalAudio || audio.hasJournal,
+                recoveredSeconds: recoveredSeconds, turnCount: page.turns.count),
+            isSweepable(meeting.id)
+        else { return false }
+        do {
+            try await store.delete(meeting.id)
+        } catch {
+            return false
+        }
+        await (feature?.diagnostics as? MeetingDiagnosticsRecorder)?
+            .deleteDiagnostics(for: meeting.id)
+        session.processing[meeting.id] = nil
+        session.noteLibraryChanged()
+        return true
+    }
+
+    /// Reads the audio folder off the main actor: a final file larger than
+    /// the CAF header, and journal segments that are still there. Nil when
+    /// the folder cannot be read.
+    nonisolated static func emptyRecordingAudio(in folder: URL) async
+        -> (hasFinalAudio: Bool, hasJournal: Bool)?
+    {
+        let fileManager = FileManager.default
+        guard fileManager.fileExists(atPath: folder.path) else { return nil }
+        let hasFinalAudio = MeetingTrack.allCases.contains { track in
+            let url = MeetingJournalLayout.finalAudioFile(track, in: folder)
+            let size =
+                (try? fileManager.attributesOfItem(atPath: url.path))?[.size] as? NSNumber
+            return (size?.intValue ?? 0) > MeetingCAFFileWriter.headerSize
+        }
+        return (hasFinalAudio, MeetingAudioJournalRecovery.hasJournal(in: folder))
     }
 }
