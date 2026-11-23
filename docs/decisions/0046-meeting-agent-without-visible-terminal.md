@@ -8,6 +8,11 @@
   meeting text on standard input, no shell, a new empty folder for each run) was re-checked on 2026-11-23 and held
   every attempt on Codex 0.171.0; the exact array is in the limits note. Note for decision 2: Codex gets no file,
   only the text of one meeting on standard input.
+  **Superseded in part on 2026-11-23** by the decision about the meeting agent probe and the automatic meeting
+  summary ([`0049`](0049-meeting-agent-probe-and-automatic-summary.md)). It replaces: the "one user action for each
+  run" rule of decision 3 (two exceptions), the "shows which agent gets the text before the first run" rule of
+  decision 5 (for a summary run only), the manual Codex version re-check of decisions 8 and 11 (the probe replaces
+  it), and the sentence "No summary is made at Stop" of decision 12. Decision 10 stays.
 - **Date:** 2026-11-22
 - **Related:** the decision about external agent CLIs in the Ensemble
   ([`0018-conductor-external-agent-orchestration.md`](0018-conductor-external-agent-orchestration.md)), the decision
@@ -39,16 +44,20 @@ Meetings scope, 0047).
 2. **Limit, for Claude Code.** The run is read-only and sees only the files of that one meeting. It has no write
    access, no shell command, no web tools and no MCP tools. Codex has a different limit (decision 11).
 3. **Each run starts from one explicit user action.** Rafu starts no run at Stop, at launch or on a timer.
+   *(Superseded in part by 0049: the probe with fixed text, and one summary run for each processing job, are
+   exceptions.)*
 4. **No questions during a live meeting in version 1.** A question can be asked only after the meeting has stopped
    and its transcript exists.
 5. **The interface is honest about the run.** Before the first run for a meeting, it shows which agent gets the text.
    While the run works, it shows a running state and a Cancel control. The process ends when the app quits.
+   *(Superseded in part by 0049: a summary run has no consent step; the summary block names the agent.)*
 6. **No Rafu-held credential.** The process gets an environment from an allow list. The CLI uses its own
    authentication, as in the decision about Agent Terminals (0021).
 7. **Which agents.** The ask box offers Claude Code and Codex in version 1. OpenAI with the user's API key and
    Anthropic with the user's API key come later, as a separate stage.
 8. **A CLI that cannot be held to the limit is not offered in version 1.** The hidden agent limits check decides this
-   for each CLI and each tested CLI version.
+   for each CLI and each tested CLI version. *(Superseded in part by 0049: the probe that Rafu runs replaces the
+   manual check for a Codex version.)*
 9. **Name suggestions are suggestions.** The user confirms each speaker name. Rafu never applies a name by itself.
 10. **This record permits this one use only.** Each other hidden process needs its own decision record.
 
@@ -60,10 +69,12 @@ advisor for the user on 2026-11-23, to be confirmed. The user can change it.
     network. Codex gets no file of the user. The built-in tools that stay are listed in the limits note. The Codex
     choice is active only for a Codex version that passed the re-check. Until a version passes, the ask box shows
     Codex as "not available yet" with the reason. If the re-check fails, the ask box shows "Not available with this
-    Codex version", and Claude Code works. Rafu never puts a file named `AGENTS.md` in the Codex folder, because
+    Codex version", and Claude Code works. *(The version re-check part is superseded by 0049: the probe replaces
+    it.)* Rafu never puts a file named `AGENTS.md` in the Codex folder, because
     Codex applies it without being asked. Decision 2 (read-only access to the files of one meeting) applies to
     Claude Code. Decision 11 replaces it for Codex.
-12. **No summary is made at Stop.** The first item in the conversation column is a local overview made with no AI
+12. *(The sentence "No summary is made at Stop" is superseded by 0049: an automatic title and summary are on by
+    default, with a Settings switch.)* **No summary is made at Stop.** The first item in the conversation column is a local overview made with no AI
     (date, length, speakers, talk time). A "Summarize" chip is a normal question: one user action, the hidden agent,
     and the answer is kept in the meeting. The line on the approved artboard becomes "Rafu writes the transcript on
     this Mac". This follows decision 3 (no run at Stop) and "keep AI explicit". (Decided by the advisor for the user
@@ -111,7 +122,8 @@ A CLI release that changes its permission flags. The start of the API-key stage.
 - Nothing. The Codex standard-input re-check passed on 2026-11-23 (Codex 0.171.0, 60 runs). Three flags were
   added to the candidate: `-c skills.include_instructions=false` (else the user's skills are listed to the model),
   `--disable=view_image` and `--disable=sleep_tool`. Rafu makes a new empty folder for each run, because Codex
-  applies an `AGENTS.md` it finds there. A new Codex version must pass the re-check before it is offered.
+  applies an `AGENTS.md` it finds there. A new Codex version must pass the re-check before it is offered
+  *(now the probe of 0049)*.
 
 The summary question is answered (decision 12). The Claude Code array is in the limits note. The stricter run
 (the meeting text on standard input) is the Codex design; Claude Code keeps the file-reading design.

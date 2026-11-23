@@ -206,6 +206,17 @@ Lightning. Still open by hand: the whole visual pass (light and dark x
 Indigo/Khadi, Increase Contrast, Reduce Motion), VoiceOver on the rail, handle,
 and tabs, full screen, a second window, and the 770 pt minimum window.
 
+## The Meetings window uses it too (2026-11-23)
+
+Last verified: not run by hand; the handoff gave no OS or Swift version for this change. Tests and the merged build
+passed on `main`.
+
+The standalone Meetings window now uses `FlatWindowChrome` as well. It follows the frosted-window setting and has no
+title bar band. A drag strip sits above the meeting list, and it is a window drag surface. `TitlebarDragSurface` is
+now shared between the workspace window and the Meetings window, so the drag-surface list in rule 3a gains one
+surface: the Meetings drag strip. The handoff did not say that any rule above changed. Check the Meetings window as
+well when you change `applyChrome`.
+
 ## Why it matters
 
 The pre-merge look (empty dark strip above the sidebar) read as dated

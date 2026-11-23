@@ -1,7 +1,8 @@
 # ADR 0048: Meeting capture and on-device speech
 
-- **Status:** Accepted (2026-11-23), amended 2026-11-23 (twice: the speech engines, then the "Me" capture method). See
-  "Amendment 2026-11-23" and "Amendment 2026-11-23: the capture method of Me". Capture behaviour is measured on
+- **Status:** Accepted (2026-11-23), amended 2026-11-23 (three times: the speech engines, the "Me" capture method,
+  then the echo mark for each word). See "Amendment 2026-11-23", "Amendment 2026-11-23: the capture method of Me"
+  and "Amendment 2026-11-23: the echo mark is set for each word". Capture behaviour is measured on
   one Mac only (session 1 of the capture check); see the note about meeting audio capture
   ([`meeting-audio-capture.md`](../references/meeting-audio-capture.md)).
 - **Date:** 2026-11-22
@@ -107,6 +108,12 @@ and "Nemotron later".
 Decided by the user on 2026-11-23: Nemotron English 1120 ms is the default, Apple speech and WhisperKit large-v3 are
 the other two choices. The reason is the bench above.
 
+**Changed by the user later on 2026-11-23, after real calls:** WhisperKit large-v3 is the default text engine. In real
+Teams calls, Nemotron gave text with no punctuation and two turns for six minutes; WhisperKit gave accurate text.
+Nemotron and Apple speech stay as choices. The first-use sheet is now "Choose a speech model", with WhisperKit first and
+marked "Recommended", and one "Done" button. A user who never chose an engine gets WhisperKit; until its model is
+installed, the final text uses Apple speech.
+
 - At the first use of Meetings, Rafu shows one sheet: "Download Nemotron (613 MB)" with the licence line, and the
   buttons Download and "Use Apple speech for now". Rafu never downloads with no user action.
 - WhisperKit makes the final text after Stop only. It works on 30 s windows, and no live path is measured. When
@@ -203,9 +210,10 @@ capture. Behaviour on macOS 26 is not measured.
 ### Capture rules
 
 - **No voice processing.** It stops the call-audio tap and makes other sound quieter.
-- **The echo mark in the text.** A "Me" turn that repeats a "Them" turn in the same time window is marked "echo" and
-  is hidden by default. It is never deleted. The rule needs 0.8 word overlap, 3 words or more, and the built-in
-  speakers or a correlation flag. At the start, when the output is the built-in speakers, the view says "Use
+- **The echo mark in the text.** *(The turn rule that is written here is replaced by a word rule; see "Amendment
+  2026-11-23: the echo mark is set for each word" below.)* A "Me" turn that repeats a "Them" turn in the same time
+  window is marked "echo" and is hidden by default. It is never deleted. The rule needs 0.8 word overlap, 3 words
+  or more, and the built-in speakers or a correlation flag. At the start, when the output is the built-in speakers, the view says "Use
   headphones for a clean Me track". The "Me" level meter stays honest. (Decided by the advisor for the user on
   2026-11-23, to be confirmed.)
 - **The Automatic microphone rule.** Settings ▸ Meetings ▸ "Microphone": Automatic (the default), System default, or
@@ -247,6 +255,36 @@ decision stands unless they show a fault.
 
 **Consequence.** The recorder was not changed. If a live check shows that "Me" fails to rebuild during a Bluetooth route
 change (the recorder tries three times, 500 ms apart), report it with the diagnostics before changing the restart rule.
+
+## Amendment 2026-11-23: the echo mark is set for each word
+
+**Decision.** The echo mark is set for each "Me" word, not for a whole "Me" turn. This replaces the turn rule in
+"Capture rules" (0.8 word overlap over a whole turn, 3 words or more, start window of -0.3 to 2.0 s).
+
+**Why.** One meeting of 6 min 17 s on the built-in microphone and speakers (Teams) showed that the turn rule misses
+echo and counts it as the user's talk time: a Nemotron turn with 79.7 percent matched words got no mark (the rule
+needs 80), and two echo turns started 8 s and 11 s after the far-side turn, outside the 2.0 s window. The far-side
+sound is as loud as the user's own voice, so no loudness test can separate
+them; text match is the only usable signal. The numbers are in
+[`meeting-transcript-quality.md`](../references/meeting-transcript-quality.md).
+
+**The rule.**
+
+- The mark is only set when the output was the built-in speakers. With headphones no word is marked.
+- A "Me" word matches a "Them" word with the same normalised text when their start times are at most 1.5 s apart.
+  Each "Them" word is used once.
+- A run of 3 or more "Me" words with no pause between them is a stretch. A stretch of fewer than 3 words is never
+  echo. In a stretch, a matched word is echo when at least 50 percent of the words within 3 places on each side are
+  matched; an unmatched word is echo at 60 percent. A run of 1 or 2 words that is not echo, with echo on both sides in
+  the same stretch, is echo too.
+- The words stay in the turns. Turns are cut where the echo flag changes, so an echo turn holds only echo words. Echo
+  turns are hidden by default and never deleted. Talk time and share count the speech time of non-echo words only.
+
+**What stays.** No voice processing. The start-view line "Use headphones for a clean Me track". The level meter stays
+honest.
+
+**Status.** Merged on `main`, with unit tests on made-up words. The thresholds are design values taken from the one
+meeting. They are not yet checked on a re-processed real meeting.
 
 ## Alternatives considered
 

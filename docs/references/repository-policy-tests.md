@@ -30,7 +30,8 @@ Facts about the popup components:
 
 - `@available(macOS 26, *)` is not accepted on a `@Suite` type. Put it on each `@Test` function.
 - `#expect(x.allSatisfy(\.someKeyPath))` does not compile. Bind the result to a `let` first, then
-  `#expect(result)`.
+  `#expect(result)`. A closure also works: `allSatisfy { $0.flag }` (the macro turns the key path into a call that can
+  rethrow). Met again 2026-11-23 in the echo-flag tests.
 
 ### Duplicate type names after a merge
 

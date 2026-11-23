@@ -74,16 +74,21 @@ The user can change it. Each has a safe default in place.
   speech. The live view names the engine.
 - **The NVIDIA Open Model License** is accepted for a download that the user starts in Settings.
 - **Codex design.** The meeting text on standard input, empty private folder, shell tool off, strict permission
-  profile, no user configuration, no network. The Codex choice is active only after a re-check passes.
+  profile, no user configuration, no network. The Codex choice is active only after a re-check passes. (Since
+  2026-11-23 the re-check is a probe that Rafu runs itself; see the decision about the meeting agent probe and the
+  automatic summary, 0049, and the status log.)
 - **Terminals with the Rafu tools.** Ensemble terminals only, as today.
-- **Summary.** None at Stop. A local overview with no AI, and a "Summarize" chip that is a normal question.
+- **Summary.** *(Changed 2026-11-23 by the user: an automatic title and summary run after each processing job, on by
+  default, no consent step, Settings switch `meetings.autoSummary`; see the status log. "None at Stop" is no longer
+  true.)* Before: none at Stop; a local overview with no AI, and a "Summarize" chip that is a normal question.
 - **No switch for each meeting in Share.** The Settings switch only, and a status line in Share.
 - **"Open Folder..."** opens a workspace window beside the Meetings window.
 - **Retention.** Transcripts until the user deletes them. Audio: "Until I delete" (default), 30 days or 7 days.
 - **Command-Shift-M** is a menu command, active only when Rafu is in front.
 - **Meetings on macOS 15.** The entry points show, are not active, and say "Meetings needs macOS 26".
-- **Echo on the Mac speakers.** No voice processing. An echo mark in the text; echo lines are hidden by default and
-  never deleted.
+- **Echo on the Mac speakers.** No voice processing. An echo mark in the text, set for each word since 2026-11-23
+  (see [`meeting-transcript-quality.md`](../../references/meeting-transcript-quality.md)); echo lines are hidden by
+  default and never deleted.
 - **Microphone.** Settings ▸ Meetings ▸ "Microphone": Automatic (default), System default, or a named device.
   Automatic uses the built-in microphone when the default input is a Bluetooth device.
 - **"Them"** is all sound that the Mac plays, except Rafu's own, in version 1.
@@ -120,6 +125,9 @@ Not in version 1:
 - The decision about a meeting agent with no visible terminal
   ([`0046`](../../decisions/0046-meeting-agent-without-visible-terminal.md)). Accepted in principle, amended
   2026-11-23 (Codex is offered with a different limit). It is the only exception to the visible-terminal rule.
+  Superseded in part on 2026-11-23 by the decision about the meeting agent probe and the automatic summary
+  ([`0049`](../../decisions/0049-meeting-agent-probe-and-automatic-summary.md)): a probe with fixed text and one
+  summary run after each processing job need no user action; the probe replaces the manual Codex version re-check.
 - The decision about Meetings scope, app-data storage and agent access
   ([`0047`](../../decisions/0047-meetings-scope-app-data-storage-and-agent-access.md)). Accepted (2026-11-23).
 - The decision about meeting capture and on-device speech
@@ -223,6 +231,42 @@ before any fan-out (see `docs/plans/phases/README.md`, "Source-path mapping and 
 - Process cleanup on quit: the hidden agent and the speech helper end when the app quits.
 
 ## Status log
+
+**2026-11-23: version 4 packages merged (agent, transcript quality, UI shell).** All three are on `main`. Both test
+modes passed (the handoff gave 4,495 app tests and 1,117 core tests, and did not say whether each mode ran the same
+count). **Still in progress: the package for the unified meeting view. Still pending: the live checks with a
+headset** (together with the eight Bluetooth checks listed below).
+
+- **Agent.** Agent commits `4e50489a` to `a72d3175`. Codex is selectable: a probe replaces the exact-version lock.
+  Answers stream (Claude Code several pieces, Codex one). An automatic title and summary run after each processing
+  job, on by default, with no consent step; the Settings switch `meetings.autoSummary` turns it off; with no agent
+  ready the summary shows "unavailable". The summary block names the agent. Name suggestions report "no names
+  found". A stored answer records the text revision. Stop ends the whole process group. Decision:
+  [`0049`](../../decisions/0049-meeting-agent-probe-and-automatic-summary.md) (supersedes in part the decision about a
+  meeting agent with no visible terminal). Facts and event shapes:
+  [`meeting-hidden-agent-limits.md`](../../references/meeting-hidden-agent-limits.md). Live on this Mac (Claude Code
+  2.1.330, codex-cli 0.171.0, macOS 27.2): both probes ready, both summaries valid. The "fix soon" item "signal the
+  process group" (list below) is done.
+- **Transcript quality.** The echo mark is set for each word; turns are cut at a sentence end after 20 s and at 60 s;
+  a stray "Them" word joins the nearest speaker; talk share counts speech time of non-echo words. The decision about
+  meeting capture and speech (`0048`) has an amendment. Note:
+  [`meeting-transcript-quality.md`](../../references/meeting-transcript-quality.md). The thresholds are design values
+  and are not yet checked on a re-processed real meeting.
+- **UI shell.**
+  - WhisperKit is now the default text engine. A user who never chose gets WhisperKit. Until its model is installed,
+    the final text uses Apple speech. The first-use sheet recommends WhisperKit. (The decision record about meeting
+    capture and speech still says Nemotron is the default; the handoff did not say a record was changed.)
+  - Fix of a false "Processing stopped": the window observes the summaries, and a meeting with no step and no failure
+    reads "Finishing".
+  - One duration format, `MeetingsFormat`.
+  - The Meetings window follows the frosted setting and uses flat chrome with no title bar band (`FlatWindowChrome`; a
+    drag strip above the list; `TitlebarDragSurface` is now shared). See
+    [`flat-window-chrome-titlebar-merge.md`](../../references/flat-window-chrome-titlebar-merge.md).
+  - Companion: Meetings shows in the menu bar card. The Meetings gate posts a notification, so the companion
+    recomputes its sections. Meetings status parts are made at launch on macOS 26 and later (no device, no
+    permission, no engine, no process). A tab-title rule applies when there are more than 4 tabs.
+- **Test nuance.** `#expect(x.allSatisfy(\.flag))` does not compile; write `allSatisfy { $0.flag }`
+  ([`repository-policy-tests.md`](../../references/repository-policy-tests.md)).
 
 **2026-11-23: "Me" capture without AVAudioEngine (fix of a live crash).** Merged on `main` (commits `af21657a`,
 `fa1d0039`, merge `4fd12f7a`, review fixes `9b2341f5`). Both test modes passed (4,442 app tests and 1,071 core tests, in parallel and in serial mode). **The eight live checks with a Bluetooth headset

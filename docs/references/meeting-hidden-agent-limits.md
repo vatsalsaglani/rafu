@@ -6,7 +6,8 @@ terminal, [ADR 0046](../decisions/0046-meeting-agent-without-visible-terminal.md
 [`meetings.md`](../plans/phases/meetings.md)). It also records one finding about the Ensemble Claude Code adapter
 (`Sources/RafuApp/Conductor/Adapters/ClaudeCodeAdapter.swift`).
 
-Last verified: 2026-11-23 for the section "Codex with the meeting text on standard input" (codex-cli 0.171.0,
+Last verified: 2026-11-23 for the section "The probe, streaming and the summary (2026-11-23)" (Claude Code 2.1.330,
+codex-cli 0.171.0, macOS 27.2); 2026-11-23 for the section "Codex with the meeting text on standard input" (codex-cli 0.171.0,
 same Mac and macOS); 2026-11-22 for the rest, macOS 27.2.1 (26B8132, arm64), Swift 6.4.2. Claude Code 2.1.330
 (`~/.local/bin/claude` → `~/.local/share/claude/versions/2.1.330`, Mach-O), codex-cli 0.171.0
 (`/opt/homebrew/bin/codex` → `/opt/homebrew/Caskroom/codex/0.171.0/bin/codex`, Mach-O). Both CLIs signed in
@@ -71,6 +72,11 @@ Restricted: Tools only + `"--restricted"`. Restricted, plan mode: Restricted wit
  "--tools=Read,Glob,Grep", "--permission-mode", "dontAsk", "--permission-prompts", "none", "--strict-mcp-config",
  "--disable-slash-commands", "--no-chrome", "--max-budget-usd", "0.50", "--restricted", "--safe-mode"]
 ```
+
+**Changed 2026-11-23 (argument revision 2):** the array Rafu now runs is the selected array plus
+`"--include-partial-messages"` directly after `"--verbose"`, for every run kind (question, name suggestion, summary,
+probe). Everything else is unchanged. See "The probe, streaming and the summary (2026-11-23)" below. The array below
+is the checked one without that flag.
 
 First event (`system`/`init`) for the selected array: `tools` = `["Glob","Grep","Read"]`, `mcp_servers` = `[]`,
 `skills` 0, `slash_commands` 0, `permissionMode` `dontAsk`, plugins only the four built-in ones
@@ -487,6 +493,96 @@ object is skipped.
 | Codex | `{"type":"turn.completed"}` | | The answer counts only after it. |
 | Codex | `{"type":"turn.failed","error":{"message":…}}` | `error.message` | Stops. "401 Unauthorized" means not signed in. |
 | Codex | `{"type":"error","message":…}` | `message` | "401 Unauthorized" means not signed in. Stops at the first one. |
+
+## The probe, streaming and the summary (2026-11-23)
+
+Decision: the meeting agent probe and the automatic meeting summary
+([ADR 0049](../decisions/0049-meeting-agent-probe-and-automatic-summary.md)). Last verified live on this Mac with
+Claude Code 2.1.330, codex-cli 0.171.0 and macOS 27.2: both probes returned "ready"; Claude Code streamed several
+text pieces and Codex one; both summaries were valid. The handoff gave no Swift version for these checks.
+
+### Claude Code array, revision 2
+
+```json
+["-p", "<P>", "--model", "haiku", "--output-format", "stream-json", "--verbose", "--include-partial-messages",
+ "--no-session-persistence", "--tools=Read,Glob,Grep", "--permission-mode", "dontAsk", "--permission-prompts", "none",
+ "--strict-mcp-config", "--disable-slash-commands", "--no-chrome", "--max-budget-usd", "0.50", "--restricted",
+ "--safe-mode"]
+```
+
+Checked live: exit 0, and the `init` event is unchanged (tools `Glob`, `Grep`, `Read`; no MCP server; `dontAsk`).
+The code constant is `MeetingAgentArguments.revision = 2`; the probe cache is bound to it, so a change of the array
+makes every CLI probe again.
+
+Event shapes with the flag (the runner reads these in `ClaudeStreamParser`):
+
+| Event | Shape | What the runner does |
+|---|---|---|
+| Text delta | `{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"…"}},"parent_tool_use_id":null}` | Cleans control characters and emits a text piece. Stops emitting after the answer byte limit. |
+| New message | `event.type == "message_start"` | Emits a text reset: the text so far is dropped. |
+| Tool call | `event.type == "content_block_start"` with `content_block.type == "tool_use"` and a `name` | A name outside `Glob`, `Grep`, `Read` stops the run. |
+| Result | `{"type":"result"}` | Always the final text, whatever the pieces were. |
+
+A `system` line with the subtype `ui_invalidate` can come before `init`; the parser must not read only the first line.
+
+### Codex: no text pieces, item-type rule, empty-folder check
+
+- The Codex stream has no text deltas. `agent_message` shows only as `item.completed`, so the parser emits no text.
+  The runner sends the one text piece after the checks pass.
+- **Allowed item types** in every real Codex run: `agent_message`, `reasoning`, `error`. Any other `item.*` type
+  (for example `command_execution` or `mcp_tool_call`) stops the run and drops the answer.
+- **Empty-folder check.** Each run gets a private run root (mode 0700) that holds one new folder `e` (the working
+  directory). After the run, the root must hold only `e`, and `e` must be empty. Else the answer is dropped and the
+  cached probe is cleared.
+
+### The Codex probe
+
+Replaces the exact-version lock. Bound to the resolved path, the version, the file time and the array revision.
+
+1. `--version` by the resolved path (5 s, 4 KB).
+2. **Tool-list capture** (no model, no account). The final Codex array plus two extra `-c` entries before `-`:
+   `model_providers.capture={name="capture", base_url="http://127.0.0.1:<port>/v1", wire_api="responses",
+   request_max_retries=0, stream_max_retries=0}` and `model_provider="capture"`. The listener is on `127.0.0.1`, port
+   0 (a free port), plain sockets. It answers `GET /v1/models…` with 200 and `POST /v1/responses` with 500, and reads
+   the POST body up to 1 MB.
+   - **Three connections, not one.** Codex opens three: two model-list GETs, then one POST of about 34.7 KB. The
+     listener accepts up to 8. (The earlier Python harness saved a body of 36,685 bytes; the two sizes are from
+     different runs and were not compared.)
+   - The tool names from every `input[]` item of type `additional_tools` (recursing into `namespace`), plus any
+     top-level `tools`, must be exactly `functions.exec`, `functions.wait`, `functions.request_user_input`,
+     `functions.request_user_input_async`. The names inside the `exec` description (pattern
+     `declare const tools: { <name>(`) must be exactly `apply_patch`, `list_mcp_resources`,
+     `list_mcp_resource_templates`, `read_mcp_resource`, `clock__curr_time`. No message text may contain
+     `<skills_instructions>`. A different list gives "this version is not supported"; a body that cannot be read
+     fails closed.
+   - The listener keeps no header, closes after the probe and is never open during a real run.
+3. **A small real run:** the same array and environment, a new empty folder, a fixed text. No "unrecognized
+   configuration setting" item, no 401 (else "not signed in"), `turn.completed`, a non-empty last `agent_message`,
+   exit 0, the item-type rule, and the empty-folder check.
+
+Claude Code probe: `--version`, then a small run on a synthetic meeting folder that Rafu writes (fixed
+`meeting.md`, `transcript.md`, `question.md`). `init` accepted, `claude_code_version` equal to `--version`, the result
+not an error, exit 0, and the folder file list and SHA-256 values unchanged.
+
+Only a "ready" result is kept between launches (`UserDefaults` key `meetings.agentProbeCache`). With no cached probe,
+the availability check reports "ready" and the first real run probes.
+
+### Process group (Foundation `Process`)
+
+Foundation `Process` gives the child its own process group (`pgid == pid`) in the runs here. This is not documented
+behaviour, so the code checks it at each start: it owns the group only when `getpgid(pid) == pid` and `pid` is not
+Rafu's own group. Stop signals `-pid` only then, and never Rafu's group. When the root process ends, one `SIGKILL`
+goes to the group. A test runs a real `/bin/sh -c 'sleep 30 & echo started; wait'`, ends it, and reads the output to
+the end in under 10 s.
+
+### Other facts
+
+- Only a full new transcript raises the text revision of a meeting; editing one turn does not. A summary or answer
+  stored for an older revision shows as stale.
+- The live probe test runs only when `RAFU_LIVE_AGENT_PROBE=1` is set in the environment. In a normal run it is
+  skipped.
+- The Quick check after a Codex update (above) is now automated by steps 2 and 3 of the probe, except the forced-call
+  table and the sandbox check, which a person still runs when the array changes.
 
 ## Why it matters
 
