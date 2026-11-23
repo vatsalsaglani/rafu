@@ -11,18 +11,20 @@ import Foundation
 ///         turns.jsonl                 one turn for each line; append only while processing
 ///         edits.jsonl                 speaker renames and text edits (never rewrites turns)
 ///         conversation.jsonl          questions and answers with citations
+///         notes.json                  the title and summary that the agent wrote
 ///         audio/                      folder, mode 0700: me.caf, them.caf, journal files
 ///
 /// Files have mode 0600. The actor is the only writer, and each write of
 /// `meeting.json` checks the version that the caller read. A meeting is never
 /// workspace data: no method takes or returns a workspace path.
-public actor MeetingStore: MeetingLibraryServicing {
+public actor MeetingStore: MeetingNotesStoring {
     // MARK: Limits
 
     static let recordFileLimit = 256 * 1024
     static let turnsFileLimit = 32 * 1024 * 1024
     static let editsFileLimit = 8 * 1024 * 1024
     static let conversationFileLimit = 16 * 1024 * 1024
+    static let notesFileLimit = 256 * 1024
     static let maximumTitleCharacters = 200
     static let maximumNameCharacters = 80
     static let untitled = "Untitled meeting"
@@ -180,6 +182,7 @@ public actor MeetingStore: MeetingLibraryServicing {
         try reporting(meeting, reportSuccess: true) {
             let record = try mutate(meeting, expectedVersion: expectedVersion) {
                 $0.title = Self.cleanTitle(title)
+                $0.titleOrigin = MeetingRecordFile.userTitle
             }
             try reindex(meeting)
             return record.version
@@ -227,7 +230,8 @@ public actor MeetingStore: MeetingLibraryServicing {
     ) async throws -> Int {
         try reporting(meeting, reportSuccess: true) {
             let payload = try Self.encodeLines(turns) { MeetingStoreError.turnTooLarge($0.id) }
-            let record = try mutate(meeting, expectedVersion: expectedVersion) { _ in
+            let record = try mutate(meeting, expectedVersion: expectedVersion) { record in
+                record.textRevision = (record.textRevision ?? 0) + 1
                 try MeetingFileIO.atomicWrite(payload, to: fileURL(meeting, "turns.jsonl"))
                 // Text edits belong to the old turns. Keep the speaker names.
                 let names = try readEdits(meeting).speakerNames
@@ -290,10 +294,11 @@ public actor MeetingStore: MeetingLibraryServicing {
         _ entry: MeetingConversationEntry, to meeting: MeetingID
     ) async throws -> Int {
         try reporting(meeting, reportSuccess: false) {
-            _ = try loadRecord(meeting)
+            let record = try loadRecord(meeting)
             let check = try verify(entry.citations, in: meeting)
             var stored = entry
             stored.citations = check.verified
+            if stored.textRevision == nil { stored.textRevision = record.textRevision ?? 0 }
             let payload = try Self.encodeLines([stored]) { _ in MeetingStoreError.entryTooLarge }
             try MeetingFileIO.append(payload, to: fileURL(meeting, "conversation.jsonl"))
             return check.failedCount
@@ -310,6 +315,60 @@ public actor MeetingStore: MeetingLibraryServicing {
     ) async throws -> MeetingCitationCheck {
         _ = try loadRecord(meeting)
         return try verify(citations, in: meeting)
+    }
+
+    // MARK: Notes
+
+    public func textRevision(of meeting: MeetingID) async throws -> Int {
+        try loadRecord(meeting).textRevision ?? 0
+    }
+
+    public func summaryNotes(of meeting: MeetingID) async throws -> MeetingSummaryNotes? {
+        _ = try loadRecord(meeting)
+        return try readNotes(meeting)
+    }
+
+    @discardableResult
+    public func saveSummaryNotes(
+        _ notes: MeetingSummaryNotes, for meeting: MeetingID
+    ) async throws -> Bool {
+        try reporting(meeting, reportSuccess: true) {
+            let record = try loadRecord(meeting)
+            guard notes.schema == MeetingSummaryNotes.currentSchema,
+                notes.textRevision == (record.textRevision ?? 0)
+            else { return false }
+            let data = try MeetingJSON.makeEncoder().encode(notes)
+            guard data.count <= Self.notesFileLimit else { throw MeetingStoreError.entryTooLarge }
+            try MeetingFileIO.atomicWrite(data, to: fileURL(meeting, "notes.json"))
+            return true
+        }
+    }
+
+    @discardableResult
+    public func applyGeneratedTitle(_ title: String, to meeting: MeetingID) async throws -> Bool {
+        try reporting(meeting, reportSuccess: true) {
+            let record = try loadRecord(meeting)
+            let cleaned = Self.cleanTitle(title)
+            guard cleaned != Self.untitled else { return false }
+            switch record.titleOrigin {
+            case MeetingRecordFile.agentTitle?:
+                break
+            case nil:
+                guard
+                    MeetingSummaryTitleRule.isDefaultForm(record.title)
+                        || record.title == Self.untitled
+                else { return false }
+            default:
+                return false
+            }
+            guard cleaned != record.title || record.titleOrigin == nil else { return true }
+            _ = try mutate(meeting, expectedVersion: record.version) {
+                $0.title = cleaned
+                $0.titleOrigin = MeetingRecordFile.agentTitle
+            }
+            try reindex(meeting)
+            return true
+        }
     }
 
     // MARK: Search
@@ -532,8 +591,10 @@ public actor MeetingStore: MeetingLibraryServicing {
 
     private func sizes(of id: MeetingID) -> MeetingSizes {
         let audio = MeetingFileIO.regularFiles(in: audioURL(id)).reduce(Int64(0)) { $0 + $1.size }
-        let text = ["meeting.json", "turns.jsonl", "edits.jsonl", "conversation.jsonl"]
-            .reduce(Int64(0)) { $0 + MeetingFileIO.regularFileSize(fileURL(id, $1)) }
+        let text = [
+            "meeting.json", "turns.jsonl", "edits.jsonl", "conversation.jsonl", "notes.json",
+        ]
+        .reduce(Int64(0)) { $0 + MeetingFileIO.regularFileSize(fileURL(id, $1)) }
         return MeetingSizes(audioBytes: audio, transcriptBytes: text)
     }
 
@@ -569,6 +630,18 @@ public actor MeetingStore: MeetingLibraryServicing {
         else { return ([], 0) }
         let decoded = Self.decodeLines(data, as: MeetingConversationEntry.self)
         return (decoded.values, decoded.skipped)
+    }
+
+    /// The notes, or nil when there is no file, it is damaged or it has
+    /// another schema.
+    private func readNotes(_ id: MeetingID) throws -> MeetingSummaryNotes? {
+        guard
+            let data = try MeetingFileIO.readBounded(
+                fileURL(id, "notes.json"), maximumBytes: Self.notesFileLimit),
+            let notes = try? MeetingJSON.makeDecoder().decode(MeetingSummaryNotes.self, from: data),
+            notes.schema == MeetingSummaryNotes.currentSchema
+        else { return nil }
+        return notes
     }
 
     private func appendEdit(_ line: MeetingEditLine, to id: MeetingID) throws {

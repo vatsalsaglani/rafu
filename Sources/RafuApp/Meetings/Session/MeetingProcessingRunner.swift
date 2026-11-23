@@ -177,6 +177,7 @@ final class MeetingProcessingRunner {
             try await writeResult(
                 marking.turns, engines: engines, duration: audio.duration, of: meeting,
                 in: store)
+            session.summaryHandlers.afterProcessing(meeting)
             session.processing[meeting] = nil
             session.noteLibraryChanged()
             try? await store.applyAudioRetention(preferences.audioRetention(), now: Date())

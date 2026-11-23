@@ -6,12 +6,14 @@ import Testing
 @Suite("Hidden meeting agent: arguments and prompts")
 struct MeetingAgentArgumentsTests {
     /// Copied by hand from `docs/references/meeting-hidden-agent-limits.md`,
-    /// "Selected (Restricted, safe mode)".
-    @Test("The Claude Code array equals the selected array of the limits note")
+    /// "Selected (Restricted, safe mode)", with `--include-partial-messages`
+    /// after `--verbose` (the streaming array, argument revision 2).
+    @Test("The Claude Code array equals the selected streaming array of the limits note")
     func claudeArrayEqualsTheNote() {
+        #expect(MeetingAgentArguments.revision == 2)
         let expected = [
             "-p", "<P>", "--model", "haiku", "--output-format", "stream-json", "--verbose",
-            "--no-session-persistence",
+            "--include-partial-messages", "--no-session-persistence",
             "--tools=Read,Glob,Grep", "--permission-mode", "dontAsk", "--permission-prompts",
             "none",
             "--strict-mcp-config",
@@ -57,6 +59,28 @@ struct MeetingAgentArgumentsTests {
         #expect(actual.last == "-")
         #expect(!actual.contains("--trust"))
         #expect(!actual.contains { $0.hasPrefix("--sandbox") })
+    }
+
+    @Test("The capture array is the final Codex array with two settings before the last -")
+    func codexCaptureArray() {
+        let folder = URL(fileURLWithPath: "/private/E", isDirectory: true)
+        let final = MeetingAgentArguments.codex(emptyFolder: folder)
+        let capture = MeetingAgentArguments.codexCapture(emptyFolder: folder, port: 47614)
+        #expect(Array(capture.prefix(final.count - 1)) == Array(final.dropLast()))
+        #expect(
+            Array(capture.suffix(5)) == [
+                "-c",
+                #"model_providers.capture={name="capture", base_url="http://127.0.0.1:47614/v1", wire_api="responses", request_max_retries=0, stream_max_retries=0}"#,
+                "-c", #"model_provider="capture""#, "-",
+            ])
+        #expect(capture.count == final.count + 4)
+    }
+
+    @Test("The probe texts hold the fixed question only")
+    func probeTexts() {
+        #expect(MeetingAgentProbeTexts.questionFile.contains(MeetingAgentProbeTexts.question))
+        #expect(MeetingAgentProbeTexts.codexPacket.contains("The color of the day is blue."))
+        #expect(MeetingAgentProbeTexts.codexPacket.hasPrefix("# Rules"))
     }
 
     @Test("The Claude Code prompt argument holds no word of a question")
@@ -109,16 +133,16 @@ struct MeetingAgentArgumentsTests {
         #expect(question.contains("- them: Them"))
     }
 
-    @Test("The version rule accepts only a checked Codex version")
+    @Test("The version rule reads the version of each CLI")
     func versionRule() {
         #expect(
             MeetingAgentVersionRule.version(fromVersionOutput: "codex-cli 0.171.0\n") == "0.171.0")
         #expect(
             MeetingAgentVersionRule.version(fromVersionOutput: "codex-cli 0.172.1") == "0.172.1")
         #expect(MeetingAgentVersionRule.version(fromVersionOutput: "garbage") == nil)
-        #expect(MeetingAgentVersionRule.isSupportedCodex(version: "0.171.0"))
-        #expect(!MeetingAgentVersionRule.isSupportedCodex(version: "0.172.0"))
-        #expect(!MeetingAgentVersionRule.isSupportedCodex(version: nil))
+        #expect(
+            MeetingAgentVersionRule.version(fromVersionOutput: "2.1.330 (Claude Code)\n")
+                == "2.1.330")
     }
 
     @Test("Answer text is cleaned and bounded")

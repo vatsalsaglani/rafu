@@ -193,6 +193,12 @@ nonisolated final class MeetingAgentSystemProcess: MeetingAgentProcessHandle {
 
     let output: AsyncStream<Data>
     private let pid: pid_t
+    /// True when the child leads its own process group, so a signal can
+    /// reach each process that the CLI started. Foundation's `Process`
+    /// starts the child in a new group (pgid == pid, seen on macOS 27.2);
+    /// this is not documented, so it is checked for each start. Rafu's own
+    /// group is never signalled.
+    let ownsGroup: Bool
     private let exitBox: ExitBox
     /// Keeps the `Process` object for the life of the handle.
     private let process: Mutex<Process?>
@@ -225,7 +231,11 @@ nonisolated final class MeetingAgentSystemProcess: MeetingAgentProcessHandle {
 
         let exitBox = ExitBox()
         self.exitBox = exitBox
+        let group = GroupBox()
         process.terminationHandler = { finished in
+            // A process that the CLI started can outlive it and hold the
+            // output pipe open: end the whole group when the root ends.
+            if let leader = group.leader { kill(-leader, SIGKILL) }
             exitBox.resolve(
                 finished.terminationReason == .uncaughtSignal
                     ? .signalled(finished.terminationStatus) : .exited(finished.terminationStatus))
@@ -238,6 +248,8 @@ nonisolated final class MeetingAgentSystemProcess: MeetingAgentProcessHandle {
             throw error
         }
         pid = process.processIdentifier
+        ownsGroup = Self.leadsOwnGroup(pid)
+        if ownsGroup { group.set(pid) }
         self.process = Mutex(process)
         // The child has its own copies of these pipe ends.
         try? outputPipe.fileHandleForWriting.close()
@@ -276,16 +288,34 @@ nonisolated final class MeetingAgentSystemProcess: MeetingAgentProcessHandle {
 
     func terminate() {
         guard exitBox.isRunning else { return }
-        kill(pid, SIGTERM)
-        let pid = pid
+        let target = signalTarget
+        kill(target, SIGTERM)
         let exitBox = exitBox
         DispatchQueue.global().asyncAfter(deadline: .now() + Self.killDelay) {
-            if exitBox.isRunning { kill(pid, SIGKILL) }
+            if exitBox.isRunning { kill(target, SIGKILL) }
         }
     }
 
     func forceKill() {
-        if exitBox.isRunning { kill(pid, SIGKILL) }
+        if exitBox.isRunning { kill(signalTarget, SIGKILL) }
+    }
+
+    /// The group (`-pid`) when the child leads its own group, else the child.
+    private var signalTarget: pid_t { ownsGroup ? -pid : pid }
+
+    /// True when `pid` leads its own process group and that group is not
+    /// Rafu's group.
+    static func leadsOwnGroup(_ pid: pid_t) -> Bool {
+        guard pid > 0 else { return false }
+        return getpgid(pid) == pid && pid != getpgrp()
+    }
+
+    /// The group leader, set after the start; read by the termination
+    /// handler, which can run on another thread.
+    private final class GroupBox: Sendable {
+        private let value = Mutex<pid_t?>(nil)
+        var leader: pid_t? { value.withLock { $0 } }
+        func set(_ pid: pid_t) { value.withLock { $0 = pid } }
     }
 
     func termination() async -> MeetingAgentTermination {

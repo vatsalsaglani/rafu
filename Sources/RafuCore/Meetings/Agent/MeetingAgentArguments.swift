@@ -11,12 +11,18 @@ import Foundation
 /// Claude Code prompt is a fixed text (`MeetingAgentPrompts`), and the Codex
 /// packet goes on standard input (the last argument `-`).
 public enum MeetingAgentArguments {
-    /// Claude Code 2.1.330, "Selected (Restricted, safe mode)". The working
-    /// directory is the frozen meeting copy; standard input is `/dev/null`.
+    /// The revision of the arrays below. A ready probe result is kept for
+    /// one revision: a change to an array probes each CLI again.
+    public static let revision = 2
+
+    /// Claude Code 2.1.330, "Selected (Restricted, safe mode)", with
+    /// `--include-partial-messages` after `--verbose` so the answer streams.
+    /// The working directory is the frozen meeting copy; standard input is
+    /// `/dev/null`.
     public static func claude(prompt: String) -> [String] {
         [
             "-p", prompt, "--model", "haiku", "--output-format", "stream-json", "--verbose",
-            "--no-session-persistence",
+            "--include-partial-messages", "--no-session-persistence",
             "--tools=Read,Glob,Grep", "--permission-mode", "dontAsk", "--permission-prompts",
             "none", "--strict-mcp-config",
             "--disable-slash-commands", "--no-chrome", "--max-budget-usd", "0.50", "--restricted",
@@ -49,6 +55,22 @@ public enum MeetingAgentArguments {
         ]
     }
 
-    /// The version probe (`codex --version`). It holds no private text.
+    /// The final Codex array with two settings before the last `-` that send
+    /// the model request to Rafu's capture listener on `127.0.0.1:<port>`
+    /// (no model, no account): the probe reads the tool list in that
+    /// request. Never used for a real run.
+    public static func codexCapture(emptyFolder: URL, port: UInt16) -> [String] {
+        var arguments = codex(emptyFolder: emptyFolder)
+        arguments.removeLast()
+        arguments += [
+            "-c",
+            "model_providers.capture={name=\"capture\", base_url=\"http://127.0.0.1:\(port)/v1\", wire_api=\"responses\", request_max_retries=0, stream_max_retries=0}",
+            "-c", "model_provider=\"capture\"",
+            "-",
+        ]
+        return arguments
+    }
+
+    /// The version probe (`--version`). It holds no private text.
     public static let versionProbe = ["--version"]
 }

@@ -148,6 +148,7 @@ struct MeetingAgentRegistrationAndPolicyTests {
                 }
             }
         }
-        #expect(scanned >= 8)
+        // Each file of both folders, with the probe, capture, drive and summary files.
+        #expect(scanned >= 18)
     }
 }

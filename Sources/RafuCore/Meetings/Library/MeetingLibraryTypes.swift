@@ -47,6 +47,15 @@ struct MeetingRecordFile: Codable, Sendable {
     var duration: TimeInterval
     var state: MeetingState
     var engines: MeetingEngineUse
+    /// Goes up each time the whole transcript is replaced. Nil (an older
+    /// file) is revision 0. The schema stays 1: an older reader ignores it.
+    var textRevision: Int?
+    /// Who set the title: "user" (a rename) or "agent" (the summary). Nil
+    /// for the title given at the start.
+    var titleOrigin: String?
+
+    static let userTitle = "user"
+    static let agentTitle = "agent"
 }
 
 /// One line of `edits.jsonl`. The turns file is never rewritten by an edit;
@@ -107,10 +116,14 @@ public struct MeetingConversationEntry: Hashable, Codable, Sendable, Identifiabl
     /// The agent that wrote an answer. Nil for a question.
     public var cli: MeetingAgentCLI?
     public var citations: [MeetingCitation]
+    /// The text revision of the meeting when the line was written. An answer
+    /// with an older revision than the meeting answered an older text. Nil
+    /// in a line written before the revision existed.
+    public var textRevision: Int?
 
     public init(
         id: UUID = UUID(), date: Date, role: MeetingConversationRole, text: String,
-        cli: MeetingAgentCLI? = nil, citations: [MeetingCitation] = []
+        cli: MeetingAgentCLI? = nil, citations: [MeetingCitation] = [], textRevision: Int? = nil
     ) {
         self.id = id
         self.date = date
@@ -118,6 +131,7 @@ public struct MeetingConversationEntry: Hashable, Codable, Sendable, Identifiabl
         self.text = text
         self.cli = cli
         self.citations = citations
+        self.textRevision = textRevision
     }
 }
 

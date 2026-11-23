@@ -132,6 +132,18 @@ nonisolated enum MeetingAgentRunFolders {
         return Run(root: root, emptyFolder: emptyFolder)
     }
 
+    /// The names in `folder`, sorted; empty when it cannot be read.
+    static func entries(of folder: URL) -> [String] {
+        ((try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []).sorted()
+    }
+
+    /// True when the run root still holds only `e`, and `e` is empty: the
+    /// CLI wrote no file.
+    static func isUntouched(_ run: Run) -> Bool {
+        entries(of: run.root) == [run.emptyFolder.lastPathComponent]
+            && entries(of: run.emptyFolder).isEmpty
+    }
+
     /// Removes run roots older than `age` seconds, left by a crash.
     static func removeStale(in runsRoot: URL, olderThan age: TimeInterval, now: Date = Date()) {
         guard isRealDirectory(runsRoot),

@@ -24,6 +24,25 @@ public enum MeetingAgentLimits {
     public static let maximumIDsPerRange = 20
     /// The most citations taken from one answer.
     public static let maximumCitations = 200
+    /// The time limit of the small real run of a probe.
+    public static let probeTimeLimit = Duration.seconds(90)
+    /// The time limit of the Codex tool-list capture (no model, no account).
+    public static let captureTimeLimit = Duration.seconds(10)
+    /// The largest request header that the capture listener reads.
+    public static let maximumCaptureHeaderBytes = 32 * 1_024
+    /// The largest request body that the capture listener reads (the saved
+    /// request of codex-cli 0.171.0 was about 35 KB).
+    public static let maximumCaptureBodyBytes = 1_024 * 1_024
+    /// The most connections that the capture listener answers.
+    public static let maximumCaptureConnections = 8
+    /// The longest summary title, in characters.
+    public static let maximumSummaryTitleCharacters = 80
+    /// The largest summary text.
+    public static let maximumSummaryBytes = 8 * 1_024
+    /// The most decisions, and the most action items, in one summary.
+    public static let maximumSummaryItems = 20
+    /// The longest decision or action item, in characters.
+    public static let maximumSummaryItemCharacters = 400
 }
 
 /// The answer text of a reply, cleaned: valid UTF-8, inside the limit, no
@@ -36,6 +55,14 @@ public enum MeetingAgentAnswerText {
 
     public static func clean(_ raw: String) throws(Problem) -> String {
         guard raw.utf8.count <= MeetingAgentLimits.maximumAnswerBytes else { throw .tooLarge }
+        let text = filtered(raw).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { throw .empty }
+        return text
+    }
+
+    /// `raw` with no control character except a new line (a tab becomes a
+    /// space), no direction override and no line or paragraph separator.
+    static func filtered(_ raw: String) -> String {
         var scalars = String.UnicodeScalarView()
         for scalar in raw.unicodeScalars {
             switch scalar {
@@ -53,8 +80,15 @@ public enum MeetingAgentAnswerText {
                 scalars.append(scalar)
             }
         }
-        let text = String(scalars).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { throw .empty }
-        return text
+        return String(scalars)
+    }
+}
+
+/// One piece of streamed answer text, cleaned like the answer
+/// (`MeetingAgentAnswerText`) but not trimmed: a space between two pieces
+/// stays. The streamed text is only a preview; the final answer replaces it.
+public enum MeetingAgentDeltaText {
+    public static func clean(_ raw: String) -> String {
+        MeetingAgentAnswerText.filtered(raw)
     }
 }

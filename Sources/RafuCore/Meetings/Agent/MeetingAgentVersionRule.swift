@@ -1,15 +1,13 @@
 import Foundation
 
-/// Which CLI versions the hidden meeting agent trusts. Codex shows no tool
-/// list in its event stream, so Rafu cannot check its limit at run time:
-/// only a version that passed the check of
-/// `meeting-hidden-agent-limits.md` is offered. Claude Code is checked at
-/// each run by its init event (`ClaudeStreamParser`), not by version.
+/// Reads a CLI version. No version is trusted by number: a probe
+/// (`MeetingAgentProbing`) checks each CLI binary with fixed text before it
+/// is offered, and keeps a ready result for one path, version, modification
+/// date and argument revision. Claude Code is also checked at each run by
+/// its init event (`ClaudeStreamParser`).
 public enum MeetingAgentVersionRule {
-    public static let checkedCodexVersions: Set<String> = ["0.171.0"]
-
-    /// The version number in `codex --version` output, for example
-    /// `codex-cli 0.171.0` → `0.171.0`.
+    /// The version number in `--version` output, for example
+    /// `codex-cli 0.171.0` → `0.171.0` and `2.1.330 (Claude Code)` → `2.1.330`.
     public static func version(fromVersionOutput output: String) -> String? {
         let firstLine = output.split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
         for token in firstLine.split(separator: " ").reversed() {
@@ -21,10 +19,5 @@ public enum MeetingAgentVersionRule {
             }
         }
         return nil
-    }
-
-    public static func isSupportedCodex(version: String?) -> Bool {
-        guard let version else { return false }
-        return checkedCodexVersions.contains(version)
     }
 }
