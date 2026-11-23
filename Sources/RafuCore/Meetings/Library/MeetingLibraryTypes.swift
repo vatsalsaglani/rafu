@@ -47,6 +47,15 @@ struct MeetingRecordFile: Codable, Sendable {
     var duration: TimeInterval
     var state: MeetingState
     var engines: MeetingEngineUse
+    /// Goes up each time the whole transcript is replaced. Nil (an older
+    /// file) is revision 0. The schema stays 1: an older reader ignores it.
+    var textRevision: Int?
+    /// Who set the title: "user" (a rename) or "agent" (the summary). Nil
+    /// for the title given at the start.
+    var titleOrigin: String?
+
+    static let userTitle = "user"
+    static let agentTitle = "agent"
 }
 
 /// One line of `edits.jsonl`. The turns file is never rewritten by an edit;
