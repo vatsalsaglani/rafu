@@ -136,12 +136,16 @@ nonisolated struct MeetingTapLayout: Sendable {
 nonisolated enum MeetingAudioCallbacks {
     /// The IO block of a Core Audio device: the call-audio aggregate device
     /// ("Them") and the input device ("Me"). Reads the input AudioBufferList
-    /// in place (no `AVAudioPCMBuffer` per callback) and never writes the
-    /// output list.
+    /// in place (no `AVAudioPCMBuffer` per callback) and writes only silence
+    /// to the output list: a device with input and output streams (a USB
+    /// headset) gives this block its output buffers too.
     static func deviceIOBlock(ring: MeetingCaptureRing, layout: MeetingTapLayout)
         -> AudioDeviceIOBlock
     {
-        { _, inputData, inputTime, _, _ in
+        { _, inputData, inputTime, outputData, _ in
+            for buffer in UnsafeMutableAudioBufferListPointer(outputData) {
+                if let data = buffer.mData { memset(data, 0, Int(buffer.mDataByteSize)) }
+            }
             copyChannelZero(
                 from: inputData, layout: layout, hostTime: inputTime.pointee.mHostTime,
                 ring: ring)
@@ -159,7 +163,9 @@ nonisolated enum MeetingAudioCallbacks {
             ring.formatErrors.add(1, ordering: .relaxed)
             return
         }
-        let stride = layout.isInterleaved ? max(1, layout.channelCount) : 1
+        // The buffer states its own channel count: correct for interleaved
+        // and non-interleaved buffers even if the stream changed after start.
+        let stride = max(1, Int(buffers[0].mNumberChannels))
         let bytesPerFrame = MemoryLayout<Float>.size * stride
         let frameCount = Int(buffers[0].mDataByteSize) / bytesPerFrame
         guard frameCount > 0 else { return }

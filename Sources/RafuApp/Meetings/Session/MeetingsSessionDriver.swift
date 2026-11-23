@@ -413,6 +413,7 @@ final class MeetingsSessionDriver {
         await (feature?.diagnostics as? MeetingDiagnosticsRecorder)?
             .deleteDiagnostics(for: meeting.id)
         session.processing[meeting.id] = nil
+        if session.windowSelection == meeting.id { session.windowSelection = nil }
         session.noteLibraryChanged()
         return true
     }

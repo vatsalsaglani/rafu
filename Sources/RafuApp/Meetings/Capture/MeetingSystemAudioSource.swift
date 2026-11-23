@@ -8,7 +8,11 @@ import RafuCore
 nonisolated struct MeetingPropertyListener {
     var object: AudioObjectID
     var address: AudioObjectPropertyAddress
-    typealias Block = @Sendable (UInt32, UnsafePointer<AudioObjectPropertyAddress>) -> Void
+    /// A block object, not a Swift closure: Core Audio finds the listener to
+    /// remove by block identity, and a Swift closure can bridge to a new
+    /// block object at each call.
+    typealias Block =
+        @convention(block) @Sendable (UInt32, UnsafePointer<AudioObjectPropertyAddress>) -> Void
     var block: Block
 }
 
