@@ -16,20 +16,29 @@ struct MeetingsStartView: View {
     @Environment(\.rafuTheme) private var theme
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: RafuMetrics.space4) {
-                Text("New recording")
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(theme.palette.textPrimary)
-                    .accessibilityAddTraits(.isHeader)
-                MeetingsStartRecordingButton(feature: feature, commands: commands)
-                facts
+        // Centred in both directions; it scrolls only when the window is
+        // shorter than the column.
+        GeometryReader { proxy in
+            ScrollView {
+                VStack(alignment: .center, spacing: RafuMetrics.space4) {
+                    Text("New recording")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(theme.palette.textPrimary)
+                        .accessibilityAddTraits(.isHeader)
+                    MeetingsStartRecordingButton(feature: feature, commands: commands)
+                    facts
+                    Text(
+                        "Headphones are best. Rafu uses the Mac microphone when a headset is in call mode."
+                    )
+                    .font(.system(size: 11))
+                    .foregroundStyle(theme.palette.textMuted)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: 440)
+                .padding(RafuMetrics.space5)
+                .frame(maxWidth: .infinity, minHeight: proxy.size.height)
             }
-            .frame(maxWidth: 440, alignment: .leading)
-            .padding(.horizontal, RafuMetrics.space5)
-            .padding(.top, 72)
-            .padding(.bottom, RafuMetrics.space5)
-            .frame(maxWidth: .infinity, alignment: .top)
         }
         .task {
             microphone = await microphoneReader.read()
@@ -49,7 +58,8 @@ struct MeetingsStartView: View {
                     SettingsPaneRouter.shared.request(.meetings)
                     openSettings()
                 }
-                .buttonStyle(.link)
+                .buttonStyle(.plain)
+                .foregroundStyle(theme.palette.accent)
                 .help("Choose the microphone in Settings ▸ Meetings")
             }
             if microphone?.isHeadset == true {
@@ -62,7 +72,8 @@ struct MeetingsStartView: View {
             ) {
                 if engineLine?.offersDownload == true, feature.modelDownloadSheet != nil {
                     Button("Download…", action: onDownload)
-                        .buttonStyle(.link)
+                        .buttonStyle(.plain)
+                        .foregroundStyle(theme.palette.accent)
                         .help("Download the speech model")
                 }
             }

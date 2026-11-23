@@ -9,6 +9,7 @@ import SwiftUI
 struct MeetingsWindowView: View {
     let feature: MeetingsFeature
 
+    @State private var isWindowFullScreen = false
     @AppStorage("themeChoice") private var themeChoice = RafuThemeChoice.system.rawValue
     @AppStorage("themeRevision") private var themeRevision = 0
     @AppStorage(WindowSurfacePreference.styleKey) private var windowSurfaceStyle =
@@ -26,7 +27,7 @@ struct MeetingsWindowView: View {
         let surface = windowSurface(resolvedTheme)
         Group {
             if feature.availability.isAvailable {
-                MeetingsWindowSplitView(feature: feature)
+                MeetingsWindowSplitView(feature: feature, isFullScreen: isWindowFullScreen)
             } else {
                 MeetingsPlaceholderView(availability: feature.availability)
             }
@@ -43,6 +44,16 @@ struct MeetingsWindowView: View {
                 .ignoresSafeArea()
             }
         }
+        // No system title bar band: the content fills the titlebar zone, as
+        // in a workspace window (flat-window-chrome-titlebar-merge.md). The
+        // list column keeps the traffic lights clear.
+        .background(
+            FlatWindowChrome(
+                titleBarColor: NSColor(resolvedTheme.palette.appBackground),
+                hidesTrafficLights: false,
+                onFullScreenChange: { isWindowFullScreen = $0 }
+            )
+        )
         .environment(\.rafuWindowSurface, surface)
         .rafuTheme(resolvedTheme)
         .preferredColorScheme(preferredColorScheme)
@@ -75,6 +86,9 @@ struct MeetingsWindowView: View {
 /// dialogs and the model download sheet.
 private struct MeetingsWindowSplitView: View {
     let feature: MeetingsFeature
+    /// In full screen the system manages the traffic lights; the list
+    /// column needs no room for them.
+    let isFullScreen: Bool
 
     @State private var model = MeetingsWindowModel()
     @State private var showsDownloadSheet = false
@@ -94,10 +108,18 @@ private struct MeetingsWindowSplitView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            MeetingsListColumn(
-                feature: feature, model: model, commands: commands,
-                onRename: beginRename, onDelete: { deleteTarget = $0 }
-            )
+            VStack(spacing: 0) {
+                // The titlebar zone over the list: the traffic lights sit
+                // here, and an empty area still moves the window.
+                if !isFullScreen {
+                    TitlebarDragSurface()
+                        .frame(height: WindowTitlebarRow.height + RafuMetrics.space1)
+                }
+                MeetingsListColumn(
+                    feature: feature, model: model, commands: commands,
+                    onRename: beginRename, onDelete: { deleteTarget = $0 }
+                )
+            }
             .frame(width: 240)
             .frame(maxHeight: .infinity, alignment: .top)
             .rafuFrameSurface(.sidebar)

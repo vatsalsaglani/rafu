@@ -266,7 +266,7 @@ struct WindowTitlebarRow: View {
 
 /// The titlebar's empty area: moves the window and, on a double-click, does
 /// what the user chose in System Settings.
-private struct TitlebarDragSurface: View {
+struct TitlebarDragSurface: View {
     var body: some View {
         Color.clear
             .contentShape(Rectangle())

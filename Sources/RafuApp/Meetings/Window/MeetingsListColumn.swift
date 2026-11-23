@@ -126,7 +126,7 @@ private struct MeetingsListSectionLabel: View {
     @Environment(\.rafuTheme) private var theme
 
     var body: some View {
-        Text(title)
+        Text(title.uppercased())
             .font(.system(size: 11, weight: .semibold))
             .foregroundStyle(theme.palette.textMuted)
             .padding(.horizontal, RafuMetrics.space2)
@@ -146,17 +146,17 @@ private struct MeetingsNewRecordingRow: View {
 
     var body: some View {
         let isBusy = MeetingsWindowPresentation.isRecorderBusy(session.recorderState)
-        RafuHoverRow(isSelected: session.windowSelection == nil && !isBusy) {
+        RafuHoverRow(isSelected: false) {
             Button(action: action) {
                 HStack(spacing: RafuMetrics.space2) {
                     Image(systemName: "plus.circle")
-                        .font(.system(size: 12))
-                        .foregroundStyle(theme.palette.textSecondary)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(isBusy ? theme.palette.textMuted : theme.palette.accent)
                         .frame(width: 16, height: 16)
                         .accessibilityHidden(true)
                     Text("New Recording")
-                        .font(.system(size: 13))
-                        .foregroundStyle(theme.palette.textPrimary)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(isBusy ? theme.palette.textMuted : theme.palette.accent)
                     Spacer(minLength: 0)
                 }
                 .padding(.horizontal, RafuMetrics.space2)

@@ -49,6 +49,9 @@ struct RafuApplication: App {
                 .rafuMotionScope()
         }
         .defaultSize(width: 1180, height: 760)
+        // Flat chrome like a workspace window: no system title bar band;
+        // `FlatWindowChrome` in the content merges the titlebar zone.
+        .windowStyle(.hiddenTitleBar)
         .commandsRemoved()
 
         Settings {
