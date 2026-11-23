@@ -36,6 +36,14 @@ public enum MeetingAgentAnswerText {
 
     public static func clean(_ raw: String) throws(Problem) -> String {
         guard raw.utf8.count <= MeetingAgentLimits.maximumAnswerBytes else { throw .tooLarge }
+        let text = filtered(raw).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { throw .empty }
+        return text
+    }
+
+    /// `raw` with no control character except a new line (a tab becomes a
+    /// space), no direction override and no line or paragraph separator.
+    static func filtered(_ raw: String) -> String {
         var scalars = String.UnicodeScalarView()
         for scalar in raw.unicodeScalars {
             switch scalar {
@@ -53,8 +61,15 @@ public enum MeetingAgentAnswerText {
                 scalars.append(scalar)
             }
         }
-        let text = String(scalars).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { throw .empty }
-        return text
+        return String(scalars)
+    }
+}
+
+/// One piece of streamed answer text, cleaned like the answer
+/// (`MeetingAgentAnswerText`) but not trimmed: a space between two pieces
+/// stays. The streamed text is only a preview; the final answer replaces it.
+public enum MeetingAgentDeltaText {
+    public static func clean(_ raw: String) -> String {
+        MeetingAgentAnswerText.filtered(raw)
     }
 }

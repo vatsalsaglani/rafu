@@ -13,11 +13,15 @@ extension MeetingsFeature {
         snapshotRoot: URL = MeetingAgentRunFolders.defaultSnapshotRoot
     ) {
         guard availability.isAvailable else { return }
+        let session = session
         register(
             .agentRunner(
                 MeetingAgentRunner(
                     store: { @MainActor [weak self] in self?.store },
-                    diagnostics: diagnostics, runsRoot: runsRoot)))
+                    diagnostics: diagnostics, runsRoot: runsRoot,
+                    activity: { @MainActor [weak session] meeting, activity, isRunning in
+                        session?.noteAgentRun(activity, of: meeting, isRunning: isRunning)
+                    })))
 
         // Both roots carry the app variant in their name, so these
         // folders belong to this variant only, and no run of it lives

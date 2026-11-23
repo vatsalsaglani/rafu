@@ -5,13 +5,30 @@ public enum MeetingAgentStreamVerdict: Hashable, Sendable {
     /// Read on.
     case more
     /// End the process now: the parser has seen enough (a refused init
-    /// event, not signed in, a setting that no longer works).
+    /// event, not signed in, a setting that no longer works, a tool that
+    /// Rafu does not allow).
     case stop
+}
+
+/// A piece of streamed answer text from a parser.
+public enum MeetingAgentTextEvent: Hashable, Sendable {
+    /// More answer text, already cleaned.
+    case delta(String)
+    /// The agent started a new message: the streamed text so far is not
+    /// the answer.
+    case reset
 }
 
 /// A parser of one CLI's JSON-lines standard output.
 public protocol MeetingAgentStreamParsing: Sendable {
     mutating func consume(line: Data) -> MeetingAgentStreamVerdict
+    /// The text events since the last call. A parser that streams no text
+    /// returns none.
+    mutating func takeTextEvents() -> [MeetingAgentTextEvent]
+}
+
+extension MeetingAgentStreamParsing {
+    public mutating func takeTextEvents() -> [MeetingAgentTextEvent] { [] }
 }
 
 /// Splits standard-output bytes into lines with two bounds: one line, and
@@ -69,10 +86,14 @@ enum MeetingAgentJSON {
     }
 }
 
-/// Reads the `--output-format stream-json` events of Claude Code (shapes in
-/// `meeting-hidden-agent-limits.md` and its saved results). It checks the
-/// `system`/`init` event before any answer counts: the tools must be
-/// exactly Glob, Grep and Read, no MCP server, permission mode `dontAsk`.
+/// Reads the `--output-format stream-json --include-partial-messages`
+/// events of Claude Code (shapes in `meeting-hidden-agent-limits.md` and its
+/// saved results). It checks the `system`/`init` event before any answer
+/// counts: the tools must be exactly Glob, Grep and Read, no MCP server,
+/// permission mode `dontAsk`. It streams the text of top-level
+/// `text_delta` events after an accepted init event, resets the text at each
+/// `message_start`, and stops the run at a tool call outside the three
+/// tools. The answer is always the `result` text, never the streamed text.
 public struct ClaudeStreamParser: MeetingAgentStreamParsing {
     public enum InitCheck: Hashable, Sendable {
         case notSeen
@@ -90,6 +111,11 @@ public struct ClaudeStreamParser: MeetingAgentStreamParsing {
     public private(set) var resultText: String?
     public private(set) var resultIsError = false
     public private(set) var sawResult = false
+    /// The agent called a tool other than Glob, Grep or Read.
+    public private(set) var forbiddenTool = false
+
+    private var textEvents: [MeetingAgentTextEvent] = []
+    private var streamedBytes = 0
 
     public init() {}
 
@@ -100,10 +126,17 @@ public struct ClaudeStreamParser: MeetingAgentStreamParsing {
     }
 
     /// The answer: the result text of a result event that is not an error,
-    /// after an accepted init event.
+    /// after an accepted init event, with no forbidden tool call.
     public var answer: String? {
-        guard initCheck == .accepted, sawResult, !resultIsError else { return nil }
+        guard initCheck == .accepted, sawResult, !resultIsError, !forbiddenTool else {
+            return nil
+        }
         return resultText
+    }
+
+    public mutating func takeTextEvents() -> [MeetingAgentTextEvent] {
+        defer { textEvents = [] }
+        return textEvents
     }
 
     public mutating func consume(line: Data) -> MeetingAgentStreamVerdict {
@@ -124,7 +157,62 @@ public struct ClaudeStreamParser: MeetingAgentStreamParsing {
             // A result before an accepted init event is never an answer.
             return initCheck == .accepted ? .more : .stop
         }
+        if type == "stream_event", let inner = event["event"] as? [String: Any] {
+            let parent = event["parent_tool_use_id"]
+            return consumeStreamEvent(inner, topLevel: parent == nil || parent is NSNull)
+        }
+        if type == "assistant", let message = event["message"] as? [String: Any],
+            let content = message["content"] as? [Any]
+        {
+            for case let block as [String: Any] in content where !Self.isAllowed(block) {
+                forbiddenTool = true
+                return .stop
+            }
+        }
         return .more
+    }
+
+    private mutating func consumeStreamEvent(_ inner: [String: Any], topLevel: Bool)
+        -> MeetingAgentStreamVerdict
+    {
+        switch inner["type"] as? String {
+        case "content_block_start":
+            if let block = inner["content_block"] as? [String: Any], !Self.isAllowed(block) {
+                forbiddenTool = true
+                return .stop
+            }
+        case "message_start":
+            guard topLevel, initCheck == .accepted else { break }
+            textEvents.append(.reset)
+            streamedBytes = 0
+        case "content_block_delta":
+            guard topLevel, initCheck == .accepted,
+                let delta = inner["delta"] as? [String: Any],
+                delta["type"] as? String == "text_delta", let raw = delta["text"] as? String
+            else { break }
+            let text = MeetingAgentDeltaText.clean(raw)
+            guard !text.isEmpty else { break }
+            // Past the answer limit the stream shows no more text; the
+            // result text decides.
+            let bytes = text.utf8.count
+            guard streamedBytes + bytes <= MeetingAgentLimits.maximumAnswerBytes else {
+                streamedBytes = MeetingAgentLimits.maximumAnswerBytes + 1
+                break
+            }
+            streamedBytes += bytes
+            textEvents.append(.delta(text))
+        default:
+            break
+        }
+        return .more
+    }
+
+    /// A content block is allowed unless it is a tool call (any type that
+    /// ends in `tool_use`) to a tool other than Glob, Grep or Read.
+    static func isAllowed(_ block: [String: Any]) -> Bool {
+        guard let type = block["type"] as? String, type.hasSuffix("tool_use") else { return true }
+        guard type == "tool_use", let name = block["name"] as? String else { return false }
+        return checkedTools.contains(name)
     }
 
     static func check(_ event: [String: Any]) -> Bool {
@@ -147,31 +235,45 @@ public struct ClaudeStreamParser: MeetingAgentStreamParsing {
 /// - `{"type":"item.completed","item":{"type":"error","message":"Codex is
 ///   ignoring 1 unrecognized configuration setting. …"}}`
 /// - `{"type":"turn.failed","error":{"message":…}}`
+///
+/// Each `item.*` event must have the item type `agent_message`, `reasoning`
+/// or `error`. Any other item (for example `mcp_tool_call`) stops the run.
+/// Codex streams no answer text: `agent_message` comes only as a completed
+/// item.
 public struct CodexStreamParser: MeetingAgentStreamParsing {
+    public static let allowedItemTypes: Set<String> = ["agent_message", "reasoning", "error"]
+
     public private(set) var notSignedIn = false
     /// A `-c` key or flag that this Codex version no longer knows.
     public private(set) var unrecognizedSetting = false
     public private(set) var turnFailed = false
     public private(set) var turnCompleted = false
+    /// An item of a type outside `allowedItemTypes`.
+    public private(set) var toolEvent = false
     private var lastMessage: String?
 
     public init() {}
 
     /// The last `agent_message` of the completed turn.
     public var answer: String? {
-        guard turnCompleted, !turnFailed, !notSignedIn, !unrecognizedSetting else { return nil }
+        guard turnCompleted, !turnFailed, !notSignedIn, !unrecognizedSetting, !toolEvent else {
+            return nil
+        }
         return lastMessage
     }
 
     public mutating func consume(line: Data) -> MeetingAgentStreamVerdict {
         guard let event = MeetingAgentJSON.object(line) else { return .more }
-        switch event["type"] as? String {
-        case "turn.started":
-            lastMessage = nil
-            turnCompleted = false
-        case "item.completed":
-            guard let item = event["item"] as? [String: Any] else { return .more }
-            switch item["type"] as? String {
+        let type = event["type"] as? String
+        if let type, type.hasPrefix("item.") {
+            guard let item = event["item"] as? [String: Any],
+                let itemType = item["type"] as? String, Self.allowedItemTypes.contains(itemType)
+            else {
+                toolEvent = true
+                return .stop
+            }
+            guard type == "item.completed" else { return .more }
+            switch itemType {
             case "agent_message":
                 if let text = item["text"] as? String { lastMessage = text }
             case "error":
@@ -183,6 +285,12 @@ public struct CodexStreamParser: MeetingAgentStreamParsing {
                 }
             default: break
             }
+            return .more
+        }
+        switch type {
+        case "turn.started":
+            lastMessage = nil
+            turnCompleted = false
         case "turn.completed":
             turnCompleted = true
         case "turn.failed":

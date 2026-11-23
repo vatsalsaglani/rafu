@@ -6,12 +6,14 @@ import Testing
 @Suite("Hidden meeting agent: arguments and prompts")
 struct MeetingAgentArgumentsTests {
     /// Copied by hand from `docs/references/meeting-hidden-agent-limits.md`,
-    /// "Selected (Restricted, safe mode)".
-    @Test("The Claude Code array equals the selected array of the limits note")
+    /// "Selected (Restricted, safe mode)", with `--include-partial-messages`
+    /// after `--verbose` (the streaming array, argument revision 2).
+    @Test("The Claude Code array equals the selected streaming array of the limits note")
     func claudeArrayEqualsTheNote() {
+        #expect(MeetingAgentArguments.revision == 2)
         let expected = [
             "-p", "<P>", "--model", "haiku", "--output-format", "stream-json", "--verbose",
-            "--no-session-persistence",
+            "--include-partial-messages", "--no-session-persistence",
             "--tools=Read,Glob,Grep", "--permission-mode", "dontAsk", "--permission-prompts",
             "none",
             "--strict-mcp-config",

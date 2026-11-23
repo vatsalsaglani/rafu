@@ -11,12 +11,18 @@ import Foundation
 /// Claude Code prompt is a fixed text (`MeetingAgentPrompts`), and the Codex
 /// packet goes on standard input (the last argument `-`).
 public enum MeetingAgentArguments {
-    /// Claude Code 2.1.330, "Selected (Restricted, safe mode)". The working
-    /// directory is the frozen meeting copy; standard input is `/dev/null`.
+    /// The revision of the arrays below. A ready probe result is kept for
+    /// one revision: a change to an array probes each CLI again.
+    public static let revision = 2
+
+    /// Claude Code 2.1.330, "Selected (Restricted, safe mode)", with
+    /// `--include-partial-messages` after `--verbose` so the answer streams.
+    /// The working directory is the frozen meeting copy; standard input is
+    /// `/dev/null`.
     public static func claude(prompt: String) -> [String] {
         [
             "-p", prompt, "--model", "haiku", "--output-format", "stream-json", "--verbose",
-            "--no-session-persistence",
+            "--include-partial-messages", "--no-session-persistence",
             "--tools=Read,Glob,Grep", "--permission-mode", "dontAsk", "--permission-prompts",
             "none", "--strict-mcp-config",
             "--disable-slash-commands", "--no-chrome", "--max-budget-usd", "0.50", "--restricted",

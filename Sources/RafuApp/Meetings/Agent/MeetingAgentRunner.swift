@@ -10,17 +10,23 @@ import RafuCore
 /// - Claude Code reads a frozen copy of the meeting (`meeting.md`,
 ///   `transcript.md`, and `question.md` that holds the rules and the
 ///   question). Its working directory is that copy. Its init event is
-///   checked before an answer counts.
+///   checked before an answer counts, and a tool call outside Glob, Grep and
+///   Read ends the run.
 /// - Codex gets the packet (rules, question, meeting text) on standard
 ///   input. Its working directory is a new empty 0700 folder.
 ///
 /// Private text is never in a process argument, an environment value or a
 /// diagnostics event. The reply is untrusted data: bounded, cleaned, never
-/// run and never used as a path. One run for each meeting at a time.
+/// run and never used as a path. One run of each kind for each meeting at a
+/// time (a question can run while the summary runs).
 actor MeetingAgentRunner: MeetingAgentRunning, MeetingAgentAvailabilityChecking,
     MeetingAgentStreaming, MeetingAgentProbing
 {
     typealias StoreProvider = @Sendable () async -> (any MeetingStoring)?
+    /// Called at the start (`true`) and at the end (`false`) of each run.
+    typealias ActivitySink = @Sendable (MeetingID, MeetingAgentActivity, Bool) async -> Void
+    /// Receives the events of a streamed answer.
+    typealias StreamSink = @Sendable (MeetingAgentStreamEvent) -> Void
 
     private let storeProvider: StoreProvider
     private let diagnostics: any MeetingDiagnosticsRecording
@@ -31,9 +37,16 @@ actor MeetingAgentRunner: MeetingAgentRunning, MeetingAgentAvailabilityChecking,
     private let versionTimeLimit: Duration
     private let environment: [String: String]
     private let clock: @Sendable () -> Date
+    private let activity: ActivitySink
 
-    private var running: Set<MeetingID> = []
+    /// The cancel action of the run in each lane.
+    private var lanes: [Lane: @Sendable () -> Void] = [:]
     private var codexVersions: [String: CachedVersion] = [:]
+
+    private struct Lane: Hashable {
+        var meeting: MeetingID
+        var kind: MeetingAgentRunKind
+    }
 
     private struct CachedVersion {
         var modified: Date?
@@ -49,7 +62,8 @@ actor MeetingAgentRunner: MeetingAgentRunning, MeetingAgentAvailabilityChecking,
         timeLimit: Duration = MeetingAgentLimits.timeLimit,
         versionTimeLimit: Duration = MeetingAgentLimits.versionProbeTimeLimit,
         environment: [String: String] = MeetingAgentEnvironment.make(),
-        clock: @escaping @Sendable () -> Date = { Date() }
+        clock: @escaping @Sendable () -> Date = { Date() },
+        activity: @escaping ActivitySink = { _, _, _ in }
     ) {
         self.storeProvider = store
         self.diagnostics = diagnostics
@@ -60,6 +74,7 @@ actor MeetingAgentRunner: MeetingAgentRunning, MeetingAgentAvailabilityChecking,
         self.versionTimeLimit = versionTimeLimit
         self.environment = environment
         self.clock = clock
+        self.activity = activity
     }
 
     // MARK: - Public API
@@ -67,10 +82,93 @@ actor MeetingAgentRunner: MeetingAgentRunning, MeetingAgentAvailabilityChecking,
     func ask(_ question: String, about meeting: MeetingID, using cli: MeetingAgentCLI)
         async throws -> MeetingAgentReply
     {
+        try await ask(question, about: meeting, using: cli, sink: nil)
+    }
+
+    nonisolated func askStream(
+        _ question: String, about meeting: MeetingID, using cli: MeetingAgentCLI
+    ) -> AsyncThrowingStream<MeetingAgentStreamEvent, Error> {
+        let (stream, continuation) = AsyncThrowingStream<MeetingAgentStreamEvent, Error>
+            .makeStream()
+        let task = Task {
+            do {
+                let reply = try await self.ask(
+                    question, about: meeting, using: cli, sink: { continuation.yield($0) })
+                continuation.yield(.finished(reply))
+                continuation.finish()
+            } catch {
+                continuation.finish(throwing: error)
+            }
+        }
+        // The consumer stopped iterating (or the stream ended): end the run.
+        continuation.onTermination = { _ in task.cancel() }
+        return stream
+    }
+
+    func cancelRun(_ kind: MeetingAgentRunKind, for meeting: MeetingID) async {
+        lanes[Lane(meeting: meeting, kind: kind)]?()
+    }
+
+    func suggestSpeakerNames(for meeting: MeetingID, using cli: MeetingAgentCLI)
+        async throws -> [MeetingSpeakerLabel: String]
+    {
+        switch try await suggestSpeakerNameResult(for: meeting, using: cli) {
+        case .names(let names): names
+        case .noNamesFound, .nothingToName: [:]
+        }
+    }
+
+    func suggestSpeakerNameResult(for meeting: MeetingID, using cli: MeetingAgentCLI)
+        async throws -> MeetingNameSuggestionResult
+    {
+        guard
+            case .answer(let run) = try await perform(
+                .speakerNames, meeting: meeting, cli: cli, sink: nil)
+        else { return .nothingToName }
+        let parsed: MeetingNameSuggestionsReply
+        do {
+            parsed = try MeetingNameReplyParser.parse(run.text)
+        } catch {
+            record(run, outcome: .failed, citations: 0, failed: 0, meeting: meeting)
+            throw MeetingAgentError.failed
+        }
+        record(run, outcome: .answered, citations: 0, failed: 0, meeting: meeting)
+        let names = parsed.names.filter { run.labels.contains($0.key) }
+        return names.isEmpty ? .noNamesFound : .names(names)
+    }
+
+    func availability(of cli: MeetingAgentCLI) async -> MeetingAgentAvailability {
+        guard let executable = locator.locate(cli) else { return .notInstalled }
+        switch cli {
+        case .claudeCode:
+            return .ready
+        case .codex:
+            let version = await codexVersion(of: executable)
+            return MeetingAgentVersionRule.isSupportedCodex(version: version)
+                ? .ready : .unsupportedVersion(found: version ?? "unknown")
+        }
+    }
+
+    func probe(_ cli: MeetingAgentCLI, refresh: Bool) async -> MeetingAgentProbeResult {
+        switch await availability(of: cli) {
+        case .ready: .ready
+        case .notInstalled: .notInstalled
+        case .unsupportedVersion(let found): .unsupportedVersion(found: found)
+        }
+    }
+
+    // MARK: - Question
+
+    private func ask(
+        _ question: String, about meeting: MeetingID, using cli: MeetingAgentCLI,
+        sink: StreamSink?
+    ) async throws -> MeetingAgentReply {
         let trimmed = question.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed.count <= MeetingAgentLimits.maximumQuestionCharacters
         else { throw MeetingAgentError.failed }
-        guard case .answer(let run) = try await perform(.user(trimmed), meeting: meeting, cli: cli)
+        guard
+            case .answer(let run) = try await perform(
+                .user(trimmed), meeting: meeting, cli: cli, sink: sink)
         else { throw MeetingAgentError.failed }
 
         let ids = MeetingCitationParser.citations(in: run.text)
@@ -86,11 +184,13 @@ actor MeetingAgentRunner: MeetingAgentRunning, MeetingAgentAvailabilityChecking,
         do {
             let now = clock()
             try await run.library.appendConversation(
-                MeetingConversationEntry(date: now, role: .question, text: trimmed), to: meeting)
+                MeetingConversationEntry(
+                    date: now, role: .question, text: trimmed, textRevision: run.textRevision),
+                to: meeting)
             try await run.library.appendConversation(
                 MeetingConversationEntry(
                     date: now, role: .answer, text: reply.text, cli: cli,
-                    citations: check.verified),
+                    citations: check.verified, textRevision: run.textRevision),
                 to: meeting)
         } catch {
             record(run, outcome: .failed, citations: 0, failed: 0, meeting: meeting)
@@ -102,81 +202,21 @@ actor MeetingAgentRunner: MeetingAgentRunning, MeetingAgentAvailabilityChecking,
         return reply
     }
 
-    func suggestSpeakerNames(for meeting: MeetingID, using cli: MeetingAgentCLI)
-        async throws -> [MeetingSpeakerLabel: String]
-    {
-        guard case .answer(let run) = try await perform(.speakerNames, meeting: meeting, cli: cli)
-        else { return [:] }
-        let parsed: MeetingNameSuggestionsReply
-        do {
-            parsed = try MeetingNameReplyParser.parse(run.text)
-        } catch {
-            record(run, outcome: .failed, citations: 0, failed: 0, meeting: meeting)
-            throw MeetingAgentError.failed
-        }
-        record(run, outcome: .answered, citations: 0, failed: 0, meeting: meeting)
-        return parsed.names.filter { run.labels.contains($0.key) }
-    }
-
-    func availability(of cli: MeetingAgentCLI) async -> MeetingAgentAvailability {
-        guard let executable = locator.locate(cli) else { return .notInstalled }
-        switch cli {
-        case .claudeCode:
-            return .ready
-        case .codex:
-            let version = await codexVersion(of: executable)
-            return MeetingAgentVersionRule.isSupportedCodex(version: version)
-                ? .ready : .unsupportedVersion(found: version ?? "unknown")
-        }
-    }
-
-    // MARK: - Streaming and probing (contract stubs)
-
-    nonisolated func askStream(
-        _ question: String, about meeting: MeetingID, using cli: MeetingAgentCLI
-    ) -> AsyncThrowingStream<MeetingAgentStreamEvent, Error> {
-        let (stream, continuation) = AsyncThrowingStream<MeetingAgentStreamEvent, Error>
-            .makeStream()
-        let task = Task {
-            do {
-                continuation.yield(.started)
-                let reply = try await self.ask(question, about: meeting, using: cli)
-                continuation.yield(.textDelta(reply.text))
-                continuation.yield(.finished(reply))
-                continuation.finish()
-            } catch {
-                continuation.finish(throwing: error)
-            }
-        }
-        continuation.onTermination = { _ in task.cancel() }
-        return stream
-    }
-
-    func cancelRun(_ kind: MeetingAgentRunKind, for meeting: MeetingID) async {}
-
-    func suggestSpeakerNameResult(for meeting: MeetingID, using cli: MeetingAgentCLI)
-        async throws -> MeetingNameSuggestionResult
-    {
-        let names = try await suggestSpeakerNames(for: meeting, using: cli)
-        return names.isEmpty ? .noNamesFound : .names(names)
-    }
-
-    func probe(_ cli: MeetingAgentCLI, refresh: Bool) async -> MeetingAgentProbeResult {
-        switch await availability(of: cli) {
-        case .ready: .ready
-        case .notInstalled: .notInstalled
-        case .unsupportedVersion(let found): .unsupportedVersion(found: found)
-        }
-    }
-
     // MARK: - One run
 
-    private enum Request {
+    private enum Request: Sendable {
         case user(String)
         case speakerNames
+
+        var kind: MeetingAgentRunKind {
+            switch self {
+            case .user: .question
+            case .speakerNames: .speakerNames
+            }
+        }
     }
 
-    private struct RunSuccess {
+    private struct RunSuccess: Sendable {
         var library: any MeetingLibraryServicing
         var cli: MeetingAgentCLI
         var text: String
@@ -185,9 +225,12 @@ actor MeetingAgentRunner: MeetingAgentRunning, MeetingAgentAvailabilityChecking,
         var wallSeconds: Double
         /// The speaker labels of the meeting (name suggestions only).
         var labels: Set<MeetingSpeakerLabel>
+        /// The text revision of the meeting that the agent read, when the
+        /// library knows it.
+        var textRevision: Int?
     }
 
-    private enum RunResult {
+    private enum RunResult: Sendable {
         case answer(RunSuccess)
         /// A name-suggestion run for a meeting with no speaker to name.
         case nothingToAsk
@@ -201,15 +244,42 @@ actor MeetingAgentRunner: MeetingAgentRunning, MeetingAgentAvailabilityChecking,
         var exitCode: Int32?
     }
 
-    private func perform(_ request: Request, meeting: MeetingID, cli: MeetingAgentCLI)
-        async throws -> RunResult
-    {
-        // Busy check and claim before the first await, so two calls can never
-        // both pass it.
-        guard !running.contains(meeting) else { throw MeetingAgentError.busy }
-        running.insert(meeting)
-        defer { running.remove(meeting) }
+    /// Claims the lane of this meeting and kind, runs the request in a task
+    /// that `cancelRun` can cancel, and reports the start and the end of
+    /// the run to the activity sink.
+    private func perform(
+        _ request: Request, meeting: MeetingID, cli: MeetingAgentCLI, sink: StreamSink?
+    ) async throws -> RunResult {
+        // Busy check and claim before the first await, so two calls can
+        // never both pass it.
+        let lane = Lane(meeting: meeting, kind: request.kind)
+        guard lanes[lane] == nil else { throw MeetingAgentError.busy }
+        let work = Task {
+            try await self.performClaimed(request, meeting: meeting, cli: cli, sink: sink)
+        }
+        lanes[lane] = { work.cancel() }
+        let started = MeetingAgentActivity(kind: request.kind, cli: cli, started: clock())
+        await activity(meeting, started, true)
 
+        let outcome: Result<RunResult, any Error>
+        do {
+            outcome = .success(
+                try await withTaskCancellationHandler {
+                    try await work.value
+                } onCancel: {
+                    work.cancel()
+                })
+        } catch {
+            outcome = .failure(error)
+        }
+        lanes[lane] = nil
+        await activity(meeting, started, false)
+        return try outcome.get()
+    }
+
+    private func performClaimed(
+        _ request: Request, meeting: MeetingID, cli: MeetingAgentCLI, sink: StreamSink?
+    ) async throws -> RunResult {
         guard let library = await storeProvider() as? any MeetingLibraryServicing else {
             throw MeetingAgentError.failed
         }
@@ -220,6 +290,8 @@ actor MeetingAgentRunner: MeetingAgentRunning, MeetingAgentAvailabilityChecking,
             throw MeetingAgentError.failed
         }
         guard let summary, summary.state == .ready else { throw MeetingAgentError.meetingNotReady }
+        let textRevision = try? await (library as? any MeetingNotesStoring)?.textRevision(
+            of: meeting)
 
         let question: String
         var labels: Set<MeetingSpeakerLabel> = []
@@ -237,7 +309,7 @@ actor MeetingAgentRunner: MeetingAgentRunning, MeetingAgentAvailabilityChecking,
             labels = Set(shown.map(\.label))
             question = MeetingAgentPrompts.speakerNamesQuestion(labels: shown)
         }
-        let kind: MeetingAgentRunKind = if case .user = request { .question } else { .speakerNames }
+        let kind = request.kind
 
         guard let executable = locator.locate(cli) else {
             recordUserError(MeetingAgentError.notInstalled(cli), meeting: meeting)
@@ -252,16 +324,17 @@ actor MeetingAgentRunner: MeetingAgentRunning, MeetingAgentAvailabilityChecking,
             case .claudeCode:
                 (text, version, exit) = try await runClaude(
                     executable: executable, question: question, kind: kind, library: library,
-                    meeting: meeting)
+                    meeting: meeting, sink: sink)
             case .codex:
                 (text, version, exit) = try await runCodex(
                     executable: executable, question: question, kind: kind, library: library,
-                    meeting: meeting)
+                    meeting: meeting, sink: sink)
             }
             return .answer(
                 RunSuccess(
                     library: library, cli: cli, text: text, cliVersion: version, exitCode: exit,
-                    wallSeconds: Self.seconds(since: started), labels: labels))
+                    wallSeconds: Self.seconds(since: started), labels: labels,
+                    textRevision: textRevision))
         } catch let failure as RunFailure {
             diagnostics.record(
                 .agentRun(
@@ -280,7 +353,7 @@ actor MeetingAgentRunner: MeetingAgentRunning, MeetingAgentAvailabilityChecking,
 
     private func runClaude(
         executable: MeetingAgentExecutable, question: String, kind: MeetingAgentRunKind,
-        library: any MeetingLibraryServicing, meeting: MeetingID
+        library: any MeetingLibraryServicing, meeting: MeetingID, sink: StreamSink?
     ) async throws -> (String, String?, Int32?) {
         let snapshot: MeetingAgentSnapshot
         do {
@@ -303,9 +376,11 @@ actor MeetingAgentRunner: MeetingAgentRunning, MeetingAgentAvailabilityChecking,
             arguments: MeetingAgentArguments.claude(
                 prompt: MeetingAgentPrompts.claudePromptArgument),
             environment: environment, currentDirectoryURL: snapshot.folder, standardInput: nil)
-        let (parser, end, termination) = try await drive(spec, parser: ClaudeStreamParser())
+        let result = try await drive(
+            spec, parser: ClaudeStreamParser(), onEvent: Self.claudeEvents(to: sink))
+        let parser = result.parser
         let version = parser.cliVersion
-        let exitCode = termination?.exitCode
+        let exitCode = result.termination?.exitCode
         func fail(_ error: MeetingAgentError, _ outcome: MeetingAgentRunOutcome) -> RunFailure {
             RunFailure(error: error, outcome: outcome, cliVersion: version, exitCode: exitCode)
         }
@@ -313,22 +388,53 @@ actor MeetingAgentRunner: MeetingAgentRunning, MeetingAgentAvailabilityChecking,
         if parser.initCheck == .refused {
             throw fail(.unsupportedVersion(.claudeCode), .failed)
         }
+        if parser.forbiddenTool { throw fail(.failed, .failed) }
         if parser.notLoggedIn { throw fail(.notSignedIn(.claudeCode), .notSignedIn) }
-        try Self.checkEnd(end, fail: fail)
+        try Self.checkEnd(result.end, fail: fail)
         guard parser.initCheck == .accepted else {
             throw fail(.unsupportedVersion(.claudeCode), .failed)
         }
-        guard termination == .exited(0), let answer = parser.answer else {
+        guard result.termination == .exited(0), let answer = parser.answer else {
             throw fail(.failed, .failed)
         }
         return (try Self.cleaned(answer, fail: fail), version, exitCode)
+    }
+
+    /// Streamed Claude Code text goes to the sink as it comes.
+    private static func claudeEvents(to sink: StreamSink?)
+        -> (@Sendable (MeetingAgentDriveEvent) -> Void)?
+    {
+        guard let sink else { return nil }
+        return { event in
+            switch event {
+            case .started:
+                sink(.started)
+            case .text(let pieces):
+                for piece in pieces {
+                    switch piece {
+                    case .delta(let text): sink(.textDelta(text))
+                    case .reset: sink(.textReset)
+                    }
+                }
+            }
+        }
+    }
+
+    /// Only the start goes to the sink (Codex streams no text).
+    private static func startOnly(to sink: StreamSink?)
+        -> (@Sendable (MeetingAgentDriveEvent) -> Void)?
+    {
+        guard let sink else { return nil }
+        return { event in
+            if case .started = event { sink(.started) }
+        }
     }
 
     // MARK: Codex
 
     private func runCodex(
         executable: MeetingAgentExecutable, question: String, kind: MeetingAgentRunKind,
-        library: any MeetingLibraryServicing, meeting: MeetingID
+        library: any MeetingLibraryServicing, meeting: MeetingID, sink: StreamSink?
     ) async throws -> (String, String?, Int32?) {
         let version = await codexVersion(of: executable)
         guard MeetingAgentVersionRule.isSupportedCodex(version: version) else {
@@ -366,19 +472,25 @@ actor MeetingAgentRunner: MeetingAgentRunning, MeetingAgentAvailabilityChecking,
             executableURL: URL(fileURLWithPath: executable.resolvedPath),
             arguments: MeetingAgentArguments.codex(emptyFolder: run.emptyFolder),
             environment: environment, currentDirectoryURL: run.emptyFolder, standardInput: packet)
-        let (parser, end, termination) = try await drive(spec, parser: CodexStreamParser())
-        let exitCode = termination?.exitCode
+        let result = try await drive(
+            spec, parser: CodexStreamParser(), onEvent: Self.startOnly(to: sink))
+        let parser = result.parser
+        let exitCode = result.termination?.exitCode
         func fail(_ error: MeetingAgentError, _ outcome: MeetingAgentRunOutcome) -> RunFailure {
             RunFailure(error: error, outcome: outcome, cliVersion: version, exitCode: exitCode)
         }
 
         if parser.notSignedIn { throw fail(.notSignedIn(.codex), .notSignedIn) }
         if parser.unrecognizedSetting { throw fail(.unsupportedVersion(.codex), .failed) }
-        try Self.checkEnd(end, fail: fail)
-        guard termination == .exited(0), let answer = parser.answer else {
+        if parser.toolEvent { throw fail(.failed, .failed) }
+        try Self.checkEnd(result.end, fail: fail)
+        guard result.termination == .exited(0), let answer = parser.answer else {
             throw fail(.failed, .failed)
         }
-        return (try Self.cleaned(answer, fail: fail), version, exitCode)
+        let text = try Self.cleaned(answer, fail: fail)
+        // Codex streams no text: the whole answer comes as one piece at the end.
+        sink?(.textDelta(text))
+        return (text, version, exitCode)
     }
 
     // MARK: Codex version
@@ -396,137 +508,42 @@ actor MeetingAgentRunner: MeetingAgentRunning, MeetingAgentAvailabilityChecking,
             environment: environment, currentDirectoryURL: FileManager.default.temporaryDirectory,
             standardInput: nil)
         guard
-            let probe = try? await drive(
-                spec, parser: VersionCollector(), timeLimit: versionTimeLimit,
+            let probe = try? await MeetingAgentDrive.run(
+                spec, parser: MeetingAgentVersionCollector(), processRunner: processRunner,
+                timeLimit: versionTimeLimit,
                 maximumOutputBytes: MeetingAgentLimits.maximumVersionOutputBytes),
-            probe.1 == .finished, probe.2 == .exited(0)
+            probe.end == .finished, probe.termination == .exited(0)
         else { return nil }
-        let version = MeetingAgentVersionRule.version(fromVersionOutput: probe.0.firstLine ?? "")
+        let version = MeetingAgentVersionRule.version(
+            fromVersionOutput: probe.parser.firstLine ?? "")
         codexVersions[executable.resolvedPath] = CachedVersion(
             modified: executable.modified, version: version)
         return version
     }
 
-    /// Keeps the first line of the `--version` output.
-    private struct VersionCollector: MeetingAgentStreamParsing {
-        var firstLine: String?
-
-        mutating func consume(line: Data) -> MeetingAgentStreamVerdict {
-            if firstLine == nil { firstLine = String(decoding: line, as: UTF8.self) }
-            return .more
-        }
-    }
-
     // MARK: - Process driving
 
-    enum DriveEnd: Equatable {
-        /// Standard output ended and the process exited.
-        case finished
-        /// The parser asked to end the process.
-        case stopped
-        case outputTooLarge
-        case timedOut
-        case cancelled
-    }
-
-    private enum DriveStep<P: MeetingAgentStreamParsing>: Sendable {
-        case read(P, DriveEnd)
-        case timedOut
-        case timerEnded
-    }
-
-    /// Starts the process and reads its output with the parser until the
-    /// end, a stop, the byte limit, the time limit or cancellation. The
-    /// process is always ended before this returns.
+    /// Runs the process with the runner's time limit. A process that did not
+    /// start, or a cancel before the start, is a run failure.
     private func drive<P: MeetingAgentStreamParsing>(
-        _ spec: MeetingAgentProcessSpec, parser: P, timeLimit: Duration? = nil,
-        maximumOutputBytes: Int = MeetingAgentLimits.maximumOutputBytes
-    ) async throws -> (P, DriveEnd, MeetingAgentTermination?) {
-        if Task.isCancelled { throw MeetingAgentError.cancelled }
-        let handle: any MeetingAgentProcessHandle
+        _ spec: MeetingAgentProcessSpec, parser: P,
+        onEvent: (@Sendable (MeetingAgentDriveEvent) -> Void)? = nil
+    ) async throws -> MeetingAgentDrive.Result<P> {
         do {
-            handle = try processRunner.start(spec)
+            return try await MeetingAgentDrive.run(
+                spec, parser: parser, processRunner: processRunner, timeLimit: timeLimit,
+                onEvent: onEvent)
+        } catch is CancellationError {
+            throw MeetingAgentError.cancelled
         } catch {
             throw RunFailure(error: .failed, outcome: .failed, cliVersion: nil, exitCode: nil)
         }
-        let limit = timeLimit ?? self.timeLimit
-        let (finalParser, end) = await withTaskCancellationHandler {
-            await withTaskGroup(of: DriveStep<P>.self) { group -> (P, DriveEnd) in
-                group.addTask {
-                    await Self.read(
-                        handle, parser: parser, maximumOutputBytes: maximumOutputBytes)
-                }
-                group.addTask {
-                    do {
-                        try await Task.sleep(for: limit)
-                        return .timedOut
-                    } catch {
-                        return .timerEnded
-                    }
-                }
-                var timedOut = false
-                var didRead = false
-                var result: (P, DriveEnd) = (parser, .cancelled)
-                while let step = await group.next() {
-                    switch step {
-                    case .read(let finished, let end):
-                        didRead = true
-                        result = (finished, end)
-                        group.cancelAll()
-                    case .timedOut:
-                        // A reader that already ended wins over a late timer.
-                        guard !didRead else { break }
-                        timedOut = true
-                        handle.terminate()
-                        group.cancelAll()
-                    case .timerEnded:
-                        break
-                    }
-                }
-                if timedOut { return (result.0, .timedOut) }
-                if Task.isCancelled { return (result.0, .cancelled) }
-                return result
-            }
-        } onCancel: {
-            handle.terminate()
-        }
-        handle.terminate()
-        let termination = await handle.termination()
-        return (finalParser, end, termination)
-    }
-
-    private static func read<P: MeetingAgentStreamParsing>(
-        _ handle: any MeetingAgentProcessHandle, parser: P, maximumOutputBytes: Int
-    ) async -> DriveStep<P> {
-        var parser = parser
-        var splitter = MeetingAgentLineSplitter(maximumOutputBytes: maximumOutputBytes)
-        for await chunk in handle.output {
-            let lines: [Data]
-            do {
-                lines = try splitter.append(chunk)
-            } catch {
-                handle.terminate()
-                return .read(parser, .outputTooLarge)
-            }
-            for line in lines where parser.consume(line: line) == .stop {
-                handle.terminate()
-                return .read(parser, .stopped)
-            }
-        }
-        if Task.isCancelled { return .read(parser, .cancelled) }
-        if let last = splitter.finish(), parser.consume(line: last) == .stop {
-            handle.terminate()
-            return .read(parser, .stopped)
-        }
-        // The exit is inside the time limit too.
-        _ = await handle.termination()
-        return .read(parser, .finished)
     }
 
     // MARK: - Helpers
 
     private static func checkEnd(
-        _ end: DriveEnd, fail: (MeetingAgentError, MeetingAgentRunOutcome) -> RunFailure
+        _ end: MeetingAgentDriveEnd, fail: (MeetingAgentError, MeetingAgentRunOutcome) -> RunFailure
     ) throws {
         switch end {
         case .finished: return
@@ -604,5 +621,15 @@ actor MeetingAgentRunner: MeetingAgentRunning, MeetingAgentAvailabilityChecking,
         let elapsed = ContinuousClock.now - start
         return Double(elapsed.components.seconds)
             + Double(elapsed.components.attoseconds) / 1e18
+    }
+}
+
+/// Keeps the first line of the `--version` output.
+nonisolated struct MeetingAgentVersionCollector: MeetingAgentStreamParsing {
+    var firstLine: String?
+
+    mutating func consume(line: Data) -> MeetingAgentStreamVerdict {
+        if firstLine == nil { firstLine = String(decoding: line, as: UTF8.self) }
+        return .more
     }
 }

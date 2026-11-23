@@ -147,6 +147,41 @@ nonisolated struct FakeAgentLocator: MeetingAgentLocating {
     }
 }
 
+/// Keeps each start and end that the runner reports.
+nonisolated final class AgentActivityLog: Sendable {
+    struct Entry: Hashable, Sendable {
+        var meeting: MeetingID
+        var kind: MeetingAgentRunKind
+        var cli: MeetingAgentCLI
+        var isRunning: Bool
+    }
+
+    private let storage = Mutex<[Entry]>([])
+    /// Each entry as it comes, for a test that waits for a run to end.
+    let changes: AsyncStream<Entry>
+    private let continuation: AsyncStream<Entry>.Continuation
+
+    init() {
+        (changes, continuation) = AsyncStream<Entry>.makeStream()
+    }
+
+    var sink: MeetingAgentRunner.ActivitySink {
+        { [self] meeting, activity, isRunning in
+            let entry = Entry(
+                meeting: meeting, kind: activity.kind, cli: activity.cli, isRunning: isRunning)
+            storage.withLock { $0.append(entry) }
+            continuation.yield(entry)
+        }
+    }
+
+    /// Waits until a run of `kind` reports its end.
+    func waitForEnd(of kind: MeetingAgentRunKind) async {
+        for await entry in changes where entry.kind == kind && !entry.isRunning { return }
+    }
+
+    var entries: [Entry] { storage.withLock { $0 } }
+}
+
 /// Keeps each diagnostics event.
 nonisolated final class AgentTestDiagnostics: MeetingDiagnosticsRecording {
     private let storage = Mutex<[MeetingDiagnosticEvent]>([])
@@ -223,14 +258,29 @@ nonisolated struct AgentTestLibrary {
     func makeRunner(
         _ process: FakeAgentProcessRunner,
         diagnostics: AgentTestDiagnostics = AgentTestDiagnostics(),
-        locator: FakeAgentLocator = FakeAgentLocator(), timeLimit: Duration = .seconds(30)
+        locator: FakeAgentLocator = FakeAgentLocator(), timeLimit: Duration = .seconds(30),
+        activity: @escaping MeetingAgentRunner.ActivitySink = { _, _, _ in }
     ) -> MeetingAgentRunner {
         let store = store
         return MeetingAgentRunner(
             store: { store }, diagnostics: diagnostics, processRunner: process, locator: locator,
             runsRoot: runsRoot, timeLimit: timeLimit,
             environment: MeetingAgentEnvironment.make(
-                path: "/usr/bin:/bin", home: "/Users/test", user: "test"))
+                path: "/usr/bin:/bin", home: "/Users/test", user: "test"),
+            activity: activity)
+    }
+
+    /// A ready meeting whose only speaker is `me` (nothing to name).
+    func makeMeOnlyMeeting() async throws -> MeetingID {
+        let created = try await store.create(title: "Solo", startDate: Date())
+        var version = try await store.appendTurns(
+            [
+                MeetingTurn(
+                    id: MeetingTurnID(1), track: .me, speaker: .me, start: 0, end: 4,
+                    text: "Notes to self.")
+            ], to: created.id, expectedVersion: created.version)
+        version = try await store.setState(.ready, of: created.id, expectedVersion: version)
+        return created.id
     }
 
     /// Folders left in the snapshot root and the runs root.
