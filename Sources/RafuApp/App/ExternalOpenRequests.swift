@@ -171,6 +171,12 @@ final class RafuAppDelegate: NSObject, NSApplicationDelegate {
         return .terminateLater
     }
 
+    /// Right-click on the Dock icon: New Window, Open Meetings, and Start
+    /// or Stop Recording (`RafuDockMenu`).
+    func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
+        RafuDockMenu.shared.makeMenu()
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         // Synchronous backstop: drops a voice socket that is still open.
         VoiceSession.shared.terminateNow()

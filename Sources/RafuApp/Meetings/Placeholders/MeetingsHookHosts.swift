@@ -16,10 +16,14 @@ struct MeetingsWindowRoot: View {
 
     @Environment(\.openWindow) private var openWindow
     private let factory = MeetingsFeatureFactory.shared
+    /// The fully made feature, set on appear. The launch makes the feature
+    /// with the status parts only, so `factory.feature` can exist before
+    /// this hook is registered; this state change draws the view again.
+    @State private var resolved: MeetingsFeature?
 
     var body: some View {
         Group {
-            if let feature = factory.feature, let hook = feature.windowView {
+            if let feature = resolved, let hook = feature.windowView {
                 hook(feature)
             } else {
                 MeetingsPlaceholderView()
@@ -27,7 +31,7 @@ struct MeetingsWindowRoot: View {
         }
         .frame(minWidth: 520, minHeight: 360)
         .onAppear {
-            factory.resolve()
+            resolved = factory.resolve()
             MeetingsWindowOpener.shared.capture(openWindow)
         }
     }
@@ -41,6 +45,10 @@ struct MeetingsNavigatorPanelView: View {
 
     @Environment(\.openWindow) private var openWindow
     private let factory = MeetingsFeatureFactory.shared
+    /// The fully made feature, set on appear. The launch makes the feature
+    /// with the status parts only, so `factory.feature` can exist before
+    /// this hook is registered; this state change draws the view again.
+    @State private var resolved: MeetingsFeature?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -52,7 +60,7 @@ struct MeetingsNavigatorPanelView: View {
                 }
             }
             Group {
-                if let feature = factory.feature, let hook = feature.navigatorView {
+                if let feature = resolved, let hook = feature.navigatorView {
                     hook(feature, session)
                 } else {
                     MeetingsPlaceholderView(compact: true)
@@ -62,7 +70,7 @@ struct MeetingsNavigatorPanelView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .onAppear {
-            factory.resolve()
+            resolved = factory.resolve()
             MeetingsWindowOpener.shared.capture(openWindow)
         }
     }
@@ -75,10 +83,14 @@ struct MeetingsTabHost: View {
 
     @Environment(\.openWindow) private var openWindow
     private let factory = MeetingsFeatureFactory.shared
+    /// The fully made feature, set on appear. The launch makes the feature
+    /// with the status parts only, so `factory.feature` can exist before
+    /// this hook is registered; this state change draws the view again.
+    @State private var resolved: MeetingsFeature?
 
     var body: some View {
         Group {
-            if let feature = factory.feature, let hook = feature.meetingTabBody {
+            if let feature = resolved, let hook = feature.meetingTabBody {
                 hook(feature, session, meeting)
             } else {
                 MeetingsPlaceholderView()
@@ -86,7 +98,7 @@ struct MeetingsTabHost: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .onAppear {
-            factory.resolve()
+            resolved = factory.resolve()
             MeetingsWindowOpener.shared.capture(openWindow)
         }
     }
@@ -96,10 +108,14 @@ struct MeetingsTabHost: View {
 struct MeetingsSettingsPaneHost: View {
     @Environment(\.openWindow) private var openWindow
     private let factory = MeetingsFeatureFactory.shared
+    /// The fully made feature, set on appear. The launch makes the feature
+    /// with the status parts only, so `factory.feature` can exist before
+    /// this hook is registered; this state change draws the view again.
+    @State private var resolved: MeetingsFeature?
 
     var body: some View {
         Group {
-            if let feature = factory.feature, let hook = feature.settingsView {
+            if let feature = resolved, let hook = feature.settingsView {
                 hook(feature)
             } else {
                 Section {
@@ -111,7 +127,7 @@ struct MeetingsSettingsPaneHost: View {
             }
         }
         .onAppear {
-            factory.resolve()
+            resolved = factory.resolve()
             MeetingsWindowOpener.shared.capture(openWindow)
         }
     }

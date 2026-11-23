@@ -28,6 +28,9 @@ struct WindowAccessor: NSViewRepresentable {
         WorkspaceWindowRegistry.shared.installOpenWorkspaceWindowAction {
             openWindow(id: "workspace")
         }
+        // So the Dock menu and the menu bar card can open Meetings before
+        // the user opened any Meetings surface in this launch.
+        MeetingsWindowOpener.shared.capture(openWindow)
         DispatchQueue.main.async { [weak view] in
             guard let window = view?.window else { return }
             onResolve(window)
