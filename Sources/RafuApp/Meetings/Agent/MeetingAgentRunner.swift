@@ -75,7 +75,8 @@ actor MeetingAgentRunner: MeetingAgentRunning, MeetingAgentAvailabilityChecking,
             prober
             ?? MeetingAgentProber(
                 processRunner: processRunner, locator: locator, environment: environment,
-                runsRoot: runsRoot, versionTimeLimit: versionTimeLimit)
+                runsRoot: runsRoot, versionTimeLimit: versionTimeLimit,
+                toolListCapture: MeetingAgentCodexToolListCapture())
     }
 
     // MARK: - Public API

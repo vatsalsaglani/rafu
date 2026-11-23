@@ -61,6 +61,28 @@ struct MeetingAgentArgumentsTests {
         #expect(!actual.contains { $0.hasPrefix("--sandbox") })
     }
 
+    @Test("The capture array is the final Codex array with two settings before the last -")
+    func codexCaptureArray() {
+        let folder = URL(fileURLWithPath: "/private/E", isDirectory: true)
+        let final = MeetingAgentArguments.codex(emptyFolder: folder)
+        let capture = MeetingAgentArguments.codexCapture(emptyFolder: folder, port: 47614)
+        #expect(Array(capture.prefix(final.count - 1)) == Array(final.dropLast()))
+        #expect(
+            Array(capture.suffix(5)) == [
+                "-c",
+                #"model_providers.capture={name="capture", base_url="http://127.0.0.1:47614/v1", wire_api="responses", request_max_retries=0, stream_max_retries=0}"#,
+                "-c", #"model_provider="capture""#, "-",
+            ])
+        #expect(capture.count == final.count + 4)
+    }
+
+    @Test("The probe texts hold the fixed question only")
+    func probeTexts() {
+        #expect(MeetingAgentProbeTexts.questionFile.contains(MeetingAgentProbeTexts.question))
+        #expect(MeetingAgentProbeTexts.codexPacket.contains("The color of the day is blue."))
+        #expect(MeetingAgentProbeTexts.codexPacket.hasPrefix("# Rules"))
+    }
+
     @Test("The Claude Code prompt argument holds no word of a question")
     func promptArgumentIsFixed() {
         let question = "When does Zanzibar ship the quokka build?"
